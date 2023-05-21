@@ -1,0 +1,10 @@
+------- cameraApp settings
+numeric ExposureTimeMsEditField: 150
+char    ActiveareaDropDown: "1152 x 1152"
+char    QuickSettingsDropDown: "Default"
+char    BinningDropDown: "1 x 1"
+char    OffsetDropDown: "0, 0"
+logical CenteredCheckBox: true
+char    ImagesizeEditField: "1152 x 1152"
+numeric ReadouttimemsEditField: 5.61275
+numeric RecordframesEditField: 1944

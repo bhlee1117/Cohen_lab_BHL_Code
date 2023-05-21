@@ -1,0 +1,55 @@
+------- dragonflyApp settings
+logical AllOFFButton: false
+logical AllONButton: false
+logical DMDstatusButton: true
+numeric SliceSpinner: 1
+numeric FOVSpinner: 1
+char    appendedfoldernameEditField: "PB_Berst1"
+numeric NSpinner: 2
+numeric SpacingumEditField: 70.9
+char    FilterDropDown: "Arch"
+logical CalibrationButton: true
+logical SheetButton: false
+logical DotsButton_2: false
+logical SLMstatusButton: false
+logical ZstackButton: false
+logical SnapLimeONCheckBox: false
+logical SnapLimeOFFCheckBox: true
+logical SnapRedONCheckBox: true
+logical SnapRedOFFCheckBox: true
+logical Blue460nmButton: false
+logical Lime561nmButton: false
+logical Red640nmButton: false
+logical SnapBlueONCheckBox: false
+logical SnapBlueOFFCheckBox: true
+char    dfQuickSettingsDropDown: "topoAP"
+numeric BlueAmpVEditField: 0.1
+numeric LimePowerEditField: 1000
+logical LimeLaserstatusButton: false
+numeric GotoSpinner: 1
+numeric SetFirstZEditField: 13.9595
+numeric SetLastZEditField: 14.0304
+char    WaveformEditField: "dragonflySimpleWaveform_PB"
+numeric camFramesInEditField: 1000
+numeric camPicturesOutEditField: 1000
+numeric ExposureTimeMsEditField_waveform: 5
+char    ROIDropDown_waveform: "1024 x 1024"
+logical ActivateWaveformExposureTimeCheckBox: true
+logical ActivateWaveformROICheckBox: false
+logical ActivateWaveformCameraFramesCheckBox: true
+numeric nCellsEditField: 1
+numeric liveBluePowerEditField: 78.3445
+char    PatternsEditField: "dragonflySimplePatterns_PB"
+numeric dmdPatternsOutEditField: 1
+numeric dmdTrigsOutEditField: 1
+
+------- cameraApp settings
+numeric ExposureTimeMsEditField: 5
+char    ActiveareaDropDown: "1004 x 1864"
+char    QuickSettingsDropDown: "RCaMPtopatch"
+char    BinningDropDown: "2 x 2"
+char    OffsetDropDown: "473, 20"
+logical CenteredCheckBox: false
+char    ImagesizeEditField: "502 x 932"
+numeric ReadouttimemsEditField: 9.78334
+numeric RecordframesEditField: 1000

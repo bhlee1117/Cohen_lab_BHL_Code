@@ -1,0 +1,1 @@
+2021-07-22 offset activeArea center? exposure bin   imgSize  filter stack?   firstZ    lastZ   N spacing currentZ

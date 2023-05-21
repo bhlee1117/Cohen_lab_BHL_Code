@@ -1,0 +1,64 @@
+% 
+% 
+% %m=2;
+% n=2;
+% 
+% spt_sz = 1;
+% gauss2 = @(x,y,x0,y0,sigma) exp(-1/sigma^2/2*((x-x0).^2+(y-y0).^2))/2/pi/sigma^2;
+% 
+% [X,Y] = ndgrid(-1152/2:1152/2-1,-1920/2:1920/2-1);
+% Target = zeros(1152,1920);
+% % spot = zeros(1152,1920);
+% % spot(round(576-spt_sz/2/n):round(576+spt_sz/2/n),round(960-spt_sz/2):round(960+spt_sz/2))=1;
+% theta = linspace(2*pi/10,2*pi,10);
+% for i = 1:length(theta)
+% 
+% Target = Target + gauss2(X,Y,cos(theta(i))*50,sin(theta(i))*50,spt_sz);
+% end
+% 
+% % Target = gauss2(X,Y,0,0,spt_sz)+gauss2(X,Y,20,20,spt_sz);
+% % Target(1152-(800:850),700:1400)=1;
+% % Target = Target + spot;
+% 
+% figure(33);clf;imshow(Target,[])
+%%
+% Target = register_pattern_test(1152,1920,[650 450]);
+% figure(10);clf;imshow(Target,[])
+
+
+%% clicky
+test_im = zeros(1152,1920);
+[ROIs,~]=clicky_faster(test_im);
+[X,Y]=ndgrid(1:1152,1:1920);
+
+in = cellfun(@(pixel_pos) inpolygon(X,Y,pixel_pos(:,2),pixel_pos(:,1)),ROIs,'uniformoutput',false);
+Target = false(1152,1920);
+for i=1:length(in), Target = Target|in{i}; end
+%% clicky into discrete spots
+x_spt = [];
+y_spt = [];
+for i=1:length(in)
+    area = size(in{i},1)*size(in(i),2);
+    in_i = find(in{i});
+    n_spt = length(in_i)/area;
+    [x_spt(i),y_spt(i)] = ind2sub(in_i,size(in{i},1),size(in{i},2));
+end
+
+spt_sz = 1;
+gauss2 = @(x,y,x0,y0,sigma) exp(-1/sigma^2/2*((x-x0).^2+(y-y0).^2))/2/pi/sigma^2;
+
+[X,Y] = ndgrid(-1152/2:1152/2-1,-1920/2:1920/2-1);
+Target = zeros(1152,1920);
+% spot = zeros(1152,1920);
+% spot(round(576-spt_sz/2/n):round(576+spt_sz/2/n),round(960-spt_sz/2):round(960+spt_sz/2))=1;
+theta = linspace(2*pi/10,2*pi,10);
+for i = 1:length(theta)
+
+Target = Target + gauss2(X,Y,cos(theta(i))*50,sin(theta(i))*50,spt_sz);
+end
+
+% Target = gauss2(X,Y,0,0,spt_sz)+gauss2(X,Y,20,20,spt_sz);
+% Target(1152-(800:850),700:1400)=1;
+% Target = Target + spot;
+
+figure(33);clf;imshow(Target,[])

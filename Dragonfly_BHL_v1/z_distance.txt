@@ -1,0 +1,14 @@
+2.7X
+origin -0.1679
+best: -0.1379
+
+1X
+origin 0.579
+
+-0.1479
+best contrast 0.0179
+
+1/22/2022
+1X
+origin -0.2269
+best -0.2952

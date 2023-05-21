@@ -1,0 +1,2 @@
+2021-11-06 offset activeArea center? exposure bin   imgSize  filter stack?   firstZ    lastZ   N spacing currentZ
+171933 (   0,   0)   48x  48       1      2.5   1   48x  48   RCaMP      0  13.5878  13.7005  10  12.522   0.0017 

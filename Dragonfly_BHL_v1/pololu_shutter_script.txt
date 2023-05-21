@@ -1,0 +1,12 @@
+begin
+
+	0 get_position
+
+	512 less_than
+	if 
+		4000 6 servo
+	else
+		8000 6 servo
+	endif
+
+repeat

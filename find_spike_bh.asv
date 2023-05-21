@@ -1,0 +1,11 @@
+function spike=find_spike_bh(volt_hi,threshold)
+
+for i=1:size(volt_hi,1)
+ spike_tr(i,:)=zeros(1,size(volt_hi,2)); 
+ spike(i,:)=zeros(1,size(volt_hi,2)); 
+[pks s_tmp width prom]=findpeaks(volt_hi(i,:));
+    s_tr=s_tmp;
+    s_tmp=s_tmp(find(pks>threshold));
+    spike_tr(i,s_tr)=1;
+    spike(i,s_tmp)=1;
+end

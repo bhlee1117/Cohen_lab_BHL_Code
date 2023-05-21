@@ -1,0 +1,498 @@
+%% Load data
+clear
+addpath(genpath('/Volumes/cohen_lab/Lab/Labmembers/Byung Hun Lee/Code'))
+cd /Volumes/ByungHun4TB/Cohen_lab_Data/20230216_BHLm008_Treadmill
+load(['Treadmill_BHLm008_20230318_result.mat'])
+
+%%
+place_bin=50;
+grps={[1 2 3],[4]};
+im_corr_th=[0.994 0.994 0.994 0.994];
+cmap = jet(256);
+cmap(1:find(cmap(:,1)==0.5),1) = 0.5;
+clear ind_list Arduinos
+d_threshold=2;
+for i=1%:length(grps)
+    %Result{i}.rm_ind=manual_trace_deletion(Result{i});
+    goi=grps{i}(1);
+    %Result{i}.rm_ind=[];
+    %Result{i}.rm_ind=[Result{i}.rm_ind; manual_trace_deletion(Result{i})];
+    [sz1 sz2]=size(Result{goi}.ref_im);
+    match_list=zeros(size(Result{goi}.coord,1),2,length(grps{i})-1);
+    Arduinos{1}=Result{goi}.Arduino;
+
+    for g=2:length(grps{i})
+        goi=grps{i}(g);
+        xcorrRefIm=normxcorr2(Result{grps{i}(1)}.ref_im,Result{goi}.ref_im);
+        [~, ind]=max(xcorrRefIm(:));
+        [shifty shiftx]=ind2sub(size(xcorrRefIm,1),ind);
+        shifty=sz1-shifty; shiftx=sz2-shiftx;
+        dist=distance_mat(Result{grps{i}(1)}.coord,Result{goi}.coord+[shiftx shifty]);
+        [d arg]=min((dist),[],2);
+        match_list(find((d)<d_threshold),1,g-1)=[1:sum(d<d_threshold)]';
+        match_list(arg(find((d)<d_threshold)),2,g-1)=[1:sum(d<d_threshold)]';
+        Arduinos{g}=Result{goi}.Arduino;
+    end
+
+    ind_list(:,1)=find(sum(match_list(:,1,:)==0,3)==0);
+
+    for c=1:length(ind_list(:,1))
+        for g=2:length(grps{i})
+            c_tmp=find(match_list(:,2,g-1)==match_list(ind_list(c,1),1,g-1));
+            if isempty(c_tmp)
+                ind_list(c,g)=NaN;
+            else
+                ind_list(c,g)=c_tmp;
+            end
+        end
+    end
+
+    traces_sp=[]; traces_F=[];
+    for g=1:length(grps{i})
+        goi=grps{i}(g);
+        sp=double(Result{goi}.spike(ind_list(:,g),:)); sp(:,end:size(Result{goi}.Arduino,1))=0;
+        for rm=1:size(Result{goi}.rm_manual,1)
+            sp(Result{goi}.rm_manual(rm,1):Result{goi}.rm_manual(rm,2))=0;
+        end
+        F=Result{goi}.traces_res(ind_list(:,g),:)./get_threshold(Result{goi}.traces_res(ind_list(:,g),:),1);  F(:,end:size(Result{goi}.Arduino,1))=0;
+        %im_corr=movmean(Result{goi}.im_corr,1); 
+        im_corr=Result{goi}.im_corr; 
+        F(:,im_corr<im_corr_th(g))=NaN; sp(:,im_corr<im_corr_th(g))=NaN;
+        traces_sp=[traces_sp sp]; traces_F=[traces_F F];
+
+    end
+    Arduino_align=realign_arduino(Arduinos);
+    f_size=cell2mat(cellfun(@size,Arduinos,'UniformOutput',false)');
+
+    Arduino_align=cell2mat(Arduino_align');
+    
+    show_traces_spikes(traces_F,traces_sp,[Arduino_align(:,2) Arduino_align(:,3)*3000])
+
+    % for r=1:size(Result{i}.rm_ind,1)
+    % traces_F(:,[Result{i}.rm_ind(r,1):Result{i}.rm_ind(r,2)])=NaN;
+    % traces_sp(:,[Result{i}.rm_ind(r,1):Result{i}.rm_ind(r,2)])=NaN;
+    % end
+
+% Lap_FR=get_LapFR(traces_sp,place_bin,Arduino_align,10,[1:size(traces_sp)]);
+% [trace_place SI put_pc]=traces2place(traces_sp,place_bin,Arduino_align,10,75);
+% %trace_place=trace_place(find(max(trace_place,[],2)>13),:);
+% trace_place=movmean(repmat(trace_place,1,3),6,2);
+% trace_place=trace_place(:,place_bin+1:2*place_bin);
+% trace_place_norm=(trace_place-min(trace_place,[],2));
+% trace_place_norm=trace_place_norm./(max(trace_place,[],2)-min(trace_place,[],2));
+% 
+% %[~, arg]=max(trace_place_norm(put_pc,:),[],2);
+% [~, arg]=max(trace_place_norm,[],2);
+% [~, order]=sort(arg,'ascend');
+% figure;
+% %imagesc(trace_place_norm(put_pc(order),:))
+% imagesc(trace_place_norm(order,:))
+% %set(gca,'ytick',[1:size(traces_F,1)],'yticklabel',num2str([put_pc(order)]))
+% set(gca,'ytick',[1:size(traces_F,1)],'yticklabel',num2str([order]))
+% colormap(turbo)
+
+
+end
+%% Trial 1-3 vs 4
+split=sum(f_size(1:3));
+
+Lap_FR=get_LapFR(traces_sp(:,1:split),place_bin,Arduino_align(1:split,:),10,[1:size(traces_sp)]);
+[trace_place SI boot_SI]=traces2place(traces_sp(:,1:split),place_bin,Arduino_align(1:split,:),10,1000);
+Pct=prctile(boot_SI',99)'; put_pc=find((SI-Pct)>0);
+trace_place=movmean(repmat(trace_place,1,3),6,2);
+trace_place=trace_place(:,place_bin+1:2*place_bin);
+trace_place_norm=(trace_place-min(trace_place,[],2));
+trace_place_norm=trace_place_norm./(max(trace_place,[],2)-min(trace_place,[],2));
+[~, arg]=max(trace_place_norm,[],2);
+[~, order]=sort(arg,'ascend');
+figure; tiledlayout(1,2); nexttile([1 1]);
+imagesc(trace_place_norm(order,:))
+set(gca,'ytick',[1:size(traces_F,1)],'yticklabel',num2str([order]))
+colormap(turbo)
+
+trace_place_PC=movmean(repmat(trace_place(put_pc,:),1,3),6,2);
+trace_place_PC=trace_place_PC(:,place_bin+1:2*place_bin);
+trace_place_PC_norm=(trace_place_PC-min(trace_place_PC,[],2));
+trace_place_PC_norm=trace_place_PC_norm./(max(trace_place_PC,[],2)-min(trace_place_PC,[],2));
+[~, arg]=max(trace_place_PC_norm,[],2);
+%arg=sum(trace_place_PC_norm.*[1:place_bin],2,'omitnan')./sum(trace_place_PC_norm,2,'omitnan');
+[~, order_PC]=sort(arg,'ascend');
+nexttile([1 1]);
+imagesc(trace_place_PC_norm(order_PC,:))
+set(gca,'ytick',[1:size(trace_place_PC_norm,1)],'yticklabel',num2str([put_pc(order_PC)]))
+colormap(turbo)
+
+
+%% match with Pre_Ane/ Pre_Awake
+
+    clear ind_list_pool
+    grps={[1 2 3],[2 4 5]};
+    goi=grps{1}(1);
+    d_threshold=2;
+    [sz1 sz2]=size(Result{goi}.ref_im);
+    match_list=zeros(size(Result{goi}.coord,1),2,length(grps{1})-1);
+    Arduinos{1}=Result{goi}.Arduino;
+    g2=1;
+    for g=2:length(grps{1})
+    goi=grps{1}(g);
+    xcorrRefIm=normxcorr2(Result{grps{1}(1)}.ref_im,Result{goi}.ref_im);
+    [~, ind]=max(xcorrRefIm(:));
+    [shifty shiftx]=ind2sub(size(xcorrRefIm,1),ind);
+    shifty=sz1-shifty; shiftx=sz2-shiftx;
+    dist=distance_mat(Result{grps{1}(1)}.coord,Result{goi}.coord+[shiftx shifty]);
+    [d arg]=min((dist),[],2);
+    match_list(find((d)<d_threshold),1,g2)=[1:sum(d<d_threshold)]';
+    match_list(arg(find((d)<d_threshold)),2,g2)=[1:sum(d<d_threshold)]';
+    g2=g2+1;
+    end
+
+    for g=1:length(grps{2})
+    goi=grps{2}(g);
+    xcorrRefIm=normxcorr2(Result{grps{1}(1)}.ref_im,Result_opto{goi}.ref_im);
+    [~, ind]=max(xcorrRefIm(:));
+    [shifty shiftx]=ind2sub(size(xcorrRefIm,1),ind);
+    shifty=sz1-shifty;
+    shiftx=sz2-shiftx;
+    dist=distance_mat(Result{grps{1}(1)}.coord,Result_opto{goi}.coord+[shiftx shifty]);
+    [d arg]=min((dist),[],2);
+    match_list(find((d)<d_threshold),1,g2)=[1:sum(d<d_threshold)]';
+    match_list(arg(find((d)<d_threshold)),2,g2)=[1:sum(d<d_threshold)]';
+    g2=g2+1;
+    end
+
+    ind_list_pool(:,1)=find(sum(match_list(:,1,:)==0,3)==0);
+
+     for c=1:length(ind_list_pool(:,1))
+        for g=2:size(match_list,3)+1
+            c_tmp=find(match_list(:,2,g-1)==match_list(ind_list_pool(c,1),1,g-1));
+            if isempty(c_tmp)
+                ind_list_pool(c,g)=NaN;
+            else
+                ind_list_pool(c,g)=c_tmp;
+            end
+        end
+     end
+
+     %% PCA/ICA ensembles and where they showed maximum FR
+
+i=1; 
+for g=1:length(grps{1}) % Treadmills
+goi=grps{2}(g);    
+end
+cmap=jet(15);
+ref_ind=find(ismember(ind_list_pool(:,1),ind_list(:,1)));
+index_opto2plc=find_index_bh(ind_list(:,1),ind_list_pool(ref_ind,1));
+
+for g=1:length(grps{2}) % OptoStim
+
+goi=grps{2}(g); ii=ind_list_pool(ref_ind,g+3);
+t_seg=find(Result_opto{goi}.Blue>0 & Result_opto{goi}.im_corr>0.995);
+R_tmp.frm_rate=Result_opto{goi}.frm_rate;
+R_tmp.traces_hi=Result_opto{goi}.traces_hi(ii,t_seg);
+R_tmp.traces=Result_opto{goi}.traces(ii,t_seg);
+R_tmp.c_ftprnt=Result_opto{goi}.c_ftprnt(:,:,ii);
+R_tmp.spike=Result_opto{goi}.spike(ii,t_seg);
+R_tmp.Blue=Result_opto{goi}.Blue(t_seg); R_tmp.coord=Result_opto{goi}.coord(ii,:);
+[CAs{g} ic_sub]=assembly_PCAICA(R_tmp,30*1e-3,1.5,15,1);
+end
+figure;
+for g=1:length(grps{2}) % OptoStim
+    nexttile([1 1])
+for n=1:size(CAs{g},2)
+    
+    [~, arg]=max(trace_place(index_opto2plc(find(CAs{g}(:,n))),:),[],2);
+    plot(arg,repmat(n,length(arg),1),'.','color',cmap(n,:),'markersize',12)
+hold all
+end
+end
+
+%% Plot Stim session traces ordered by place field
+
+cmap=jet(15);  
+ref_ind=find(ismember(ind_list_pool(:,1),ind_list(:,1)));
+index_opto2plc=find_index_bh(ind_list(:,1),ind_list_pool(ref_ind,1))';
+put_PC_pool=find_index_bh(index_opto2plc,put_pc(order_PC)); put_PC_pool(put_PC_pool==0)=[];
+
+ax1=figure;
+for g=1%:length(grps{2}) % OptoStim
+
+goi=grps{2}(g); ii=ind_list_pool(put_PC_pool,g+3);
+%t_seg=find(Result_opto{goi}.Blue>0 & Result_opto{goi}.im_corr>0.995);
+t_seg=find(Result_opto{goi}.im_corr>0.995);
+R_tmp.traces=Result_opto{goi}.traces(ii,t_seg);
+R_tmp.Blue=Result_opto{goi}.Blue(t_seg);
+R_tmp.spike=Result_opto{goi}.spike(ii,t_seg);
+R_tmp.c_ftprnt=Result_opto{goi}.c_ftprnt(:,:,ii);
+nexttile([1 1])
+imagesc(movmean(R_tmp.spike,10,2,'omitnan'))
+colormap('turbo')
+axis off
+end
+%%
+
+
+
+
+
+
+%% Caculate cross correlation, template based
+clear Cross_rpy 
+noi=[1 3 4 5 10 11 12 14 15 17 18 19 20 24 25 28 30 32 34 35];
+t_wind=2.^[1:6]*5; it_N=500;
+ref_ind=find(ismember(ind_list_pool(:,1),ind_list(:,1)));
+index_opto2plc=find_index_bh(ind_list(:,1),ind_list_pool(ref_ind,1))';
+put_PC_pool=find_index_bh(index_opto2plc,put_pc(order_PC)); a=find(put_PC_pool>0);
+
+template_replay=movmean(repmat(trace_place(put_pc(order_PC(a(noi))),:),1,3),6,2);
+template_replay=template_replay(:,place_bin+1:2*place_bin);
+template_replay_norm=(template_replay-min(template_replay,[],2));
+%template_replay_norm=template_replay_norm./(max(template_replay,[],2)-min(template_replay,[],2));
+[m arg]=max(template_replay_norm,[],2); 
+template=zeros(size(template_replay_norm,1),size(template_replay_norm,2));
+w = gausswin(15); 
+
+
+for n=1:length(arg) 
+template(n,round(arg(n)))=1; 
+end
+
+template=repmat(template,1,3);
+template=conv2(template,w','same');
+template=template(:,place_bin+1:2*place_bin);
+
+for g=1%2:length(grps{2}) % OptoStim
+clear rand_covsum
+goi=grps{2}(g); ii=ind_list_pool(put_PC_pool(a),g+3);
+%t_seg=find(Result_opto{goi}.Blue>0 & Result_opto{goi}.im_corr>0.995);
+t_seg=find(Result_opto{goi}.im_corr>0.995);
+R_tmp.traces=Result_opto{goi}.traces(ii,t_seg);
+R_tmp.Blue=Result_opto{goi}.Blue(t_seg);
+R_tmp.spike=Result_opto{goi}.spike(ii,t_seg);
+R_tmp.c_ftprnt=Result_opto{goi}.c_ftprnt(:,:,ii);
+%target=movmean(R_tmp.spike(noi,:),10,2,'omitnan');
+target=conv2(R_tmp.spike(noi,2000:end),w','same');
+
+for t=1:length(t_wind)
+    
+template_resz=imresize(template,[length(noi) t_wind(t)]);    
+% tmp=conv2(target,template_resz,'same');
+% Cross_rpy{g}(t,:,1)=tmp(size(target,1)/2,:);
+% tmp=conv2(target,fliplr(template_resz),'same');
+% Cross_rpy{g}(t,:,2)=tmp(size(target,1)/2,:);
+tmp=normxcorr2(template_resz,target);
+Cross_rpy{g}(t,:,1)=tmp(size(target,1),size(template_resz,2):end); %forward
+[pks_data{1,t} locs_data{1,t}]=findpeaks(Cross_rpy{g}(t,:,1));
+tmp=normxcorr2(fliplr(template_resz),target);
+Cross_rpy{g}(t,:,2)=tmp(size(target,1),size(template_resz,2):end); %reverse
+[pks_data{2,t} locs_data{2,t}]=findpeaks(Cross_rpy{g}(t,:,2));
+
+for it=1:it_N
+
+perm=randperm([size(target,1)],size(target,1));
+% tmp=conv2(target(perm,:),template_resz,'same');
+% rand_covsum{1}(it,:,t)=tmp(size(target,1)/2,:); %forward
+for fwd_rwv=1:2
+if fwd_rwv==1
+tmp=normxcorr2(template_resz,target(perm,:));
+else
+tmp=normxcorr2(fliplr(template_resz),target(perm,:));
+end
+rand_covsum{fwd_rwv}(it,:,t)=tmp(size(target,1),size(template_resz,2):end); %forward
+end
+% tmp=conv2(target(perm,:),fliplr(template_resz),'same');
+% rand_covsum{2}(it,:,t)=tmp(size(target,1)/2,:); %reverse
+[pks_shuffle{t,it,fwd_rwv} locs_shuffle{t,it,fwd_rwv}]=findpeaks(rand_covsum{fwd_rwv}(it,:,t));
+end
+
+end
+Cross_rpy{g}(Cross_rpy{g}<0)=0;
+rand_covsum{1}(rand_covsum{1}<0)=0; rand_covsum{2}(rand_covsum{2}<0)=0;
+
+figure;
+ax1=[]; p=[]; fwd_rev=2;
+
+for t=1:length(t_wind)
+r=rand_covsum{fwd_rev}(:,:,t);
+th=prctile(r(:),99);
+for it=1:it_N; s_peaks(it)=sum(pks_shuffle{t,it,fwd_rwv}>th); end
+dat_peaks=sum(pks_data{fwd_rev,t}>th);
+plot(t,dat_peaks,'ro');
+hold all
+text(t+0.2,50,num2str(sum(s_peaks<dat_peaks)/length(s_peaks)))
+plot(repmat(t,it_N,1),s_peaks,'.','color',[0.5 0.5 0.5])
+end
+end
+
+
+
+
+%%
+i=2;
+tr_tmp=Result_opto{i}.traces_res(:,Result_opto{i}.Blue>0);
+tr_sp=Result_opto{i}.spike(:,Result_opto{i}.Blue>0);
+clear CS_spike
+for i=1:size(tr_tmp,1)
+[CS_list CS_spike(i,:)]=find_CS(tr_tmp(i,:),tr_sp(i,:),12,3000);
+end
+
+%%
+Lap_FR_cst=get_LapFR(traces_sp(:,split+1:end),place_bin,Arduino_align(split+1:end,:),10,[1:size(traces_sp)]);
+[trace_place_cst, ~, ~]=traces2place(traces_sp(:,split+1:end),place_bin,Arduino_align(split+1:end,:),10,1,75);
+trace_place_cst=movmean(repmat(trace_place_cst,1,3),6,2);
+trace_place_cst=trace_place_cst(:,place_bin+1:2*place_bin);
+trace_place_cst_n=(trace_place_cst-min(trace_place_cst,[],2));
+trace_place_cst_n=trace_place_cst_n./(max(trace_place_cst,[],2)-min(trace_place_cst,[],2));
+nexttile([1 1]);
+imagesc(trace_place_cst_n(order,:))
+set(gca,'ytick',[1:size(traces_F,1)],'yticklabel',num2str([order]))
+colormap(turbo)
+%Lap_FR=show_traces_place(traces_F,traces_sp,place_bin,Ard_data,[30:36],[n]);
+
+%% Rank-order correlation
+
+clear Cross_rpy 
+noi=[1 3 4 5 10 11 12 14 15 17 18 19 20 24 25 28 30 32 34 35];
+t_wind=2.^[1:6]*5; it_N=500;
+ref_ind=find(ismember(ind_list_pool(:,1),ind_list(:,1)));
+index_opto2plc=find_index_bh(ind_list(:,1),ind_list_pool(ref_ind,1))';
+put_PC_pool=find_index_bh(index_opto2plc,put_pc(order_PC)); a=find(put_PC_pool>0);
+
+template_replay=movmean(repmat(trace_place(put_pc(order_PC(a(noi))),:),1,3),6,2);
+template_replay=template_replay(:,place_bin+1:2*place_bin);
+template_replay_norm=(template_replay-min(template_replay,[],2));
+%template_replay_norm=template_replay_norm./(max(template_replay,[],2)-min(template_replay,[],2));
+[m arg]=max(template_replay_norm,[],2); 
+template=zeros(size(template_replay_norm,1),size(template_replay_norm,2));
+w = gausswin(15); 
+
+
+for n=1:length(arg) 
+template(n,round(arg(n)))=1; 
+end
+
+template=repmat(template,1,3);
+template=conv2(template,w','same');
+template=template(:,place_bin+1:2*place_bin);
+
+for g=1%2:length(grps{2}) % OptoStim
+clear rand_covsum
+goi=grps{2}(g); ii=ind_list_pool(put_PC_pool(a),g+3);
+%t_seg=find(Result_opto{goi}.Blue>0 & Result_opto{goi}.im_corr>0.995);
+t_seg=find(Result_opto{goi}.im_corr>0.995);
+R_tmp.traces=Result_opto{goi}.traces(ii,t_seg);
+R_tmp.Blue=Result_opto{goi}.Blue(t_seg);
+R_tmp.spike=Result_opto{goi}.spike(ii,t_seg);
+R_tmp.c_ftprnt=Result_opto{goi}.c_ftprnt(:,:,ii);
+%target=movmean(R_tmp.spike(noi,:),10,2,'omitnan');
+target=conv2(R_tmp.spike(noi,2000:end),w','same');
+
+for t=1:length(t_wind)
+    
+template_resz=imresize(template,[length(noi) t_wind(t)]);    
+% tmp=conv2(target,template_resz,'same');
+% Cross_rpy{g}(t,:,1)=tmp(size(target,1)/2,:);
+% tmp=conv2(target,fliplr(template_resz),'same');
+% Cross_rpy{g}(t,:,2)=tmp(size(target,1)/2,:);
+tmp=normxcorr2(template_resz,target);
+Cross_rpy{g}(t,:,1)=tmp(size(target,1),size(template_resz,2):end); %forward
+[pks_data{1,t} locs_data{1,t}]=findpeaks(Cross_rpy{g}(t,:,1));
+tmp=normxcorr2(fliplr(template_resz),target);
+Cross_rpy{g}(t,:,2)=tmp(size(target,1),size(template_resz,2):end); %reverse
+[pks_data{2,t} locs_data{2,t}]=findpeaks(Cross_rpy{g}(t,:,2));
+
+for it=1:it_N
+
+perm=randperm([size(target,1)],size(target,1));
+% tmp=conv2(target(perm,:),template_resz,'same');
+% rand_covsum{1}(it,:,t)=tmp(size(target,1)/2,:); %forward
+for fwd_rwv=1:2
+if fwd_rwv==1
+tmp=normxcorr2(template_resz,target(perm,:));
+else
+tmp=normxcorr2(fliplr(template_resz),target(perm,:));
+end
+rand_covsum{fwd_rwv}(it,:,t)=tmp(size(target,1),size(template_resz,2):end); %forward
+end
+% tmp=conv2(target(perm,:),fliplr(template_resz),'same');
+% rand_covsum{2}(it,:,t)=tmp(size(target,1)/2,:); %reverse
+[pks_shuffle{t,it,fwd_rwv} locs_shuffle{t,it,fwd_rwv}]=findpeaks(rand_covsum{fwd_rwv}(it,:,t));
+end
+
+end
+Cross_rpy{g}(Cross_rpy{g}<0)=0;
+rand_covsum{1}(rand_covsum{1}<0)=0; rand_covsum{2}(rand_covsum{2}<0)=0;
+
+figure;
+ax1=[]; p=[]; fwd_rev=2;
+
+for t=1:length(t_wind)
+r=rand_covsum{fwd_rev}(:,:,t);
+th=prctile(r(:),99);
+for it=1:it_N; s_peaks(it)=sum(pks_shuffle{t,it,fwd_rwv}>th); end
+dat_peaks=sum(pks_data{fwd_rev,t}>th);
+plot(t,dat_peaks,'ro');
+hold all
+text(t+0.2,50,num2str(sum(s_peaks<dat_peaks)/length(s_peaks)))
+plot(repmat(t,it_N,1),s_peaks,'.','color',[0.5 0.5 0.5])
+end
+end
+
+%%
+for i=1:size(target,1)
+    for j=1:size(target,1)
+    xcorr(target(i,:),target(j,:))
+    end
+end
+
+
+%%
+
+trace_hi=R_tmp.traces(noi,2000:end)-movmedian(R_tmp.traces(noi,2000:end),250,2);
+trace_hi=trace_hi./get_threshold(trace_hi,1);
+tr_sp=R_tmp.spike(noi,2000:end);
+wind=[-150:150];
+figure;
+for i=1:size(trace_hi,1)
+tr_sta=zeros(20,301);
+[CS_list CS_spike]=find_CS(trace_hi(i,:),sp(i,:),15,4);
+for j=1:size(trace_hi,1)
+for c=1:size(CS_list,1)
+try
+tr_sta(j,:)=tr_sta(j,:)+trace_hi(j,CS_list(c,1)+wind);
+end
+end
+tr_sta(j,:)=tr_sta(j,:)/size(CS_list,1);
+end
+nexttile([1 1])
+plot(tr_sta'+[1:20]*2)
+end
+
+%%
+Lap_FR_cst=get_LapFR(traces_sp(:,split+1:end),place_bin,Arduino_align(split+1:end,:),10,[1:size(traces_sp)]);
+[trace_place_cst, ~, ~]=traces2place(traces_sp(:,split+1:end),place_bin,Arduino_align(split+1:end,:),10,1,75);
+trace_place_cst=movmean(repmat(trace_place_cst,1,3),6,2);
+trace_place_cst=trace_place_cst(:,place_bin+1:2*place_bin);
+trace_place_cst_n=(trace_place_cst-min(trace_place_cst,[],2));
+trace_place_cst_n=trace_place_cst_n./(max(trace_place_cst,[],2)-min(trace_place_cst,[],2));
+nexttile([1 1]);
+imagesc(trace_place_cst_n(order,:))
+set(gca,'ytick',[1:size(traces_F,1)],'yticklabel',num2str([order]))
+colormap(turbo)
+%Lap_FR=show_traces_place(traces_F,traces_sp,place_bin,Ard_data,[30:36],[n]);
+
+%%
+i=2; [sz2 sz1]=size(Result_opto{i}.ref_im);
+mov_mc=double(readBinMov([fpath_const{i} '/mc.bin'],sz2,sz1));
+mov_im=-movmean((mov_mc-movmean(mov_mc,150,3)),20,3);
+gen_dff_movie([fpath_const{i} '_dff'],mean(mov_mc,3),mov_im,Result_opto{i}.Blue)
+%%
+for n=[2]
+    [~, pf]=max(trace_place_norm(n,:));
+    Lap_FR=show_traces_place(traces_F,traces_sp,place_bin,Ard_data,[30:36],[n]);
+    nexttile([1 1])
+    imagesc(trace_place_norm(n,:))
+    colormap('jet')
+
+    figure;
+    imagesc((Lap_FR),[10 50])
+end

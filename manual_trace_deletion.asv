@@ -1,0 +1,21 @@
+function rm_ind=manual_trace_deletion(Result)
+
+g=1;
+rm_ind=[];
+while g
+r=Result.Arduino(:,4);
+show_traces_spikes(Result.traces_res,Result.spike,')
+%zoom('on','motion','horizontal')
+zoom xon
+title({'Press left click to add new cell, right click to remove existing cell'; 'Press enter to exit'},'fontweight','bold');
+[x y button]=ginput(1);
+if isempty(button)
+    g=0;
+    else
+plot([x x],[0 max(Result.mcTrace(:))])
+[x2 y button]=ginput(1);
+rm_ind=[rm_ind; [x x2]];
+end
+
+end
+end

@@ -1,0 +1,58 @@
+------- dragonflyApp settings
+logical AllOFFButton: true
+logical AllONButton: false
+logical DotsButton: false
+logical SpecialButton: false
+logical DMDstatusButton: false
+numeric SliceSpinner: 1
+numeric FOVSpinner: 1
+char    appendedfoldernameEditField: "linesel_10x_155mW_hivlut_5c_25mWcm2_s27rr_1khz_ov"
+numeric NSpinner: 20
+numeric SpacingumEditField: 0
+char    FilterDropDown: "GFP"
+logical CalibrationButton: true
+logical SheetButton: false
+logical DotsButton_2: false
+logical SLMstatusButton: false
+logical ZstackButton: false
+logical SnapLimeONCheckBox: false
+logical SnapLimeOFFCheckBox: true
+logical SnapRedONCheckBox: false
+logical SnapRedOFFCheckBox: true
+logical Blue460nmButton: false
+logical Lime561nmButton: false
+logical Red640nmButton: false
+logical SnapBlueONCheckBox: false
+logical SnapBlueOFFCheckBox: true
+char    dfQuickSettingsDropDown: "Optopatch"
+numeric BlueAmpVEditField: 0.0799573
+numeric LimePowerEditField: 100
+logical LimeLaserstatusButton: false
+numeric GotoSpinner: 20
+numeric SetFirstZEditField: 0
+numeric SetLastZEditField: 0
+char    WaveformEditField: "dragonflyRCaMPtopatchWaveform"
+numeric camFramesInEditField: 1
+numeric camPicturesOutEditField: 1800
+numeric ExposureTimeMsEditField_waveform: 150
+char    ROIDropDown_waveform: "1024 x 1024"
+logical ActivateWaveformExposureTimeCheckBox: false
+logical ActivateWaveformROICheckBox: false
+logical ActivateWaveformCameraFramesCheckBox: false
+numeric nCellsEditField: 1
+numeric liveBluePowerEditField: 8.8
+numeric waveformBluePowerEditField: 25
+char    PatternsEditField: "dragonflyRCaMPtopatchPatterns"
+numeric dmdPatternsOutEditField: 1045
+numeric dmdTrigsOutEditField: 6270
+
+------- cameraApp settings
+numeric ExposureTimeMsEditField: 150
+char    ActiveareaDropDown: "2048 x 160"
+char    QuickSettingsDropDown: "Optopatch"
+char    BinningDropDown: "1 x 1"
+char    OffsetDropDown: "0, 0"
+logical CenteredCheckBox: true
+char    ImagesizeEditField: "2048 x 160"
+numeric ReadouttimemsEditField: 0.779549
+numeric RecordframesEditField: 2

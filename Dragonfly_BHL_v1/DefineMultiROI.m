@@ -1,0 +1,40 @@
+function roi_points = DefineMultiROI(refimg)
+if ~exist('refimg','var')
+    [fname,fpath]=uigetfile('*.*'); if fname==0;return;end
+    refimg = imread(fullfile(fpath,fname));
+end
+
+figure
+imshow(refimg, [], 'InitialMagnification', 'fit')
+hold on;
+
+[ysize, xsize] = size(refimg(:,:,1)); 
+npts = 1;
+colorindex = 0;
+order = get(gca,'ColorOrder');
+nroi = 1;
+roi_points = {};
+  [x, y] = meshgrid(1:xsize, 1:ysize);
+ while(npts > 0)
+%   [xv, yv] = (getline(gca, 'closed'));
+%   if size(xv,1) < 3  % exit loop if only a line is drawn
+%   break
+%   end
+      rectpos = getrect;
+      xv = rectpos(ones(5,1),1) + [0 rectpos([3 3]) 0 0]';
+      yv = rectpos(ones(5,1),2) + [0 0 rectpos([4 4]) 0]';
+  if size(unique([xv, yv],'rows'),1) == 1, break, end
+  inpoly = inpolygon(x,y,xv,yv);
+  
+ %draw the bounding polygons and label them
+  currcolor = order(1+mod(colorindex,size(order,1)),:);
+  plot(xv, yv, 'Linewidth', 1,'Color',currcolor);
+  text(mean(xv),mean(yv),num2str(colorindex+1),'Color',currcolor,'FontSize',12);
+  
+  roi_points{nroi} = [xv, yv];
+  nroi = nroi + 1;
+ end
+ 
+ save([datestr(now,'HHMMSS') '_multiROIRef.mat'],'refimg','roi_points')
+
+end

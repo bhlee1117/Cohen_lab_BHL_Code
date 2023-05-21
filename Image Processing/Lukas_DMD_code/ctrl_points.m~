@@ -1,0 +1,5 @@
+function pts = ctrl_points(im, DMD, tform)
+
+% make images out of the connected regions
+[y1, x1] = find(L == 1); 
+end

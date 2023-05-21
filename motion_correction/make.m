@@ -1,0 +1,1 @@
+mexOpenCV optical_flow_motion_correction_OCV_GPU.cpp -lgpu -lmwocvgpumex

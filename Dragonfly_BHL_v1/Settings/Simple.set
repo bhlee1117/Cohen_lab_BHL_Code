@@ -1,0 +1,58 @@
+------- dragonflyApp settings
+logical AllOFFButton: false
+logical AllONButton: true
+logical DotsButton: false
+logical SpecialButton: false
+logical DMDstatusButton: true
+numeric SliceSpinner: 1
+numeric FOVSpinner: 1
+char    appendedfoldernameEditField: "M1_GFP_d70_c2048_b4_Simple"
+numeric NSpinner: 2
+numeric SpacingumEditField: 70.8771
+char    FilterDropDown: "GFP"
+logical CalibrationButton: true
+logical SheetButton: false
+logical DotsButton_2: false
+logical SLMstatusButton: false
+logical ZstackButton: false
+logical SnapLimeONCheckBox: false
+logical SnapLimeOFFCheckBox: true
+logical SnapRedONCheckBox: false
+logical SnapRedOFFCheckBox: true
+logical Blue460nmButton: false
+logical Lime561nmButton: false
+logical Red640nmButton: false
+logical SnapBlueONCheckBox: true
+logical SnapBlueOFFCheckBox: true
+char    dfQuickSettingsDropDown: "RCaMPtopatch"
+numeric BlueAmpVEditField: 0.11673
+numeric LimePowerEditField: 100
+logical LimeLaserstatusButton: true
+numeric GotoSpinner: 1
+numeric SetFirstZEditField: 13.9595
+numeric SetLastZEditField: 14.0304
+char    WaveformEditField: "dragonflySimpleWaveform"
+numeric camFramesInEditField: 1500
+numeric camPicturesOutEditField: 1500
+numeric ExposureTimeMsEditField_waveform: 20
+char    ROIDropDown_waveform: "1024 x 1024"
+logical ActivateWaveformExposureTimeCheckBox: true
+logical ActivateWaveformROICheckBox: false
+logical ActivateWaveformCameraFramesCheckBox: true
+numeric nCellsEditField: 1
+numeric liveBluePowerEditField: 20
+numeric waveformBluePowerEditField: 100
+char    PatternsEditField: "dragonflySimplePatterns"
+numeric dmdPatternsOutEditField: 1
+numeric dmdTrigsOutEditField: 1
+
+------- cameraApp settings
+numeric ExposureTimeMsEditField: 20
+char    ActiveareaDropDown: "1024 x 160"
+char    QuickSettingsDropDown: "RCaMPtopatch"
+char    BinningDropDown: "1 x 1"
+char    OffsetDropDown: "972, 829"
+logical CenteredCheckBox: true
+char    ImagesizeEditField: "1024 x 160"
+numeric ReadouttimemsEditField: 0.779549
+numeric RecordframesEditField: 1500

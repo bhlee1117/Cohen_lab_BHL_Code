@@ -1,0 +1,35 @@
+function tform = adjst_tform(im, DMD, tform)
+
+% map the DMD coordinates onto camera coordinates
+[y, x] = find(DMD);  
+
+% put those points into a format on which the transform can act
+temp = [x'; y'; ones(1, numel(x))]; 
+dmd_tformpts = tform\temp; 
+
+% map those points onto a camera field of view 
+cam = zeros(2048); 
+
+temp = uint16(dmd_tformpts); 
+
+for i = 1:numel(dmd_tformpts(1,:))
+    cam(temp(2,i), temp(1,i)) = 1; 
+end
+
+% close the boxes
+se = strel('square', 5); 
+BW_cam = imclose(cam, se);
+
+% Find the connected regions 
+CC_cam = bwconncomp(BW_cam); 
+L = labelmatrix(CC_cam);
+
+% find the centers of 3 connected regions
+pts(1,:) = find_center(im, L, 1); 
+pts(2,:) = find_center(im, L, 2); 
+pts(3,:) = find_center(im, L, 3); 
+
+
+
+
+end

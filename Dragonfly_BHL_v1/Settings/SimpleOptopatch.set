@@ -1,0 +1,59 @@
+------- dragonflyApp settings
+logical AllOFFButton: false
+logical AllONButton: true
+logical DotsButton: false
+logical SpecialButton: false
+logical ROIONButton: false
+logical DMDstatusButton: true
+numeric SliceSpinner: 1
+numeric FOVSpinner: 1
+char    appendedfoldernameEditField: "p1"
+numeric NSpinner: 2
+numeric SpacingumEditField: 70.9
+char    FilterDropDown: "Arch"
+logical CalibrationButton: true
+logical SheetButton: false
+logical DotsButton_2: false
+logical SLMstatusButton: false
+logical ZstackButton: false
+logical SnapLimeONCheckBox: false
+logical SnapLimeOFFCheckBox: true
+logical SnapRedONCheckBox: true
+logical SnapRedOFFCheckBox: true
+logical Blue460nmButton: false
+logical Lime561nmButton: false
+logical Red640nmButton: false
+logical SnapBlueONCheckBox: false
+logical SnapBlueOFFCheckBox: true
+char    dfQuickSettingsDropDown: "RCaMPtopatch"
+numeric BlueAmpVEditField: 10
+numeric LimePowerEditField: 100
+logical LimeLaserstatusButton: false
+numeric GotoSpinner: 1
+numeric SetFirstZEditField: 13.9595
+numeric SetLastZEditField: 14.0304
+char    WaveformEditField: "dragonflySimpleWaveform"
+numeric camFramesInEditField: 700
+numeric camPicturesOutEditField: 500
+numeric ExposureTimeMsEditField_waveform: 20
+char    ROIDropDown_waveform: "1024 x 1024"
+logical ActivateWaveformExposureTimeCheckBox: true
+logical ActivateWaveformROICheckBox: false
+logical ActivateWaveformCameraFramesCheckBox: true
+numeric nCellsEditField: 1
+numeric liveBluePowerEditField: 5305.22
+numeric waveformBluePowerEditField: 5305
+char    PatternsEditField: "dragonflySimplePatterns"
+numeric dmdPatternsOutEditField: 1
+numeric dmdTrigsOutEditField: 1
+
+------- cameraApp settings
+numeric ExposureTimeMsEditField: 12
+char    ActiveareaDropDown: "2048 x 2048"
+char    QuickSettingsDropDown: "RCaMPtopatch"
+char    BinningDropDown: "2 x 2"
+char    OffsetDropDown: "0, 0"
+logical CenteredCheckBox: true
+char    ImagesizeEditField: "1024 x 1024"
+numeric ReadouttimemsEditField: 9.99771
+numeric RecordframesEditField: 500

@@ -1,0 +1,59 @@
+------- dragonflyApp settings
+logical AllOFFButton: false
+logical AllONButton: false
+logical DotsButton: false
+logical SpecialButton: true
+logical ROIONButton: false
+logical DMDstatusButton: true
+numeric SliceSpinner: 1
+numeric FOVSpinner: 1
+char    appendedfoldernameEditField: "movie_test"
+numeric NSpinner: 10
+numeric SpacingumEditField: 12.5222
+char    FilterDropDown: "RCaMP"
+logical CalibrationButton: true
+logical SheetButton: false
+logical DotsButton_2: false
+logical SLMstatusButton: false
+logical ZstackButton: false
+logical SnapLimeONCheckBox: true
+logical SnapLimeOFFCheckBox: true
+logical SnapRedONCheckBox: false
+logical SnapRedOFFCheckBox: true
+logical Blue460nmButton: false
+logical Lime561nmButton: false
+logical Red640nmButton: false
+logical SnapBlueONCheckBox: false
+logical SnapBlueOFFCheckBox: true
+char    dfQuickSettingsDropDown: "SimpleMovie"
+numeric BlueAmpVEditField: 10
+numeric LimePowerEditField: 200
+logical LimeLaserstatusButton: true
+numeric GotoSpinner: 1
+numeric SetFirstZEditField: 13.5878
+numeric SetLastZEditField: 13.7005
+char    WaveformEditField: "dragonflySimpleWaveform"
+numeric camFramesInEditField: 200
+numeric camPicturesOutEditField: 200
+numeric ExposureTimeMsEditField_waveform: 10
+char    ROIDropDown_waveform: "1024 x 1024"
+logical ActivateWaveformExposureTimeCheckBox: true
+logical ActivateWaveformROICheckBox: false
+logical ActivateWaveformCameraFramesCheckBox: true
+numeric nCellsEditField: 1
+numeric liveBluePowerEditField: 5305.22
+numeric waveformBluePowerEditField: 5300
+char    PatternsEditField: "dragonflyRCaMPtopatchPatterns_20190124_dyn24"
+numeric dmdPatternsOutEditField: 1093
+numeric dmdTrigsOutEditField: 1
+
+------- cameraApp settings
+numeric ExposureTimeMsEditField: 50
+char    ActiveareaDropDown: "2048 x 2048"
+char    QuickSettingsDropDown: "SimpleMovie"
+char    BinningDropDown: "1 x 1"
+char    OffsetDropDown: "0, 419"
+logical CenteredCheckBox: true
+char    ImagesizeEditField: "2048 x 2048"
+numeric ReadouttimemsEditField: 9.99771
+numeric RecordframesEditField: 200

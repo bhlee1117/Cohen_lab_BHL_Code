@@ -1,0 +1,59 @@
+------- dragonflyApp settings
+logical AllOFFButton: false
+logical AllONButton: true
+logical DotsButton: false
+logical SpecialButton: false
+logical ROIONButton: false
+logical DMDstatusButton: true
+numeric SliceSpinner: 1
+numeric FOVSpinner: 1
+char    appendedfoldernameEditField: "S1_RCaMP_Had59c8"
+numeric NSpinner: 23
+numeric SpacingumEditField: 5.08508
+char    FilterDropDown: "RCaMP"
+logical CalibrationButton: true
+logical SheetButton: false
+logical DotsButton_2: false
+logical SLMstatusButton: false
+logical ZstackButton: false
+logical SnapLimeONCheckBox: true
+logical SnapLimeOFFCheckBox: false
+logical SnapRedONCheckBox: false
+logical SnapRedOFFCheckBox: false
+logical Blue460nmButton: false
+logical Lime561nmButton: false
+logical Red640nmButton: false
+logical SnapBlueONCheckBox: false
+logical SnapBlueOFFCheckBox: false
+char    dfQuickSettingsDropDown: "Hadamard"
+numeric BlueAmpVEditField: 0.0538188
+numeric LimePowerEditField: 400
+logical LimeLaserstatusButton: true
+numeric GotoSpinner: 1
+numeric SetFirstZEditField: 13.5499
+numeric SetLastZEditField: 13.6617
+char    WaveformEditField: "dragonflyHadamardWaveformRCaMP"
+numeric camFramesInEditField: 1
+numeric camPicturesOutEditField: 64
+numeric ExposureTimeMsEditField_waveform: 150
+char    ROIDropDown_waveform: "1024 x 1024"
+logical ActivateWaveformExposureTimeCheckBox: false
+logical ActivateWaveformROICheckBox: false
+logical ActivateWaveformCameraFramesCheckBox: false
+numeric nCellsEditField: 1
+numeric liveBluePowerEditField: 10
+numeric waveformBluePowerEditField: 1000
+char    PatternsEditField: "dragonflyHadamardPatterns"
+numeric dmdPatternsOutEditField: 140
+numeric dmdTrigsOutEditField: 140
+
+------- cameraApp settings
+numeric ExposureTimeMsEditField: 150
+char    ActiveareaDropDown: "2048 x 2048"
+char    QuickSettingsDropDown: "Hadamard"
+char    BinningDropDown: "1 x 1"
+char    OffsetDropDown: "0, 0"
+logical CenteredCheckBox: true
+char    ImagesizeEditField: "2048 x 2048"
+numeric ReadouttimemsEditField: 9.99771
+numeric RecordframesEditField: 64
