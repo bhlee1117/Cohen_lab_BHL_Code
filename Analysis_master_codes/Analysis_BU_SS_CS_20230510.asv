@@ -39,7 +39,7 @@ STAspike=zeros(3,length(wind));
 for s=sp
     try
 STAmov=STAmov+mov1_res(:,:,s+wind);
-STAspike=STAspike+dend_hi(s+wind,:)';
+STAspike=STAspike+dend_hi(s+wind,:);
 g=g+1;
     end
 end
@@ -48,7 +48,7 @@ STAspike=STAspike/(g-1);
 figure;
 moviefixsc(STAmov)
 figure;
-plot(wind*2,STAspike')
+plot(wind,STAspike')
 
 %moviefixsc(mov)
 %hold all
