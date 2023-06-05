@@ -3,52 +3,26 @@
 
 clear
 [fpath] = uigetfile_n_dir;
-%% Clicky
-i=1;
+%% Motion correction
+for i=1:length(fpath)
     load([fpath{i} '/output_data.mat'])
-    sz=double(Device_Data{1, 3}.ROI([2 4]));
-    mov1=double(readBinMov([fpath{i} '/frames1.bin'],sz(2),sz(1)));
-    sz=double(Device_Data{1, 5}.ROI([2 4]));
-    mov2=double(readBinMov([fpath{i} '/frames2.bin'],sz(2),sz(1)));
-    mov1_res=mov1-median(mov1,3);
-    [~, dend]=clicky(mov1);
-    [~, som]=clicky(mov2);
+    sz=double(Device_Data{1, 4}.ROI([2 4]));
+    mov=double(readBinMov([fpath{i} '/frames1.bin'],sz(2),sz(1)));
+    %mov=double(readBinMov_times([fpath{i} '/frames1.bin'],sz(2),sz(1),[1:30000]));
 
-%%
-    figure; ax1=[];
-    tiledlayout(2,1)
-    t=[1:length(som)];
-    ax1=[ax1 nexttile([1 1])];
-    som_hi=(som-movmedian(som,500,1));
-    plot(t,som_hi)
-    axis tight
-    ax1=[ax1 nexttile([1 1])];
-    dend_hi=(dend-movmedian(dend,500,1));
-    plot(t,dend_hi+[1:3]*20)
-    axis tight
-    linkaxes(ax1,'x')
-%%
+    mov_test=mov(:,:,150:250);
+    try mov_test = single(mov_test)./single(max(mov_test.data(:)));
+    catch disp('change to vm')
 
-tmp=som_hi - movmedian(som_hi,20); tmp=tmp'./get_threshold(tmp',1);
-spike=find_spike_bh(tmp,3,3);
-plot(t,som_hi,find(spike),som_hi(find(spike)),'r.')
-sp=find(spike);
-wind=[-10:30];
-STAmov=zeros(size(mov1,1),size(mov1,2),41); g=1;
-STAspike=zeros(3,length(wind));
-for s=sp
-    try
-STAmov=STAmov+mov1_res(:,:,s+wind);
-STAspike=STAspike+dend_hi(s+wind,:);
-g=g+1;
-    end
+        mov_test=vm(mov_test); mov_test = single(mov_test)./single(max(mov_test.data(:))); end
+    mov_test = movmean(mov_test,10,3);
+    mov_ref = squeeze(median(mov_test,3));
+    [mov_mc,xyField]=optical_flow_motion_correction_LBH(vm(mov),mov_ref,'normcorre');
+    mov_mc=vm(mov_mc);
+    mov_mc.transpose.savebin([fpath{i} '/mc.bin'])
+    %mcTrace = squeeze(mean(xyField,[1 2]));
+    save([fpath{i} '/mcTrace.mat'],'xyField')
 end
-STAmov=STAmov/(g-1);
-STAspike=STAspike/(g-1);
-figure;
-moviefixsc(STAmov)
-figure;
-plot(wind,STAspike')
 
 %moviefixsc(mov)
 %hold all
@@ -58,7 +32,7 @@ plot(wind,STAspike')
 
 
 C=0; DAQ_rate=0.00001;
-for i=1:length(fpath)
+for i=78:length(fpath)
     s=split(fpath{i},'/');
     s2=split(s(end),'_'); s2=str2num(s2{2});
     if C==s2
