@@ -1,5 +1,7 @@
 function dend_DMD_pattern(app,thres)
 
+dmd_now=app.GetDevice('DMD_Device');
+
 [fname fpath]=uigetfile();
 load(fullfile(fpath,fname))
 im=snap.img;
