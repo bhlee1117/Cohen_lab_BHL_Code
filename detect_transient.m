@@ -1,11 +1,16 @@
-function [trans tr_trace]=detect_transient(traces_hi,burst_pow)
+function [trans tr_trace]=detect_transient(traces_hi,thres,burst_pow)
+if nargin<3
+    burst_pow=zeros(1,size(traces_hi,2));
+end
 tr_trace=[];
+thres_on=thres(1);
+thres_off=thres(2);
+
 for i=1:size(traces_hi,1) %neuron
-    i
-    thres=get_threshold(traces_hi(i,:),0.9); thres2=thres*1/2;
-    [transients n]=bwlabel(movmean(traces_hi(i,:),7)>thres);
-    [transients_back]=bwlabel(movmean(traces_hi(i,:),7)>thres2);
-    transients_final=movmean(traces_hi(i,:),3)>thres;
+
+    [transients n]=bwlabel(traces_hi>thres_on);
+    [transients_back]=bwlabel(traces_hi>thres_off);
+    transients_final=movmean(traces_hi(i,:),3)>thres_on;
     tr_list=[1:n]; rm=[];
     for t=1:n
     tr_ind=find(transients==t);
