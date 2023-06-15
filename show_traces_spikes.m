@@ -12,7 +12,7 @@ t=[1:size(traces,2)]/frmrate; scale=10;
 %tr=Result{i}.traces_res-median(Result{i}.traces_res,2); fprnt=Result{i}.c_ftprnt;
 tr=traces-movmedian(traces,150,2);
 %tr=tr./get_threshold(tr,1);
-tr=(traces-median(traces,2))./get_threshold(tr,1);
+tr=(traces-median(traces,2,'omitnan'))./get_threshold(tr,1);
 
 lines=plot(t,tr(noi,:)'+[1:size(noi,2)]*scale); line_color=turbo(length(noi));
 arrayfun(@(l,c) set(l,'Color',c{:}),lines,num2cell(line_color,2))

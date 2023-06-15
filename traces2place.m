@@ -1,26 +1,31 @@
-function [trace_place SI bootstrap_SI]=traces2place(traces,place_bin,Ard_data,vel_thresh,N_it)
+function [trace_place SI bootstrap_SI]=traces2place(traces,place_bin,Virmen_data,vel_thresh,N_it)
 
-Ard_data(:,2)=Ard_data(:,2)-min(Ard_data(:,2))+1;
-lap_length=max(Ard_data(:,2));
-Ard_data(end-1:end,2:4)=repmat(Ard_data(end-2,2:4),2,1);
-lap_end=[0; find(abs(Ard_data(2:end,2)-Ard_data(1:end-1,2))>6500); size(Ard_data,1)];
+Virmen_data(:,3)=Virmen_data(:,3)-min(Virmen_data(:,3))+1;
+lap_length=max(Virmen_data(:,3));
+%Ard_data(end-1:end,2:4)=repmat(Ard_data(end-2,2:4),2,1);
+lap_end=[0; find(abs(Virmen_data(2:end,4)-Virmen_data(1:end-1,4))>0); size(Virmen_data,1)];
 laps=[lap_end(1:end-1)+1 lap_end(2:end)];
 
 for l=1:size(laps,1)
-lap_trace(laps(l,1):laps(l,2))=l; 
-cum_trace(laps(l,1):laps(l,2))=Ard_data(laps(l,1):laps(l,2),2)+lap_length*l; end
+lap_trace(laps(l,1):laps(l,2))=l; end
 
-cum_trace=movmean(cum_trace,6);
-vel_trace=(cum_trace(2:end)-cum_trace(1:end-1))/1.25*1000;
+cum_trace=Virmen_data(:,5);
+cum_trace=cum_trace([1:300:length(cum_trace)]);
+cum_trace=interp1([1:300:size(Virmen_data,1)],cum_trace,[1:size(Virmen_data,1)],'linear');
+vel_trace=(cum_trace(2:end)-cum_trace(1:end-1));
 vel_trace(end+1)=vel_trace(end);
 
-reward_spot=mean(Ard_data(Ard_data(:,3)==1,2));
+bw=bwlabel(Virmen_data(:,2));
+for b=1:max(bw)
+    tmp=find(bw==b);
+    R(b)=tmp(1);
+end
+reward_spot=mean(Virmen_data(R,3));
 
-lap_dist=max(Ard_data(:,2));
-bin_dist=ceil(Ard_data(:,2)/((lap_dist)/place_bin));
-%bin_dist_run=bin_dist; bin_dist_run(vel_trace<vel_thresh)=NaN;
-disp(['Reward spot: ' num2str(ceil(reward_spot/((lap_dist)/place_bin))) 'th bin, Total laps: ' num2str(size(laps,1))])
+lap_dist=max(Virmen_data(:,3));
+bin_dist=ceil(Virmen_data(:,3)/((lap_dist)/place_bin));
 cmap=jet(place_bin);
+disp(['Reward spot: ' num2str(ceil(reward_spot/((lap_dist)/place_bin))) 'th bin, Total laps: ' num2str(size(laps,1))])
 traces_run=traces;
 %traces_run(zscore(traces,0,2)<-4)=NaN;
 traces_run(:,vel_trace<vel_thresh)=NaN;

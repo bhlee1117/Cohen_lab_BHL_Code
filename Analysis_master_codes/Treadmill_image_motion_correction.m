@@ -3,7 +3,7 @@ clc;
 
 [fpath] = uigetfile_n_dir();
 %%
-for i=3%2:length(fpath)
+for i=1:length(fpath)
 
 load(fullfile(fpath{i},"settings.mat"))
 Sz = importdata([fpath{i} '/experimental_parameters.txt']);

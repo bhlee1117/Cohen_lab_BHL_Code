@@ -16,7 +16,7 @@ mov_test=mov(:,:,150:250);
 try mov_test = single(mov_test)./single(max(mov_test.data(:))); 
 catch disp('change to vm')
 mov_test=vm(mov_test); mov_test = single(mov_test)./single(max(mov_test.data(:))); end
-/Volumes/cohen_lab/Lab/Labmembers/Byung Hun Lee/Code/Volumes/cohen_lab/Lab/Labmembers/Byung Hun Lee/Code
+%/Volumes/cohen_lab/Lab/Labmembers/Byung Hun Lee/Code/Volumes/cohen_lab/Lab/Labmembers/Byung Hun Lee/Code
 mov_test = movmean(mov_test,10,3);
 mov_ref = squeeze(median(mov_test,3));
 [mov_mc,xyField]=optical_flow_motion_correction_LBH((mov),mov_ref,'optic_flow');

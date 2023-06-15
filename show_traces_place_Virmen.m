@@ -1,8 +1,8 @@
-function show_traces_place(traces,spike,place_bin,Virmen_align,poi,noi)
+function show_traces_place_Virmen(traces,spike,place_bin,Virmen_data,poi,noi)
 scale=-7;
-vel_thresh=0;
+vel_thresh=0.001;
 
-Virmen_align(:,2)=Virmen_align(:,2)-min(Virmen_align(:,2))+1;
+Virmen_data(:,3)=Virmen_data(:,3)-min(Virmen_data(:,3))+1;
 lap_length=max(Virmen_data(:,2));
 %Ard_data(end-1:end,2:4)=repmat(Ard_data(end-2,2:4),2,1);
 lap_end=[0; find(abs(Virmen_data(2:end,4)-Virmen_data(1:end-1,4))>0); size(Virmen_data,1)];
@@ -12,11 +12,10 @@ for l=1:size(laps,1)
 lap_trace(laps(l,1):laps(l,2))=l; end
 
 cum_trace=Virmen_data(:,5);
-cum_trace=cum_trace([1:300:length(cum_trace)]);
-cum_trace=interp1([1:300:size(Virmen_data,1)],cum_trace,[1:size(Virmen_data,1)],'linear');
+cum_trace=cum_trace([1:1000:length(cum_trace)]);
+cum_trace=interp1([1:1000:size(Virmen_data,1)],cum_trace,[1:size(Virmen_data,1)],'linear');
 vel_trace=(cum_trace(2:end)-cum_trace(1:end-1));
 vel_trace(end+1)=vel_trace(end);
-Virmen_data(:,3)=Virmen_data(:,3)-min(Virmen_data(:,3))+1;
 
 bw=bwlabel(Virmen_data(:,2));
 for b=1:max(bw)

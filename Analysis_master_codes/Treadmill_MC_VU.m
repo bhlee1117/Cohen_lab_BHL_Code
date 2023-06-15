@@ -3,7 +3,7 @@ clc;
 
 [fpath] = uigetfile_n_dir();
 %%
-for i=1:length(fpath)
+for i=1%:length(fpath)
 
     load(fullfile(fpath{i},"output_data.mat"))
     sz=double(Device_Data{1, 3}.ROI([2 4]));
@@ -25,7 +25,7 @@ for i=1:length(fpath)
     mov_test = movmean(mov_test,10,3);
     mov_ref = squeeze(median(mov_test,3));
 
-    for j=1:length(f_seg)-1
+    for j=24:length(f_seg)-1
         g=1;
         try
             mov=double(readBinMov_times([fpath{i} '/frames1.bin'],sz(2),sz(1),[f_seg(j):f_seg(j+1)+10]));
@@ -34,16 +34,17 @@ for i=1:length(fpath)
             mov=double(readBinMov_times([fpath{i} '/frames1.bin'],sz(2),sz(1),[f_seg(j):f_seg(j+1)-1]));
         end
         mov=vm(mov);
-        [mov_mc,xyField]=optical_flow_motion_correction_LBH(mov,mov_ref,'optic_flow');
+        [mov_mc,xyField]=optical_flow_motion_correction_LBH(mov,mov_ref,'normcorre');
 
-        options_rigid = NoRMCorreSetParms('d1',size(mov_mc,1),'d2',size(mov_mc,2),'bin_width',200,'max_shift',30,'us_fac',50,'init_batch',200);
-        tic; [mov_mc,shifts1,template1,options_rigid] = normcorre(mov_mc,options_rigid); toc
+%         options_rigid = NoRMCorreSetParms('d1',size(mov_mc,1),'d2',size(mov_mc,2),'bin_width',200,'max_shift',30,'us_fac',50,'init_batch',200);
+%         tic; [mov_mc,shifts1,template1,options_rigid] = normcorre(mov_mc,options_rigid); toc
 
         ave_im=mean(mov_mc,3);
         mov_mc=vm(mov_mc);
         mov_mc.transpose.savebin([fpath{i} '/mc' num2str(j,'%02d') '.bin'])
 
-        mcTrace = squeeze(mean(xyField,[1 2]));
+        %mcTrace = squeeze(mean(xyField,[1 2]));
+        mcTrace=xyField;
         save([fpath{i} '/mcTrace' num2str(j,'%02d') '.mat'],'mcTrace','ave_im')
 
         %  clear mov_mc mov
