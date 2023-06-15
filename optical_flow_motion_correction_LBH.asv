@@ -62,7 +62,7 @@ shifts_nr = reshape(shifts_nr,[],ndims(Y)-1,T);
 shifts_x = squeeze(shifts_nr(:,2,:))';
 shifts_y = squeeze(shifts_nr(:,1,:))';
 
-flow_xy=shifts2;
+flow_xy=[shifts_x shifts_y];
 % apply the shifts to the removed percentile
 
 
