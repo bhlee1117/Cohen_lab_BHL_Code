@@ -165,7 +165,7 @@ for i=1:size(NiceNeuronList,2)
             b=b+1;
         end
 
-        for Pulse=[4:-1:1]
+        for Pulse=[5:-1:1]
         BlueTime=find(Blue_sessions==max(Blue_sessions)-Pulse); % Ramp time
         BlueTime=[BlueTime(1):BlueTime(1)+500]; % First 500 ms
         tr=Result{NiceNeuronList(1,i),j}.traces(BlueTime);
