@@ -18,6 +18,7 @@ end
 
 
 DAQ_rate=0.000005;
+
 for i=1:length(fpath)
 
 
@@ -106,16 +107,86 @@ for i=1:length(fpath)
 end
 
 %%
-VirDAQ_ratio=1.027250016585005;
 
-for i=3:length(Result)
+figure;
+tiledlayout((length(Result)-1)*2,1)
+
+for i=2:length(Result)
     fileList = dir(fullfile(fpath{i}, '*.data'));
     if length(fileList)==1
         fid = fopen(fullfile(fpath{i},fileList.name));
-        VRdata = fread(fid,[10 inf],'double');
+        VRdata = fread(fid,[12 inf],'double');
     else
         error('There is more than one .data file');
     end
+
+    VRdata(:,1:4078)=[]; VRdata(:,end)=[];
+    VRdata=VRdata([6 3 2 5 10 4 7 1 9 11 12],:);
+    load([fpath{i} '/output_data.mat'])
+
+    l=find(VRdata(8,2:end)-VRdata(8,1:end-1)>0);
+    lap=[[1; (l+1)'] [(l)'; size(VRdata,2)]];
+    cumTrack=[];
+    VRdata(5,:)=VRdata(5,:)-min(VRdata(5,:));
+    cumTrack=[cumTrack VRdata(5,lap(1,1):lap(1,2))];
+    for l2=2:size(lap,1)
+    cumTrack=[cumTrack VRdata(5,lap(l2,1):lap(l2,2))+cumTrack(lap(l2,1)-1)];    
+    end
+ 
+    DAQ_rew=rescale(Device_Data{1, 2}.buffered_tasks(1, 3).channels.data)>0.7;
+    RewardOn_DAQ=find([0 (DAQ_rew(2:end)-DAQ_rew(1:end-1))==1]);
+    RewardOn_VR=find([0 (VRdata(6,2:end)-VRdata(6,1:end-1))==1]);
+   
+    NewTimebin=[];
+    for tt=1:length(RewardOn_VR)-1
+        N=length(RewardOn_DAQ(tt):RewardOn_DAQ(tt+1));
+        Gap=(RewardOn_VR(tt+1)-RewardOn_VR(tt))/(N-1);
+        NewTimebin=[NewTimebin [RewardOn_VR(tt):Gap:RewardOn_VR(tt+1)]];
+    end
+
+        Pos=interp1([1:size(VRdata,2)],VRdata(5,:),NewTimebin,'linear','extrap');
+        Lap=round(interp1([1:size(VRdata,2)],VRdata(8,:),NewTimebin,'linear','extrap'));
+        CumPos=round(interp1([1:size(VRdata,2)],cumTrack,NewTimebin,'linear','extrap'));
+        
+        truncate=length(NewTimebin);
+        DAQ_Vir=[t_DAQ(1:truncate); DAQ_rew(1:truncate); Pos; Lap; CumPos];
+    
+
+    CamCounter=Device_Data{1, 2}.Counter_Inputs(1, 1).data;
+    CamTrigger=find(CamCounter(2:end)-CamCounter(1:end-1));
+
+
+    Result{i}.Virmen=DAQ_Vir(:,CamTrigger);
+
+    tmp=squeeze(Result{i}.traces_res) - movmedian(squeeze(Result{i}.traces_res),10,2); tmp=tmp./get_threshold(tmp,1);
+    Result{i}.spike=find_spike_bh(tmp,4,3);
+    tmp=squeeze(Result{i}.traces_res) - movmedian(squeeze(Result{i}.traces_res),150,2); tmp=tmp./get_threshold(tmp,1);
+    Result{i}.spike=(Result{i}.spike+find_spike_bh(tmp,3.2,1.5))>0;
+
+end
+
+
+
+
+
+
+%%
+VirDAQ_ratio=1.027250016585005;
+figure;
+tiledlayout((length(Result)-1)*2,1)
+
+
+for i=2:length(Result)
+    fileList = dir(fullfile(fpath{i}, '*.data'));
+    if length(fileList)==1
+        fid = fopen(fullfile(fpath{i},fileList.name));
+        VRdata = fread(fid,[12 inf],'double');
+    else
+        error('There is more than one .data file');
+    end
+
+    VRdata(:,1:4078)=[]; VRdata(:,end)=[];
+    VRdata=VRdata([6 3 2 5 10 4 7 1 9 11 12],:);
     load([fpath{i} '/output_data.mat'])
 
     l=find(VRdata(8,2:end)-VRdata(8,1:end-1)>0);
@@ -135,6 +206,13 @@ for i=3:length(Result)
     t_VR= t_VR-t_VR(1);
     t_VR= milliseconds(t_VR)/1000;
     VR_pos_interp=interp1(t_VR*VirDAQ_ratio,VRdata(5,:),t_DAQ,'linear');
+    %VR_pos_interp=interp1(t_VR,VRdata(5,:),t_DAQ,'linear');
+    VR_rew=[0 (VRdata(6,2:end)-VRdata(6,1:end-1))>0];
+    VR_rew_interp=interp1(t_VR,VR_rew,t_DAQ,'linear')==1;
+    VR_rew_interp=[0 (VR_rew_interp(2:end)-VR_rew_interp(1:end-1))==1];
+    rewind=find(VR_rew_interp==1)'+[0:9000]; 
+    VR_rew_interp(rewind(:))=1;
+
     VR_reward=zeros(1,length(VR_pos_interp));
 
     bw=bwlabel(VR_pos_interp>110*0.8);
@@ -143,7 +221,7 @@ for i=3:length(Result)
         VR_reward(tmp(1)+[0:500])=1;
     end
 
-    [DAQ_VirCorr lag]=xcorr(VR_reward,DAQ_rew,1e7);
+    [DAQ_VirCorr lag]=xcorr(VR_rew_interp,DAQ_rew,1e7);
     [~, maxLag]=max(DAQ_VirCorr);
     DAQ_Virlag=lag(maxLag)/DAQ_rate;
     Pos=interp1(t_VR*VirDAQ_ratio-DAQ_Virlag,VRdata(5,:),t_DAQ,'linear');

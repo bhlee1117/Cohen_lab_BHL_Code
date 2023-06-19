@@ -31,7 +31,7 @@ se = strel('disk', 5); % Define a structuring element
 skeletonImage = bwmorph(large_vessel_mask, 'skel', Inf);
 
 switch method
-    case 'skeleton'
+    case 'Skeleton'
 
 skeletonImage = bwmorph(large_vessel_mask, 'skel', Inf);
 se90 = strel('line',thickness,90);
@@ -66,7 +66,7 @@ end
 
 roi=drawpolygon(gca);
 roi=round(roi.Position); roi(end+1,:)=roi(1,:);
-ROImage = poly2mask(roi(:,1)', roi(:,2)', sz(1), sz(2));
+ROImage = poly2mask(roi(:,1)', roi(:,2)', sz(2), sz(1));
 DMDmask= BWfinal | ROImage;
 figure(1); clf;
 imshow2(labeloverlay(imfilt,DMDmask,'Transparency',0),[])
