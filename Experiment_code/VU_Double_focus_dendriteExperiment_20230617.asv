@@ -1,0 +1,56 @@
+% Experiment code
+% z-stack
+addpath(genpath('C:\Users\Labmember\Data\ByungHun\GitHub_code'))
+Stage=xx.GetDevice("Scientifica_Stage_Controller");
+cam=xx.GetDevice('Cam_Controller');
+Shutters=xx.GetDevice('Shutter_Device');
+dmd = xx.GetDevice('DMD_Device'); %dmd(1,1) is the ALP for the Behavior
+Saveto=xx.datafolder;
+%%
+thickness= 100; % um
+step= 1; %um
+scale=100;
+numslices= thickness/step;
+Stage.Update_Current_Position_Microns();
+last_z=Stage.z;
+first_z=Stage.z + thickness*scale;
+
+   cam1 = cam(1,1);
+   cam2 = cam(1,2);
+    %Checks if enable594 is ON
+    if  Shutters(1, 1).State
+    else
+        Shutters(1, 1).State=1;
+    end
+tic;
+for z = 1:numslices
+    Stage.Update_Current_Position_Microns();
+    CurrentZ=Stage.z;
+    Zstack1(:,:,z) = cam1.Snap();
+    Zstack2(:,:,z) = cam2.Snap();
+
+    pause(cam1.exposuretime) % Pause to not saturate the COM
+    Stage.Step_Fixed(3,step*scale);
+    disp([num2str(z) 'th slice, z = ' num2str(CurrentZ/100) 'um'])
+end
+toc;
+tt=clock; t = datetime(tt);
+t.Format='ddHHmm';
+save([Saveto '\' char(t) '_Zstack.mat'],'Zstack1','Zstack2','-v7.3')
+%%
+[fname fpath]=uigetfile();
+load(fullfile(fpath,fname))
+im=snap.img;
+DMDmask = GenerateDMD_dendrite(im,10,'Edge');
+
+transform=dmd(1,1).tform;
+%transform=snap.tform;
+Rfixed = imref2d([dmd(1,1).Dimensions(2) dmd(1,1).Dimensions(1)]);
+
+newSize = [2304 2304];
+rmask = imresize(DMDmask, newSize);
+% apply transformation from image space to patterning device space
+tmask=imwarp(rmask,transform,'OutputView',Rfixed);
+
+dmd(1,1).Target=tmask;
+dmd(1,1).Write_Static();

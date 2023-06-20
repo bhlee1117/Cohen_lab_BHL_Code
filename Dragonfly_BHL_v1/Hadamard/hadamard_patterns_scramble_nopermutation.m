@@ -77,7 +77,7 @@ function [alp_pattern_data, bincode] = ...
 %     bincode = hadamard_bincode(block_rows*block_cols);
 %     assert(block_rows == 3 && block_cols == 3,'only works for 12 patterns in 11 locations')
 
-    nblock = nblock_and_step(1);
+    nblock = nblock_xxand_step(1);
     blockstep = nblock_and_step(2);
     bincode = hadamard_bincode_nopermutation(nblock);
     bitplanes = size(bincode,2);
