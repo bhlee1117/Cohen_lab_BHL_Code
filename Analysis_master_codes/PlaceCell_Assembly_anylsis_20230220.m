@@ -7,7 +7,7 @@ load(['Treadmill_BHLm008_20230318_result.mat'])
 %%
 place_bin=50;
 grps={[1 2 3],[4]};
-im_corr_th=[0.994 0.994 0.994 0.994];
+im_corr_th=[0.99 0.99 0.99 0.99];
 cmap = jet(256);
 cmap(1:find(cmap(:,1)==0.5),1) = 0.5;
 clear ind_list Arduinos
@@ -65,7 +65,6 @@ for i=1%:length(grps)
     f_size=cell2mat(cellfun(@size,Arduinos,'UniformOutput',false)');
 
     Arduino_align=cell2mat(Arduino_align');
-    
     show_traces_spikes(traces_F,traces_sp,[Arduino_align(:,2) Arduino_align(:,3)*3000])
 
     % for r=1:size(Result{i}.rm_ind,1)
@@ -73,26 +72,37 @@ for i=1%:length(grps)
     % traces_sp(:,[Result{i}.rm_ind(r,1):Result{i}.rm_ind(r,2)])=NaN;
     % end
 
-% Lap_FR=get_LapFR(traces_sp,place_bin,Arduino_align,10,[1:size(traces_sp)]);
-% [trace_place SI put_pc]=traces2place(traces_sp,place_bin,Arduino_align,10,75);
-% %trace_place=trace_place(find(max(trace_place,[],2)>13),:);
-% trace_place=movmean(repmat(trace_place,1,3),6,2);
-% trace_place=trace_place(:,place_bin+1:2*place_bin);
-% trace_place_norm=(trace_place-min(trace_place,[],2));
-% trace_place_norm=trace_place_norm./(max(trace_place,[],2)-min(trace_place,[],2));
-% 
-% %[~, arg]=max(trace_place_norm(put_pc,:),[],2);
-% [~, arg]=max(trace_place_norm,[],2);
-% [~, order]=sort(arg,'ascend');
-% figure;
-% %imagesc(trace_place_norm(put_pc(order),:))
-% imagesc(trace_place_norm(order,:))
-% %set(gca,'ytick',[1:size(traces_F,1)],'yticklabel',num2str([put_pc(order)]))
-% set(gca,'ytick',[1:size(traces_F,1)],'yticklabel',num2str([order]))
-% colormap(turbo)
+Lap_FR=get_LapFR(traces_sp,place_bin,Arduino_align,10,[1:size(traces_sp)]);
+[trace_place SI boot_SI]=traces2place(traces_sp,place_bin,Arduino_align,10,500);
+Pct=prctile(boot_SI',99)'; put_pc=find((SI-Pct)>0);
+trace_place=movmean(repmat(trace_place,1,3),6,2);
+trace_place=trace_place(:,place_bin+1:2*place_bin);
+trace_place_norm=(trace_place-min(trace_place,[],2));
+trace_place_norm=trace_place_norm./(max(trace_place,[],2)-min(trace_place,[],2));
+[~, arg]=max(trace_place_norm,[],2);
+[~, order]=sort(arg,'ascend');
+figure; tiledlayout(1,2); nexttile([1 1]);
+imagesc(trace_place_norm(order,:))
+set(gca,'ytick',[1:size(traces_F,1)],'yticklabel',num2str([order]))
+colormap(turbo)
+
+trace_place_PC=movmean(repmat(trace_place(put_pc,:),1,3),6,2);
+trace_place_PC=trace_place_PC(:,place_bin+1:2*place_bin);
+trace_place_PC_norm=(trace_place_PC-min(trace_place_PC,[],2));
+trace_place_PC_norm=trace_place_PC_norm./(max(trace_place_PC,[],2)-min(trace_place_PC,[],2));
+[~, arg]=max(trace_place_PC_norm,[],2);
+%arg=sum(trace_place_PC_norm.*[1:place_bin],2,'omitnan')./sum(trace_place_PC_norm,2,'omitnan');
+[~, order_PC]=sort(arg,'ascend');
+nexttile([1 1]);
+imagesc(trace_place_PC_norm(order_PC,:))
+set(gca,'ytick',[1:size(trace_place_PC_norm,1)],'yticklabel',num2str([put_pc(order_PC)]))
+colormap(turbo)
 
 
 end
+%%
+show_traces_place(traces_F,traces_sp,5,Arduino_align,[1:5],61);
+show_traces_align_Position(traces_F,traces_sp,-1800,[-500:15000],Arduino_align,61)
 %% Trial 1-3 vs 4
 split=sum(f_size(1:3));
 

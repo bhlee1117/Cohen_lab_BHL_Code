@@ -1,23 +1,19 @@
-function show_traces_align_Position_Virmen(traces_F,traces_sp,pos,Window,Virmen_data,noi)
+function show_traces_align_Position(traces_F,traces_sp,pos,Window,Ard_data,noi)
 
 scale=-15;
-vel_thresh=-10;
+vel_thresh=0;
 
-Virmen_data(:,5)=Virmen_data(:,5)-min(Virmen_data(:,5))+1;
-pos=pos-min(Virmen_data(:,5))+1;
-lap_length=max(Virmen_data(:,8));
-Virmen_data(:,8)=round(Virmen_data(:,8));
-%Ard_data(end-1:end,2:4)=repmat(Ard_data(end-2,2:4),2,1);
-lap_end=[0; find(abs(Virmen_data(2:end,8)-Virmen_data(1:end-1,8))>0); size(Virmen_data,1)];
+lap_length=max(Ard_data(:,2));
+Ard_data(end-1:end,2:4)=repmat(Ard_data(end-2,2:4),2,1);
+lap_end=[0; find(abs(Ard_data(2:end,2)-Ard_data(1:end-1,2))>6500); size(Ard_data,1)];
 laps=[lap_end(1:end-1)+1 lap_end(2:end)];
 
 for l=1:size(laps,1)
-lap_trace(laps(l,1):laps(l,2))=l; end
+lap_trace(laps(l,1):laps(l,2))=l; 
+cum_trace(laps(l,1):laps(l,2))=Ard_data(laps(l,1):laps(l,2),2)+lap_length*l; end
 
-cum_trace=movmean(Virmen_data(:,13),50);
-%cum_trace=cum_trace([1:1000:length(cum_trace)]);
-%cum_trace=interp1([1:1000:size(Virmen_data,1)],cum_trace,[1:size(Virmen_data,1)],'linear');
-vel_trace=(cum_trace(2:end)-cum_trace(1:end-1));
+cum_trace=movmean(cum_trace,6);
+vel_trace=(cum_trace(2:end)-cum_trace(1:end-1))/1.25*1000;
 vel_trace(end+1)=vel_trace(end);
 
 t=[1:size(traces_F,2)];
@@ -27,11 +23,11 @@ ax1=[];
 cmap=turbo(size(laps,1));
 
 % find the frames that passing the position
-b=bwlabel(Virmen_data(:,5)>pos);
+b=bwlabel(Ard_data(:,2)>pos);
 pos_reach_time=NaN(size(laps,1),1);
 
 for l=1:size(laps,1)
-[dist tmp]=min(abs(Virmen_data(laps(l,1)+25:laps(l,2)-25,5)-pos));
+[dist tmp]=min(abs(Ard_data(laps(l,1)+25:laps(l,2)-25,2)-pos));
 tmp=tmp+laps(l,1)-1+25;
 
 if dist>10 %not nearby

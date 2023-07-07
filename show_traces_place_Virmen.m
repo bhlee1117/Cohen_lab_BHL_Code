@@ -1,31 +1,23 @@
 function show_traces_place_Virmen(traces,spike,place_bin,Virmen_data,poi,noi)
 scale=-7;
-vel_thresh=0.001;
+vel_thresh=0;
 
-Virmen_data(:,3)=Virmen_data(:,3)-min(Virmen_data(:,3))+1;
-lap_length=max(Virmen_data(:,2));
+Virmen_data(:,5)=Virmen_data(:,5)-min(Virmen_data(:,5))+1;
+lap_length=max(Virmen_data(:,8));
+Virmen_data(:,8)=round(Virmen_data(:,8));
 %Ard_data(end-1:end,2:4)=repmat(Ard_data(end-2,2:4),2,1);
-lap_end=[0; find(abs(Virmen_data(2:end,4)-Virmen_data(1:end-1,4))>0); size(Virmen_data,1)];
+lap_end=[0; find(abs(Virmen_data(2:end,8)-Virmen_data(1:end-1,8))>0); size(Virmen_data,1)];
 laps=[lap_end(1:end-1)+1 lap_end(2:end)];
 
 for l=1:size(laps,1)
 lap_trace(laps(l,1):laps(l,2))=l; end
 
-cum_trace=Virmen_data(:,5);
-cum_trace=cum_trace([1:1000:length(cum_trace)]);
-cum_trace=interp1([1:1000:size(Virmen_data,1)],cum_trace,[1:size(Virmen_data,1)],'linear');
-vel_trace=(cum_trace(2:end)-cum_trace(1:end-1));
+cum_trace=Virmen_data(:,13);
+vel_trace=(cum_trace(2:end)-cum_trace(1:end-1))';
 vel_trace(end+1)=vel_trace(end);
 
-bw=bwlabel(Virmen_data(:,2));
-for b=1:max(bw)
-    tmp=find(bw==b);
-    R(b)=tmp(1);
-end
-reward_spot=mean(Virmen_data(R,3));
-
-lap_dist=max(Virmen_data(:,3));
-bin_dist=ceil(Virmen_data(:,3)/((lap_dist)/place_bin));
+lap_dist=max(Virmen_data(:,5));
+bin_dist=ceil(Virmen_data(:,5)/((lap_dist)/place_bin));
 cmap=jet(place_bin);
 spike_run=spike; spike_run(:,vel_trace<vel_thresh)=NaN;
 for p=1:place_bin
@@ -55,7 +47,7 @@ Lap_FR=NaN(max(lap_spot_stay(:)),place_bin,length(noi));
 for p=1:place_bin
     for l=1:max(lap_spot_stay(p,:))
         if ~isempty(find(lap_spot_stay(p,:)==l)) %only the laps the mouse went to the place bin
-    Lap_FR(l,p,:)=mean(spike_run(noi,find(lap_spot_stay(p,:)==l)),2,'omitnan')/(1.25*1e-3);
+    Lap_FR(l,p,:)=mean(spike_run(noi,find(lap_spot_stay(p,:)==l)),2,'omitnan')/(1*1e-3);
         end
     end
 end
@@ -65,6 +57,6 @@ end
 % arrayfun(@(l,c) set(l,'Color',c{:}),lines,num2cell(flipud(cmap),2))
 % text(zeros(1,size(laps,1)),[1:max(lap_spot_stay(:))]+1,num2str([max(lap_spot_stay(:)):-1:1]'))
 % axis tight off
-% linkaxes(ax1,'xy')
+ linkaxes(ax1,'xy')
 
 end

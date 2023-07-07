@@ -1,31 +1,25 @@
-function [trace_place SI bootstrap_SI]=traces2place(traces,place_bin,Virmen_data,vel_thresh,N_it)
+function [trace_place SI bootstrap_SI]=traces2place(traces,place_bin,Ard_data,vel_thresh,N_it)
 
-Virmen_data(:,3)=Virmen_data(:,3)-min(Virmen_data(:,3))+1;
-lap_length=max(Virmen_data(:,3));
-%Ard_data(end-1:end,2:4)=repmat(Ard_data(end-2,2:4),2,1);
-lap_end=[0; find(abs(Virmen_data(2:end,4)-Virmen_data(1:end-1,4))>0); size(Virmen_data,1)];
+lap_length=max(Ard_data(:,2));
+Ard_data(end-1:end,2:4)=repmat(Ard_data(end-2,2:4),2,1);
+lap_end=[0; find(abs(Ard_data(2:end,2)-Ard_data(1:end-1,2))>6500); size(Ard_data,1)];
 laps=[lap_end(1:end-1)+1 lap_end(2:end)];
 
 for l=1:size(laps,1)
-lap_trace(laps(l,1):laps(l,2))=l; end
+lap_trace(laps(l,1):laps(l,2))=l; 
+cum_trace(laps(l,1):laps(l,2))=Ard_data(laps(l,1):laps(l,2),2)+lap_length*l; end
 
-cum_trace=Virmen_data(:,5);
-cum_trace=cum_trace([1:300:length(cum_trace)]);
-cum_trace=interp1([1:300:size(Virmen_data,1)],cum_trace,[1:size(Virmen_data,1)],'linear');
-vel_trace=(cum_trace(2:end)-cum_trace(1:end-1));
+cum_trace=movmean(cum_trace,6);
+vel_trace=(cum_trace(2:end)-cum_trace(1:end-1))/1.25*1000;
 vel_trace(end+1)=vel_trace(end);
 
-bw=bwlabel(Virmen_data(:,2));
-for b=1:max(bw)
-    tmp=find(bw==b);
-    R(b)=tmp(1);
-end
-reward_spot=mean(Virmen_data(R,3));
+Ard_data(:,2)=Ard_data(:,2)-min(Ard_data(:,2))+1;
+reward_spot=mean(Ard_data(Ard_data(:,3)==1,2));
 
-lap_dist=max(Virmen_data(:,3));
-bin_dist=ceil(Virmen_data(:,3)/((lap_dist)/place_bin));
+lap_dist=max(Ard_data(:,2));
+bin_dist=ceil(Ard_data(:,2)/((lap_dist)/place_bin));
 cmap=jet(place_bin);
-disp(['Reward spot: ' num2str(ceil(reward_spot/((lap_dist)/place_bin))) 'th bin, Total laps: ' num2str(size(laps,1))])
+disp(['Total laps: ' num2str(size(laps,1))])
 traces_run=traces;
 %traces_run(zscore(traces,0,2)<-4)=NaN;
 traces_run(:,vel_trace<vel_thresh)=NaN;
@@ -33,7 +27,7 @@ trace_place=NaN(size(traces,1),place_bin);
 for p=1:place_bin
 spot_stay=find(bin_dist==p & (vel_trace>vel_thresh)'); 
 lap_spot_stay(p,:)=(bin_dist==p)'.*lap_trace;
-trace_place(:,p)=sum(traces_run(:,spot_stay),2,'omitnan')./(length(spot_stay)*1.25*1e-3); %divided by time resting in the place (even not walking)
+trace_place(:,p)=sum(traces_run(:,spot_stay),2,'omitnan')./(length(spot_stay)*1e-3); %divided by time resting in the place (even not walking)
 %trace_place(:,p)=sum(traces_run(:,spot_stay),2,'omitnan')./(1.25*1e-3); 
 %trace_place(:,p)=mean(traces_run(:,spot_stay),2,'omitnan')./(1.25*1e-3);
 %spatial information
@@ -41,7 +35,7 @@ trace_place(:,p)=sum(traces_run(:,spot_stay),2,'omitnan')./(length(spot_stay)*1.
 pi(p)=sum(bin_dist==p & (vel_trace>vel_thresh)')/sum((vel_trace>vel_thresh));
 end
 
-lambda=sum(traces_run,2,'omitnan')/sum(vel_trace>vel_thresh)*800;
+lambda=sum(traces_run,2,'omitnan')/sum(vel_trace>vel_thresh)*1000;
 SI=sum(pi.*trace_place.*log(trace_place./lambda)/log(2),2,'omitnan');
 
 nbytes = fprintf('processing iteration %0 of %d', N_it);
@@ -55,7 +49,7 @@ for it=1:N_it
 for p=1:place_bin
 spot_stay=find(bin_dist==p & (vel_trace>vel_thresh)'); 
 lap_spot_stay(p,:)=(bin_dist==p)'.*lap_trace;
-shuffle_trace_place(:,p)=sum(shuffle_trace(:,spot_stay),2,'omitnan')./(length(spot_stay)*1.25*1e-3); %divided by time resting in the place (even not walking)
+shuffle_trace_place(:,p)=sum(shuffle_trace(:,spot_stay),2,'omitnan')./(length(spot_stay)*1e-3); %divided by time resting in the place (even not walking)
 end
 fprintf(repmat('\b',1,nbytes))
 nbytes = fprintf('processing iteration %d of %d', it, N_it);

@@ -3,7 +3,7 @@ clc;
 
 [fpath] = uigetfile_n_dir();
 %%
-for i=2:length(fpath)
+for i=1:length(fpath)
 
     load(fullfile(fpath{i},"output_data.mat"))
     sz=double(Device_Data{1, 3}.ROI([2 4]));
@@ -25,7 +25,7 @@ for i=2:length(fpath)
     mov_test = movmean(mov_test,10,3);
     mov_ref = squeeze(median(mov_test,3));
 
-    for j=1:15%length(f_seg)-1
+    for j=1:length(f_seg)-1
         g=1;
         try
             mov=double(readBinMov_times([fpath{i} '/frames1.bin'],sz(2),sz(1),[f_seg(j):f_seg(j+1)+10]));

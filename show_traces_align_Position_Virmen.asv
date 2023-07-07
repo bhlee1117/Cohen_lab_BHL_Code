@@ -1,7 +1,7 @@
 function show_traces_align_Position_Virmen(traces_F,traces_sp,pos,Window,Virmen_data,noi)
 
-scale=-15;
-vel_thresh=-10;
+scale=-7;
+vel_thresh=0.001;
 
 Virmen_data(:,5)=Virmen_data(:,5)-min(Virmen_data(:,5))+1;
 pos=pos-min(Virmen_data(:,5))+1;
@@ -31,13 +31,17 @@ b=bwlabel(Virmen_data(:,5)>pos);
 pos_reach_time=NaN(size(laps,1),1);
 
 for l=1:size(laps,1)
-[dist tmp]=min(abs(Virmen_data(laps(l,1)+25:laps(l,2)-25,5)-pos));
-tmp=tmp+laps(l,1)-1+25;
+tmp=find(b(laps(l,1)+25:laps(l,2)-25)'==l);
+tmp=tmp+laps(l,1)-1;
 
-if dist>10 %not nearby
+if isempty(tmp) %truncated end
+pos_reach_time(l)=NaN;    
+b=b+1;
+else if abs(Virmen_data(tmp(1),5)-pos)>10 %late start
 pos_reach_time(l)=NaN;    
 else
 pos_reach_time(l)=tmp(1);
+end
 end
 end
 

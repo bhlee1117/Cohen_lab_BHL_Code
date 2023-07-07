@@ -1,29 +1,21 @@
 function [Lap_FR lap_spot_stay]=get_LapFR_Virmen(spike,place_bin,Virmen_data,vel_thresh,noi)
 
-Virmen_data(:,3)=Virmen_data(:,3)-min(Virmen_data(:,3))+1;
-lap_length=max(Virmen_data(:,3));
+Virmen_data(:,5)=Virmen_data(:,5)-min(Virmen_data(:,5))+1;
+lap_length=max(Virmen_data(:,8));
 %Ard_data(end-1:end,2:4)=repmat(Ard_data(end-2,2:4),2,1);
-lap_end=[0; find(abs(Virmen_data(2:end,4)-Virmen_data(1:end-1,4))>0); size(Virmen_data,1)];
+Virmen_data(:,8)=round(Virmen_data(:,8));
+lap_end=[0; find(abs(Virmen_data(2:end,8)-Virmen_data(1:end-1,8))>0); size(Virmen_data,1)];
 laps=[lap_end(1:end-1)+1 lap_end(2:end)];
 
 for l=1:size(laps,1)
 lap_trace(laps(l,1):laps(l,2))=l; end
 
-cum_trace=Virmen_data(:,5);
-cum_trace=cum_trace([1:300:length(cum_trace)]);
-cum_trace=interp1([1:300:size(Virmen_data,1)],cum_trace,[1:size(Virmen_data,1)],'linear');
-vel_trace=(cum_trace(2:end)-cum_trace(1:end-1));
+cum_trace=movmean(Virmen_data(:,13),50);
+vel_trace=(cum_trace(2:end)-cum_trace(1:end-1))';
 vel_trace(end+1)=vel_trace(end);
 
-bw=bwlabel(Virmen_data(:,2));
-for b=1:max(bw)
-    tmp=find(bw==b);
-    R(b)=tmp(1);
-end
-reward_spot=mean(Virmen_data(R,3));
-
-lap_dist=max(Virmen_data(:,3));
-bin_dist=ceil(Virmen_data(:,3)/((lap_dist)/place_bin));
+lap_dist=max(Virmen_data(:,5));
+bin_dist=ceil(Virmen_data(:,5)/((lap_dist)/place_bin));
 cmap=jet(place_bin);
 spike_run=spike; spike_run(:,vel_trace<vel_thresh)=NaN;
 for p=1:place_bin

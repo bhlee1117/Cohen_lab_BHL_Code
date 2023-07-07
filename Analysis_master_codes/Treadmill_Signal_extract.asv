@@ -116,9 +116,8 @@ save(save_name,'Result','fpath','-v7.3')
 
 
 %%
-lap_dist=115;
 
-for i=[2 3 5]%1:length(Result)
+for i=3%1:length(Result)
 
     fileList = dir(fullfile(fpath{i}, '*.data'));
     if ~isempty(fileList)
@@ -141,8 +140,7 @@ for i=[2 3 5]%1:length(Result)
         VRdata(5,:)=VRdata(5,:)-min(VRdata(5,:));
         cumTrack=[cumTrack VRdata(5,lap(1,1):lap(1,2))];
         for l2=2:size(lap,1)
-            %cumTrack=[cumTrack VRdata(5,lap(l2,1):lap(l2,2))+cumTrack(lap(l2,1)-1)];
-            cumTrack=[cumTrack VRdata(5,lap(l2,1):lap(l2,2))+lap_dist*(l2-1)];
+            cumTrack=[cumTrack VRdata(5,lap(l2,1):lap(l2,2))+cumTrack(lap(l2,1)-1)];
         end
 
         % load from DAQ
@@ -179,7 +177,7 @@ for i=[2 3 5]%1:length(Result)
         legend('Pos','Reward','blue')
         linkaxes(ax1,'x');
         Result{i}.Virmen=VRdata_IsAc_itp(:,CamTrigger)';
-        
+
     end
     tmp=squeeze(Result{i}.traces_res) - movmedian(squeeze(Result{i}.traces_res),10,2); tmp=tmp./get_threshold(tmp,1);
     Result{i}.spike=find_spike_bh(tmp,4,3);
