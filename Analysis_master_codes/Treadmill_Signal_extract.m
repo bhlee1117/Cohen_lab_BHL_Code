@@ -1,16 +1,18 @@
 clear
 [fpath] = uigetfile_n_dir;
-save_name='pcResult_20230706.mat';
+save_name='pcResult_20230714.mat';
 %%
-for i=5%:length(fpath)
+for i=14%:length(fpath)
+    disp(fpath{i})
     load([fpath{i} '/output_data.mat'])
     sz=double(Device_Data{1, 3}.ROI([2 4]));
     ref_time=[2000:3000];
     mov_test=double(readBinMov_times([fpath{i} '/mc' num2str(1,'%02d') '.bin'],sz(2),sz(1),ref_time));
     avgImg=mean(mov_test,3);
     [centers, radii]=Cell_segment_circle_10x_VU(avgImg,0.85);
-    Result{i}.centers=cell_detection_manual(mean(mov_test,3),centers,[0 9000]);
-    %Result{i}.centers=cell_detection_manual(mean(mov_test,3),Result{2}.centers+[1.3 -0.2],[0 9000]); %[x y]
+    %Result{i}.centers=cell_detection_manual(mean(mov_test,3),centers,[0 6000]);
+    shift=[1 0]; %[x y]
+    Result{i}.centers=cell_detection_manual(mean(mov_test,3),Result{i-1}.centers+shift,[0 9000]); 
 end
 save(save_name,'Result','fpath','-v7.3')
 
@@ -64,6 +66,9 @@ for i=1:length(fpath)
     % calculate footprint
     if frm_end<10000; end_frame=size(mov_mc,3); else end_frame=10000; end
     Result{i}.c_ftprnt=mask_footprint(Result{i}.centers,movmean(mov_res(:,:,1000:end),10,3),[],6);
+    for n=1:size(Result{i}.c_ftprnt,3)
+        Result{i}.c_ftprnt(:,:,n)=imgaussfilt(Result{i}.c_ftprnt(:,:,n),0.6);
+    end
     N=size(Result{i}.c_ftprnt,3);
     Result{i}.coord=get_coord(Result{i}.c_ftprnt);
     Result{i}.traces=[Result{i}.traces -(tovec(mov_res(:,:,1:end_frame))'*tovec(Result{i}.c_ftprnt))'];
@@ -118,7 +123,7 @@ save(save_name,'Result','fpath','-v7.3')
 %%
 lap_dist=115;
 
-for i=[2 3 5]%1:length(Result)
+for i=1:length(Result)
 
     fileList = dir(fullfile(fpath{i}, '*.data'));
     if ~isempty(fileList)
