@@ -1,6 +1,6 @@
 
 clear
-cd /Users/bhlee1117/Documents/BHL/Matlab_project/20230614_Adaptation
+cd('/Volumes/cohen_lab/Lab/Labmembers/Byung Hun Lee/Data/20230408_BU_BHLm026')
 load('20230521_Adaptation_result_BHLm2526.mat')
 % NiceNeuronList=sum(1-cellfun(@isempty,Result),2);
 % list_pyr=find(NiceNeuronList>1)';
@@ -211,7 +211,47 @@ for i=1:size(NiceNeuronList,2)
         g=g+1;
     end     
 end
+%% plot each pulses
+cmap=distinguishable_colors(2);
+figure(1);  clf;
+bin_size=100;
+clear CS_trace SS_trace totalSpike
+ax1=[];
+ax3=[];
+for p=1:5
 
+CS_trace=FineSpikes(:,:,p);
+CS_trace(Transient_traces(:,:,p)==0)=0;
+
+SS_trace=FineSpikes(:,:,p);
+SS_trace(Transient_traces(:,:,p)~=0)=0;
+
+totalSpike=sum(FineSpikes(:,:,p),2);
+
+ax1=[ax1 subplot(2,5,p)];
+CS=movsum(CS_trace,bin_size,2); CS=CS(:,[1:bin_size:end]);
+SS=movsum(SS_trace,bin_size,2); SS=SS(:,[1:bin_size:end]);
+
+plot([1:bin_size:size(FineSpikes,2)]/1000,mean(CS,1,'omitnan'),'marker','*','color',cmap(1,:))
+hold all
+plot([1:bin_size:size(FineSpikes,2)]/1000,mean(SS,1,'omitnan'),'marker','*','color',cmap(2,:))
+xlabel('Time (sec)')
+ylabel('Number of spikes')
+
+ax3=[ax3 subplot(2,5,5+p)];
+
+CS_frac=CS./totalSpike; SS_frac=SS./totalSpike;
+plot([1:bin_size:size(FineSpikes,2)]/1000,mean(CS_frac,1,'omitnan'),'marker','*','color',cmap(1,:))
+hold all
+plot([1:bin_size:size(FineSpikes,2)]/1000,mean(SS_frac,1,'omitnan'),'marker','*','color',cmap(2,:))
+xlabel('Time (sec)')
+ylabel('Fraction of spikes')
+
+end
+linkaxes(ax1,'y')
+linkaxes(ax3,'y')
+
+%% plot versus normalized blue
 Blue_bin=[0 3 6 10 15 30]; cmap=jet(length(Blue_bin)-1);
 figure; 
 bin_size=100;
