@@ -34,10 +34,10 @@ toc
 [d1,d2,T] = size(mov);                                % dimensions of dataset
 d = d1*d2;          
 
-% gSig = 4; 
-% gSiz = 7; 
-gSig = 7; 
-gSiz = 12; 
+ gSig = 2; 
+ gSiz = 5; 
+%gSig = 7; 
+%gSiz = 12; 
 psf = fspecial('gaussian', round(gSiz), gSig);
 ind_nonzero = (psf(:)>=max(psf(:,1)));
 psf = psf-mean(psf(ind_nonzero));
@@ -53,7 +53,7 @@ bound = 2*ceil(gSiz/2);
 %     'overlap_pre',32,'overlap_post',32,'max_shift',20);
 
 options_rigid = NoRMCorreSetParms('d1',d1-bound,'d2',d2-bound,'bin_width',200, ...
-    'grid_size',[64,64],'mot_uf',4,'correct_bidir',false, ...
+    'grid_size',[64, 64],'mot_uf',4,'correct_bidir',false, ...
     'overlap_pre',32,'overlap_post',32,'max_shift',40);
     
 tic; 
@@ -68,7 +68,7 @@ shifts_nr = reshape(shifts_nr,[],ndims(Y)-1,T);
 shifts_x = squeeze(shifts_nr(:,2,:))';
 shifts_y = squeeze(shifts_nr(:,1,:))';
 
-flow_xy=shifts2;
+flow_xy=[shifts_x; shifts_y];
 % apply the shifts to the removed percentile
 
 

@@ -3,8 +3,7 @@ clear
 cd /Volumes/BHL_WD18TB/20230706_BHLm025_VR
 load('pcResult_20230714.mat')
 %%
-for i=1%:length(fpath)
-    Result{i}.spike=zeros(size(Result{i}.traces));
+for i=1:length(fpath)
 %     tmp=squeeze(Result{i}.traces_res) - movmedian(squeeze(Result{i}.traces_res),10,2); tmp=tmp./get_threshold(tmp,1);
 %     Result{i}.spike=find_spike_bh(tmp,4,3);
     tmp=squeeze(Result{i}.traces_res) - movmedian(squeeze(Result{i}.traces_res),150,2); tmp=tmp./get_threshold(tmp,1);
@@ -73,11 +72,8 @@ traces_sp(:,rmv_frame)=[]; traces_F(:,rmv_frame)=[];
 Virmen_align(rmv_frame,:)=[];
 Lick_trace=zeros(size(Virmen_align,1),1);
 Lick_trace(find(rescale(Virmen_align(:,9))>0.4 & rescale(Virmen_align(:,9)) <0.5))=1;
-figure(1); clf;
-    show_traces_spikes(traces_F,traces_sp,Virmen_align(:,5))
 
-    figure(2); clf;
-    show_footprnt(Result{goi}.c_ftprnt,Result{goi}.ref_im);
+    show_traces_spikes(traces_F,traces_sp,Virmen_align(:,5))
     %show_traces_spikes(traces_F([18 19 22],:),traces_sp([18 19 22],:),Virmen_align(:,5))
 
 

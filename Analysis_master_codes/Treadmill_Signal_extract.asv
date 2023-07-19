@@ -67,7 +67,7 @@ for i=1:length(fpath)
     if frm_end<10000; end_frame=size(mov_mc,3); else end_frame=10000; end
     Result{i}.c_ftprnt=mask_footprint(Result{i}.centers,movmean(mov_res(:,:,1000:end),10,3),[],6);
     for n=1:size(Result{i}.c_ftprnt,3)
-        Result{i}.c_ftprnt(:,:,n)=imguassfilt(Result{i}.c_ftprnt,1);
+        Result{i}.c_ftprnt(:,:,n)=imgaussfilt(Result{i}.c_ftprnt(:,:,n),0.6);
     end
     N=size(Result{i}.c_ftprnt,3);
     Result{i}.coord=get_coord(Result{i}.c_ftprnt);
@@ -123,7 +123,7 @@ save(save_name,'Result','fpath','-v7.3')
 %%
 lap_dist=115;
 
-for i=[2 3 5]%1:length(Result)
+for i=1:length(Result)
 
     fileList = dir(fullfile(fpath{i}, '*.data'));
     if ~isempty(fileList)
@@ -186,10 +186,6 @@ for i=[2 3 5]%1:length(Result)
         Result{i}.Virmen=VRdata_IsAc_itp(:,CamTrigger)';
         
     end
-    tmp=squeeze(Result{i}.traces_res) - movmedian(squeeze(Result{i}.traces_res),10,2); tmp=tmp./get_threshold(tmp,1);
-    Result{i}.spike=find_spike_bh(tmp,4,3);
-    tmp=squeeze(Result{i}.traces_res) - movmedian(squeeze(Result{i}.traces_res),150,2); tmp=tmp./get_threshold(tmp,1);
-    Result{i}.spike=(Result{i}.spike+find_spike_bh(tmp,3.2,1.5))>0;
 
 end
 

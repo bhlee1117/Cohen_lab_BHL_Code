@@ -1,27 +1,102 @@
 clear
 [fpath] = uigetfile_n_dir;
-save_name='pcResult_20230714.mat';
+save_name='pcResult_20230716.mat';
 %%
-for i=14%:length(fpath)
-    disp(fpath{i})
-    load([fpath{i} '/output_data.mat'])
-    sz=double(Device_Data{1, 3}.ROI([2 4]));
-    ref_time=[2000:3000];
-    mov_test=double(readBinMov_times([fpath{i} '/mc' num2str(1,'%02d') '.bin'],sz(2),sz(1),ref_time));
-    avgImg=mean(mov_test,3);
-    [centers, radii]=Cell_segment_circle_10x_VU(avgImg,0.85);
-    %Result{i}.centers=cell_detection_manual(mean(mov_test,3),centers,[0 6000]);
-    shift=[1 0]; %[x y]
-    Result{i}.centers=cell_detection_manual(mean(mov_test,3),Result{i-1}.centers+shift,[0 9000]); 
-end
-save(save_name,'Result','fpath','-v7.3')
+time_size=150000;
+block_size=15;
+DAQ_rate=0.000005;
 
+for i=1:length(fpath)
+    load(fullfile(fpath{i},'mcTrace.mat'))
+    Result{i}.centers=CellCoordinate;
+    Result{i}.fpath=fpath{i};
+    disp(['loading  ' fpath{i}])
+    load([fpath{i} '/output_data.mat'])
+    try
+        Result{i}.Blue=Device_Data{1, 2}.buffered_tasks(1, 1).channels(1, 2).data;
+    end
+    try
+        Result{i}.Reward=Device_Data{1, 2}.buffered_tasks(1, 3).channels.data;
+    end
+
+    CamCounter=Device_Data{1, 2}.Counter_Inputs(1, 1).data;
+    CamTrigger=find(CamCounter(2:end)-CamCounter(1:end-1));
+    Result{i}.frm_rate=double((CamTrigger(2)-CamTrigger(1))*DAQ_rate);
+    sz=double(Device_Data{1, 3}.ROI([2 4]));
+    t_seg=[[1:time_size:length(CamTrigger)] length(CamTrigger)+1];
+    t_seg=[t_seg(1:end-1)' t_seg(2:end)'+100];
+    t_seg(end)=length(CamTrigger);
+
+    Result{i}.traces=[];
+    Result{i}.traces_res=[];
+    Result{i}.im_corr=[];
+    Result{i}.mcTrace=[];
+
+    for n=1:size(Result{i}.centers,1)
+
+        
+        mov=double(readBinMov([fpath{i} '/mc' num2str(n,'%02d') '_' num2str(1,'%02d') '.bin'], ...
+            bs(n)*2+1,bs(n)*2+1));
+        mov_res= mov-mean(mov,3);
+        bkg = zeros(2, size(mov,3));
+        bkg(1,:) = linspace(-1, 1, size(mov,3));  % linear term
+        bkg(2,:) = linspace(-1, 1, size(mov,3)).^2;  % quadratic term
+        mov_res=SeeResiduals(mov_res,mcTrace_block{n,1});
+        mov_res= SeeResiduals(mov_res,bkg,1);
+        
+
+        Result{i}.ref_im(1:2*bs(n)+1,1:2*bs(n)+1,n)=mean(mov,3);
+        ref_im_vec=tovec(Result{i}.ref_im(1:2*bs(n)+1,1:2*bs(n)+1,n));
+        ref_im_vec=(ref_im_vec-mean(ref_im_vec,1))./std(ref_im_vec,0,1);
+        mov_mc_vec=tovec(mov);
+        mov_mc_vec=(mov_mc_vec-mean(mov_mc_vec,1))./std(mov_mc_vec,0,1);
+        Result{i}.im_corr{n}=[];
+        Result{i}.im_corr{n}=[Result{i}.im_corr{n} sum(mov_mc_vec.*ref_im_vec,1)/(size(mov_mc_vec,1)-1)];
+
+
+        Result{i}.c_ftprnt(1:2*bs(n)+1,1:2*bs(n)+1,n)=mask_footprint([bs(n)+0.5 bs(n)+0.5],movmean(mov_res(:,:,1000:end-1000),10,3),[],8);
+        Result{i}.c_ftprnt(1:2*bs(n)+1,1:2*bs(n)+1,n)=imgaussfilt(Result{i}.c_ftprnt(1:2*bs(n)+1,1:2*bs(n)+1,n),0.6);
+
+        for t=2:size(t_seg,1)
+        Result{i}.traces(n,t_seg(t-1,1):t_seg(t-1,2)-101)=-(tovec(mov_res(:,:,1:time_size))'*tovec(Result{i}.c_ftprnt(1:2*bs(n)+1,1:2*bs(n)+1,n)))';
+        Result{i}.mcTrace(:,t_seg(t-1,1):t_seg(t-1,2)-101,n)=mcTrace_block{n,t-1}(:,1:time_size);
+
+        mov=double(readBinMov([fpath{i} '/mc' num2str(n,'%02d') '_' num2str(t,'%02d') '.bin'], ...
+                bs(n)*2+1,bs(n)*2+1));
+
+        mov_res= mov-mean(mov,3);
+        bkg = zeros(2, size(mov,3));
+        bkg(1,:) = linspace(-1, 1, size(mov,3));  % linear term
+        bkg(2,:) = linspace(-1, 1, size(mov,3)).^2;  % quadratic term
+        mov_res=SeeResiduals(mov_res,mcTrace_block{n,t});
+        mov_res= SeeResiduals(mov_res,bkg,1);
+
+        mov_mc_vec=tovec(mov);
+        mov_mc_vec=(mov_mc_vec-mean(mov_mc_vec,1))./std(mov_mc_vec,0,1);
+        Result{i}.im_corr{n}=[Result{i}.im_corr{n} sum(mov_mc_vec.*ref_im_vec,1)/(size(mov_mc_vec,1)-1)];
+
+        end
+        Result{i}.traces(n,t_seg(end,1):t_seg(end,2))=-(tovec(mov_res)'*tovec(Result{i}.c_ftprnt(1:2*bs(n)+1,1:2*bs(n)+1,n)))';
+        Result{i}.mcTrace(:,t_seg(end,1):t_seg(end,2),n)=mcTrace_block{n,end};
+    end
+
+
+ for n=1:size(Result{i}.centers,1)
+     
+ end
+
+  
+
+end
+
+
+    save(save_name,'Result','fpath','-v7.3')
 %% Signal extraction
 
 
 DAQ_rate=0.000005;
 
-for i=1%:length(fpath)
+for i=1:length(fpath)
 
 
     %load device data
@@ -184,7 +259,7 @@ for i=1:length(Result)
         legend('Pos','Reward','blue')
         linkaxes(ax1,'x');
         Result{i}.Virmen=VRdata_IsAc_itp(:,CamTrigger)';
-        
+
     end
 
 end
