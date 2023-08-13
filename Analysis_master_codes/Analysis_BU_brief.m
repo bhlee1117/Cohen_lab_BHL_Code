@@ -6,7 +6,7 @@ clear
 %%
 
 DAQ_rate=0.00001;
-for i=2:length(fpath)
+for i=1:length(fpath)
 load([fpath{i} '/output_data.mat'])
 Blue=Device_Data{1, 2}.buffered_tasks(1, 1).channels(1, 2).data;
 Airp=Device_Data{1, 2}.buffered_tasks(1, 1).channels(1, 3).data;

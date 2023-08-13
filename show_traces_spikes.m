@@ -26,6 +26,7 @@ set(gca,'ytick',[1:size(noi,2)]*scale,'yticklabel',noi)
 
 ax2=subplot(10,1,9:10);
 plot(t,otherT)
+ylim([min(otherT(:)) max(otherT(:))])
 
 linkaxes([ax1 ax2],'x')
 end

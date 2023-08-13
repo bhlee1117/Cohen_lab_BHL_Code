@@ -45,7 +45,7 @@ for j = 1:nROI2
 
 %     mask = mat2gray(sum(V(:,1:n_comp).*D(1:n_comp)'.*(V(:,1:n_comp)>0),2));
     mask = mat2gray(mean(abs(V(:,1:n_comp)).*D(1:n_comp)',2));
-    mask=imgaussfilt(mask,rad/6);
+    %mask=imgaussfilt(mask,rad/10);
     c_ftprnt(stats2(j).PixelIdxList,j) = mask;
     
 %     pause

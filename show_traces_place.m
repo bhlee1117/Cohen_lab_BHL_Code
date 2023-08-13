@@ -1,32 +1,25 @@
-function show_traces_place(traces,spike,place_bin,Virmen_align,poi,noi)
+function show_traces_place(traces,spike,place_bin,Ard_data,poi,noi)
 scale=-7;
 vel_thresh=0;
 
-Virmen_align(:,2)=Virmen_align(:,2)-min(Virmen_align(:,2))+1;
-lap_length=max(Virmen_data(:,2));
-%Ard_data(end-1:end,2:4)=repmat(Ard_data(end-2,2:4),2,1);
-lap_end=[0; find(abs(Virmen_data(2:end,4)-Virmen_data(1:end-1,4))>0); size(Virmen_data,1)];
+lap_length=max(Ard_data(:,2));
+Ard_data(end-1:end,2:4)=repmat(Ard_data(end-2,2:4),2,1);
+lap_end=[0; find(abs(Ard_data(2:end,2)-Ard_data(1:end-1,2))>6500); size(Ard_data,1)];
 laps=[lap_end(1:end-1)+1 lap_end(2:end)];
 
 for l=1:size(laps,1)
-lap_trace(laps(l,1):laps(l,2))=l; end
+lap_trace(laps(l,1):laps(l,2))=l; 
+cum_trace(laps(l,1):laps(l,2))=Ard_data(laps(l,1):laps(l,2),2)+lap_length*l; end
 
-cum_trace=Virmen_data(:,5);
-cum_trace=cum_trace([1:300:length(cum_trace)]);
-cum_trace=interp1([1:300:size(Virmen_data,1)],cum_trace,[1:size(Virmen_data,1)],'linear');
-vel_trace=(cum_trace(2:end)-cum_trace(1:end-1));
+cum_trace=movmean(cum_trace,6);
+vel_trace=(cum_trace(2:end)-cum_trace(1:end-1))/1.25*1000;
 vel_trace(end+1)=vel_trace(end);
-Virmen_data(:,3)=Virmen_data(:,3)-min(Virmen_data(:,3))+1;
+Ard_data(:,2)=Ard_data(:,2)-min(Ard_data(:,2))+1;
+reward_spot=mean(Ard_data(Ard_data(:,3)==1,2));
 
-bw=bwlabel(Virmen_data(:,2));
-for b=1:max(bw)
-    tmp=find(bw==b);
-    R(b)=tmp(1);
-end
-reward_spot=mean(Virmen_data(R,3));
 
-lap_dist=max(Virmen_data(:,3));
-bin_dist=ceil(Virmen_data(:,3)/((lap_dist)/place_bin));
+lap_dist=max(Ard_data(:,2));
+bin_dist=ceil(Ard_data(:,2)/((lap_dist)/place_bin));
 cmap=jet(place_bin);
 spike_run=spike; spike_run(:,vel_trace<vel_thresh)=NaN;
 for p=1:place_bin
@@ -66,6 +59,6 @@ end
 % arrayfun(@(l,c) set(l,'Color',c{:}),lines,num2cell(flipud(cmap),2))
 % text(zeros(1,size(laps,1)),[1:max(lap_spot_stay(:))]+1,num2str([max(lap_spot_stay(:)):-1:1]'))
 % axis tight off
-% linkaxes(ax1,'xy')
+ linkaxes(ax1,'xy')
 
 end

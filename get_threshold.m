@@ -2,7 +2,7 @@ function thres=get_threshold(volt_hp,ratio,bin)
 if nargin<2
     ratio=2.7;
 else if nargin<3
-        bin=100;
+        bin=20;
 end
 end
 %[cum bin]=histcounts(volt_hp-median(volt_hp),'Normalization','cumcount'); %cumulative count
@@ -18,8 +18,8 @@ end
 %plot(fitresult,bin,cum)
 %s=sort(volt_hp,'descend');
 %thres=s(round(size(volt_hp,2)-fitresult.c));
-volt_hp = volt_hp - movmean(volt_hp, 5);
-%volt_hp=volt_hp-movmedian(volt_hp,bin,2);
+%volt_hp = volt_hp - movmean(volt_hp, 5);
+volt_hp=volt_hp-movmedian(volt_hp,bin,2);
 for i=1:size(volt_hp,1)    
 t=find(volt_hp(i,:)<0);
 s=std([volt_hp(i,t) -volt_hp(i,t)]);
