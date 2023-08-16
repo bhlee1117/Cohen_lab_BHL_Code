@@ -4,16 +4,20 @@
 clear
 [fpath] = uigetfile_n_dir;
 %%
-for i=1:length(fpath)
+for i=9:length(fpath)
     load([fpath{i} '/output_data.mat'])
     load([fpath{i} '/mcTrace.mat'],'mcTrace')
     sz=double(Device_Data{1, 4}.ROI([2 4]));
     mov_mc=double(readBinMov([fpath{i} '/mc.bin'],sz(2),sz(1)));
     Blue=Device_Data{1, 2}.buffered_tasks(1, 1).channels(1, 2).data;
-    Blue=Device_Data{1, 2}.buffered_tasks(1, 1).channels(1, 2).data;
-    Encoder=Device_Data{1, 2}.buffered_tasks(1, 3).channels;
+    Blue_shutter=Device_Data{1, 2}.buffered_tasks(1, 2).channels(1, 1).data;
+    Blue=Blue.*Blue_shutter;
+    Encoder=Device_Data{1, 2}.buffered_tasks(1, 3).channels.data;
+    Encoder=movsum([0 abs(Encoder(2:end)-Encoder(1:end-1))],100);
     CamTrigger=find(Device_Data{1, 2}.Counter_Inputs.data(2:end)-Device_Data{1, 2}.Counter_Inputs.data(1:end-1));
     Blue=Blue(CamTrigger);
+    Encoder=Encoder(CamTrigger);
+
     nFrames=size(mov_mc,3);
     T_mean=squeeze(mean(mov_mc,[1 2]));
     avgImg=mean(mov_mc,3);
@@ -36,6 +40,7 @@ c_ftprnt=mask_footprint(sz/2,mov_res,[],40);
 Result{i}.c_ftprnt=imgaussfilt(c_ftprnt,2.5);
 Result{i}.trace=[(tovec(mov_res)'*tovec(Result{i}.c_ftprnt))'];
 Result{i}.Blue=Blue;
+Result{i}.Encoder=Encoder;
 Result{i}.ref_im=avgImg;
 
 end

@@ -34,30 +34,33 @@ toc
 [d1,d2,T] = size(mov);                                % dimensions of dataset
 d = d1*d2;          
 
- gSig = 2; 
- gSiz = 5; 
-%gSig = 7; 
-%gSiz = 12; 
+ %gSig = 3; 
+ %gSiz = 6; 
+gSig = 7; 
+gSiz = 15; 
 psf = fspecial('gaussian', round(gSiz), gSig);
 ind_nonzero = (psf(:)>=max(psf(:,1)));
 psf = psf-mean(psf(ind_nonzero));
 psf(~ind_nonzero) = 0;   % only use pixels within the center disk
 Y = imfilter(single(mov),psf,'same');
+%Y = single(mov);
 %Ypc = Yf - Y;
 bound = 2*ceil(gSiz/2);
 
 
 %total number of pixels
-% options_rigid = NoRMCorreSetParms('d1',d1-bound,'d2',d2-bound,'bin_width',200, ...
-%     'grid_size',[128,128],'mot_uf',4,'correct_bidir',false, ...
-%     'overlap_pre',32,'overlap_post',32,'max_shift',20);
-
 options_rigid = NoRMCorreSetParms('d1',d1-bound,'d2',d2-bound,'bin_width',200, ...
-    'grid_size',[64, 64],'mot_uf',4,'correct_bidir',false, ...
-    'overlap_pre',32,'overlap_post',32,'max_shift',40);
+    'grid_size',[150,150],'mot_uf',4,'correct_bidir',false, ...
+    'overlap_pre',32,'overlap_post',32,'max_shift',50);
+
+%options_rigid = NoRMCorreSetParms('d1',d1-bound,'d2',d2-bound,'bin_width',200,'max_shift',50);
+
+% options_rigid = NoRMCorreSetParms('d1',d1-bound,'d2',d2-bound,'bin_width',200, ...
+%     'grid_size',[50, 50],'mot_uf',4,'correct_bidir',false, ...
+%     'overlap_pre',32,'overlap_post',32,'max_shift',40);
     
 tic; 
-[M2,shifts2,template2] = normcorre(Y(bound/2+1:end-bound/2,bound/2+1:end-bound/2,:),options_rigid,mov_temp(bound/2+1:end-bound/2,bound/2+1:end-bound/2,:)); 
+[mov_mc,shifts2,template2] = normcorre(Y(bound/2+1:end-bound/2,bound/2+1:end-bound/2,:),options_rigid,mov_temp(bound/2+1:end-bound/2,bound/2+1:end-bound/2,:)); 
 toc 
 
 tic; mov_mc = apply_shifts(mov,shifts2,options_rigid,bound/2,bound/2); toc 
@@ -68,7 +71,14 @@ shifts_nr = reshape(shifts_nr,[],ndims(Y)-1,T);
 shifts_x = squeeze(shifts_nr(:,2,:))';
 shifts_y = squeeze(shifts_nr(:,1,:))';
 
+if size(shifts_y,1) > size(shifts_y,2)
+flow_xy=[shifts_x shifts_y];
+else
 flow_xy=[shifts_x; shifts_y];
+flow_xy=flow_xy';
+end
+
+
 % apply the shifts to the removed percentile
 
 
