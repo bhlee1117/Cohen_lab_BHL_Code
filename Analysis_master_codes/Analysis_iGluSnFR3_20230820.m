@@ -66,7 +66,38 @@ writeMov_wTrace([fpath{i} ,'_imcorr'],dFF_filt,[],100,0.1,[0 0.1],[],imcorr)
 end
 
 %%
-i=1;
+i=7;
 load([fpath{i} '/output_data.mat'])
-    sz=double(Device_Data{1, 4}.ROI([2 4]));
-    mov=double(readBinMov([fpath{i} '/frames1.bin'],sz(2),sz(1)));
+sz=double(Device_Data{1, 4}.ROI([2 4]));
+mov_mc=double(readBinMov([fpath{i} '/mc.bin'],sz(2),sz(1)));
+mov_mc=mov_mc-median(mov_mc);
+bkground=movmean(squeeze(median(mov_mc,[1 2])),300);
+mov_mc=SeeResiduals(mov_mc,bkground);
+MovFilt=imgaussfilt3(mov_mc(:,:,1:1000),[2 2 10]);
+resize_factor=0.25;
+
+MovFilt_resz=imresize(MovFilt,resize_factor);
+d=size(MovFilt_resz);
+MovVec=tovec(MovFilt_resz);
+covMat = MovVec*MovVec';
+[V, D] = eig(covMat);   
+D = diag(D);
+D = D(end:-1:1);
+V = V(:,end:-1:1);
+vSign = sign(max(V) - max(-V));  % make the largest value always positive
+V = V.*vSign;
+
+eigImgs = toimg(V,d(1),d(2));
+for ind=1:20; nexttile([1 1]); imshow2(eigImgs(:,:,ind),[]); title(num2str(ind)); end
+nexttile([1 1]);
+for ind=1:20
+plot(rescale(MovVec'*V(:,ind))+ind)
+hold all
+end
+
+pca_ind=[1:5];
+footprint = mat2gray(toimg(mean(abs(V(:,pca_ind)).*D(pca_ind)',2), d(1), d(2)));
+reconMov=mat2gray(MovFilt.*imresize(footprint,sz([2 1])));
+dFF_recon=reconMov-mean(reconMov,3);
+moviefixsc(dFF_recon./imgaussfilt(imresize(footprint,sz([2 1])),2),[0 0.1])
+

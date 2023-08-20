@@ -7,7 +7,7 @@ ref_im=ref_im./max(ref_im(:));
 %mov_im=-movmean((mov_mc-movmean(mov_mc,150,3)),20,3);
 mov_im=mov_im./reshape(range(tovec(mov_im),1),1,1,[]);
 mov_im(mov_im<0)=0; 
-mov_im=mov_im*1/prctile(mov_im(:),99.999);
+mov_im=mov_im*1/prctile(mov_im(:),99);
 cmap=[0.4 0.4 0.4; 1 0 0];
 %%
 mov_merge=zeros(size(ref_im,1),size(ref_im,2),size(mov_im,3),3);
@@ -27,7 +27,7 @@ for i=1:size(mov_merge,3)
     clf;
     imagesc(squeeze(mov_merge(:,:,i,:)),[0 3])
     axis equal tight off
-    title([num2str(i/100,'%2.2f') ' sec'])
+    title([num2str(i/50,'%2.2f') ' sec'])
     hold all;
      if ~isempty(Dwave)
 text(5,-12,['blue int:' num2str(Dwave(i))],'color',[0 0.6 1],'FontSize',12,'HorizontalAlignment','left')
