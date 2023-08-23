@@ -243,16 +243,13 @@ end
         ax2=nexttile([1 1]);
         errorbar([1:Bin_number],mean(CS_bin./Spike_bin,1,'omitnan'),std(CS_bin./Spike_bin,0,1,'omitnan')/sqrt(size(V2Result,1)), ...
             'color',[0.7 0 0.3],'marker','+','linewidth',3);
-        hold all
-        errorbar([1:Bin_number],mean((Spike_bin-CS_bin)./Spike_bin,1,'omitnan'),std((Spike_bin-CS_bin)./Spike_bin,0,1,'omitnan')/sqrt(size(V2Result,1)), ...
-            'color',[0 0.1 0.3],'marker','+','linewidth',3);
         linkaxes([ax1 ax2],'x')
         xlim([0.5 31])
         
-        xlabel('Time after stimulation onset (ms)')
+        xlabel('Time (ms)')
         ylabel('Fraction of Complex Spikes')
         set(gca,'xtick',[0:5:Bin_number],'xticklabel',[0:5:Bin_number]*6000/Bin_number,'Fontsize',15)
-        set(f1, 'Position', [100, 100, 600, 300]);
+        set(f1, 'Position', [100, 100, 400, 600]);
         saveas(f1,[save_to '/Ramp_CSratio_Time.fig'])
         print(f1, [save_to '/Ramp_CSratio_Time.jpg'],'-djpeg', ['-r', num2str(600)]);
 
