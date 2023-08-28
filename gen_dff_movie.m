@@ -3,12 +3,14 @@ if nargin<4
     Dwave=[];
 end
 %ref_im=mean(mov_mc,3); 
-ref_im=ref_im./max(ref_im(:));
+ref_im=ref_im-prctile(ref_im(:),5);
+ref_im=ref_im./prctile(ref_im(:),99.9);
 %mov_im=-movmean((mov_mc-movmean(mov_mc,150,3)),20,3);
-mov_im=mov_im./reshape(range(tovec(mov_im),1),1,1,[]);
+%mov_im(mov_im<0)=0; 
+mov_im=mov_im-prctile(ref_im(:),5);
 mov_im(mov_im<0)=0; 
-mov_im=mov_im*1/prctile(mov_im(:),99);
-cmap=[0.4 0.4 0.4; 1 0 0];
+mov_im=mov_im*1/prctile(mov_im(:),99.9);
+cmap=[1 1 1; 1 0 0];
 %%
 mov_merge=zeros(size(ref_im,1),size(ref_im,2),size(mov_im,3),3);
 

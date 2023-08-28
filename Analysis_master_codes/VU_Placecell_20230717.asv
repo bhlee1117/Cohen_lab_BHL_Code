@@ -183,9 +183,8 @@ Lap_V=[Lap_V; V*mperVR;];
 
 end
 %%
-for noi=1:size(ROI,1)
-figure(noi); clf;
-tiledlayout(2,6)
+for noi=1:size(ROI,1);
+figure(3); clf;
 ax1=[];
 ax1=[ax1 nexttile([1 1])];
 imagesc(Lap_FR(:,:,noi)); hold all;
@@ -211,7 +210,7 @@ plot(mean(Lap_V,1,'omitnan'))
 linkaxes(ax1,'x')
 axis tight
 
-nexttile([1 6])
+nexttile([1 1])
 t_DAQ_scaled=[t_VR(1): (t_VR(end)-t_VR(1))/(size(mov_trace,2)-1):t_VR(end)];
 plot(t_DAQ_scaled,mov_trace_hi(noi,:),'k',t_DAQ_scaled(find(sp(noi,:))),mov_trace_hi(noi,find(sp(noi,:))),'r.')
 hold all
@@ -219,6 +218,6 @@ plot(t_VR,VRdata(12,:)*15)
 plot(t_VR,rescale(VRdata(5,:))*15)
 
 filename=char(VirFile);
-saveas(gca,[filename(1:end-5) '_' num2str(noi) '.fig'])
+saveas(gca,[filename(1:end-5) num2str'.fig'])
 
 end

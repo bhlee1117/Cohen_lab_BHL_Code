@@ -1,5 +1,4 @@
-% Analysis on AAV expression sample and plot, in house YQ201
-% 2023/07/11, Byung Hun Lee
+% Analysis on AAV expression sample and plot, iGluSnFR3 in vivo imaging
 
 clear
 [fpath] = uigetfile_n_dir;
@@ -66,15 +65,16 @@ writeMov_wTrace([fpath{i} ,'_imcorr'],dFF_filt,[],100,0.1,[0 0.1],[],imcorr)
 end
 
 %%
-i=7;
+i=1; edgebound=10;
 load([fpath{i} '/output_data.mat'])
 sz=double(Device_Data{1, 4}.ROI([2 4]));
 mov_mc=double(readBinMov([fpath{i} '/mc.bin'],sz(2),sz(1)));
 mov_mc=mov_mc-median(mov_mc);
-bkground=movmean(squeeze(median(mov_mc,[1 2])),300);
-mov_mc=SeeResiduals(mov_mc,bkground);
-MovFilt=imgaussfilt3(mov_mc(:,:,1:1000),[2 2 10]);
-resize_factor=0.25;
+ROI=[200 100 300 300];
+mov_mc=mov_mc(ROI(1):ROI(1)+ROI(3),ROI(2):ROI(2)+ROI(4),:);
+mov_mc=mov_mc(edgebound:end-edgebound,edgebound:end-edgebound,1:1000);
+MovFilt=imgaussfilt3(mov_mc,[2 2 1]);
+resize_factor=0.5;
 
 MovFilt_resz=imresize(MovFilt,resize_factor);
 d=size(MovFilt_resz);
@@ -88,16 +88,19 @@ vSign = sign(max(V) - max(-V));  % make the largest value always positive
 V = V.*vSign;
 
 eigImgs = toimg(V,d(1),d(2));
-for ind=1:20; nexttile([1 1]); imshow2(eigImgs(:,:,ind),[]); title(num2str(ind)); end
+figure;
+for ind=1:10; nexttile([1 1]); imshow2(eigImgs(:,:,ind),[]); title(num2str(ind)); end
+figure;
 nexttile([1 1]);
-for ind=1:20
+for ind=1:10
 plot(rescale(MovVec'*V(:,ind))+ind)
 hold all
 end
-
-pca_ind=[1:5];
+%%
+pca_ind=[1 2 3];
+sz2=size(mov_mc);
 footprint = mat2gray(toimg(mean(abs(V(:,pca_ind)).*D(pca_ind)',2), d(1), d(2)));
-reconMov=mat2gray(MovFilt.*imresize(footprint,sz([2 1])));
-dFF_recon=reconMov-mean(reconMov,3);
-moviefixsc(dFF_recon./imgaussfilt(imresize(footprint,sz([2 1])),2),[0 0.1])
+reconMov=mat2gray(MovFilt.*imresize(footprint,sz2([2 1])));
+dF_recon=reconMov-mean(reconMov,3);
+moviefixsc(dF_recon,[0 0.1])
 
