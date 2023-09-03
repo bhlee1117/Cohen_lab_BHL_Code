@@ -34,10 +34,10 @@ toc
 [d1,d2,T] = size(mov);                                % dimensions of dataset
 d = d1*d2;          
 
- %gSig = 3; 
- %gSiz = 6; 
-gSig = 7; 
-gSiz = 15; 
+ gSig = 5; 
+ gSiz = 10; 
+% gSig = 7; 
+% gSiz = 15; 
 psf = fspecial('gaussian', round(gSiz), gSig);
 ind_nonzero = (psf(:)>=max(psf(:,1)));
 psf = psf-mean(psf(ind_nonzero));
@@ -63,7 +63,16 @@ tic;
 [mov_mc,shifts2,template2] = normcorre(Y(bound/2+1:end-bound/2,bound/2+1:end-bound/2,:),options_rigid,mov_temp(bound/2+1:end-bound/2,bound/2+1:end-bound/2,:)); 
 toc 
 
-tic; mov_mc = apply_shifts(mov,shifts2,options_rigid,bound/2,bound/2); toc 
+try
+    tic; mov_mc = apply_shifts(mov,shifts2,options_rigid,bound/2,bound/2); toc 
+catch
+disp('Size not matched')
+    tic; 
+options_rigid = NoRMCorreSetParms('d1',d1,'d2',d2,'bin_width',200,'max_shift',50,'mot_uf',4);    
+[mov_mc,shifts2,template2] = normcorre(mov,options_rigid,mov_temp); 
+toc 
+
+end
 
 shifts_r = squeeze(cat(3,shifts2(:).shifts));
 shifts_nr = cat(ndims(shifts2(1).shifts)+1,shifts2(:).shifts);
