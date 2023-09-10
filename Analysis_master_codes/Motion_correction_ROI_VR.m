@@ -4,37 +4,38 @@ clc;
 [fpath] = uigetfile_n_dir(); %only Treadmill data
 %% Parameter setting and get cell coordinate
 block_size=20;
-DAQ_rate=0.000005;
 
-for i=1:length(fpath)
+for i=6:length(fpath)
 
 load(fullfile(fpath{i},"output_data.mat"))
 sz=double(Device_Data{1, 3}.ROI([2 4]));
 mov_test=double(readBinMov_times([fpath{i} '/frames1.bin'],sz(2),sz(1),[3000:4000]));
     avgImg=mean(mov_test,3);
-    [CellCoordinate, ~]=Cell_segment_circle_25x_VU(avgImg,0.85);
-    CellCoordinate=cell_detection_manual(avgImg,CellCoordinate,[0 9000]); 
+    [CellCoordinate{i}, ~]=Cell_segment_circle_25x_VU(avgImg,0.85);
+    CellCoordinate{i}=cell_detection_manual(avgImg,CellCoordinate{i},[0 10000]); 
 figure(1); clf;
     imshow2(avgImg,[]); hold all
-for n=1:size(CellCoordinate,1)
-    ROI(n,:)=round([CellCoordinate(n,1)-block_size CellCoordinate(n,1)+block_size ...
-            CellCoordinate(n,2)-block_size CellCoordinate(n,2)+block_size]);
-        bs(n)=block_size;
+for n=1:size(CellCoordinate{i},1)
+    ROI{i}(n,:)=round([CellCoordinate{i}(n,1)-block_size CellCoordinate{i}(n,1)+block_size ...
+            CellCoordinate{i}(n,2)-block_size CellCoordinate{i}(n,2)+block_size]);
+        bs{i}(n)=block_size;
 
         % if ROI go further than outbound, reduce window size
-        while sum([ROI(n,1) > 1, ROI(n,2)<sz(1), ROI(n,3)> 1, ROI(n,4)<sz(2)])<4
-            bs(n)=bs(n)-1;
-            ROI(n,:)=round([CellCoordinate(n,1)-bs(n) CellCoordinate(n,1)+bs(n) ...
-                CellCoordinate(n,2)-bs(n) CellCoordinate(n,2)+bs(n)]);
+        while sum([ROI{i}(n,1) > 1, ROI{i}(n,2)<sz(1), ROI{i}(n,3)> 1, ROI{i}(n,4)<sz(2)])<4
+            bs{i}(n)=bs{i}(n)-1;
+            ROI{i}(n,:)=round([CellCoordinate{i}(n,1)-bs{i}(n) CellCoordinate{i}(n,1)+bs{i}(n) ...
+                CellCoordinate{i}(n,2)-bs{i}(n) CellCoordinate{i}(n,2)+bs{i}(n)]);
         end
-        ROI_box=[ROI(n,[1 3]); ROI(n,[1 4]); ROI(n,[2 4]); ROI(n,[2 3]); ROI(n,[1 3])];
+        ROI_box=[ROI{i}(n,[1 3]); ROI{i}(n,[1 4]); ROI{i}(n,[2 4]); ROI{i}(n,[2 3]); ROI{i}(n,[1 3])];
     plot(ROI_box(:,1),ROI_box(:,2),'r')
 end
     
-    plot(CellCoordinate(:,1),CellCoordinate(:,2),'ro','markersize',15)
+    plot(CellCoordinate{i}(:,1),CellCoordinate{i}(:,2),'ro','markersize',15)
+    saveas(gca,[fpath{i} '/ROIs.png'])
 end
 %%
 time_size=150000; %segment size
+DAQ_rate=0.000005;
 
 for i=1:length(fpath)
     clear mcTrace_block ave_im
@@ -52,10 +53,10 @@ for i=1:length(fpath)
     t_seg=[t_seg(1:end-1)' t_seg(2:end)'+100];
     t_seg(end)=length(CamTrigger);
 
-    for n=1:size(CellCoordinate,1)
+    for n=1:size(CellCoordinate{i},1)
         
         % load ROI reference
-        mov_seg=double(readBinMov_times_ROI([fpath{i} '/frames1.bin'],sz(1),sz(2),ref_time,ROI(n,:)));
+        mov_seg=double(readBinMov_times_ROI([fpath{i} '/frames1.bin'],sz(1),sz(2),ref_time,ROI{i}(n,:)));
 
         % motion correction of reference
         options_rigid = NoRMCorreSetParms('d1',size(mov_seg,1),'d2',size(mov_seg,2),'bin_width',200,'max_shift',block_size,'us_fac',50,'init_batch',200);
@@ -70,7 +71,7 @@ for i=1:length(fpath)
         % load time segment of ROI
         for t=1:size(t_seg,1)
             mcTrace_block{n,t}=[];
-            mov=vm(readBinMov_times_ROI([fpath{i} '/frames1.bin'],sz(1),sz(2),[t_seg(t,1):t_seg(t,2)],ROI(n,:)));
+            mov=vm(readBinMov_times_ROI([fpath{i} '/frames1.bin'],sz(1),sz(2),[t_seg(t,1):t_seg(t,2)],ROI{i}(n,:)));
             [mov_mc,xyField]=optical_flow_motion_correction_LBH(mov,double(mov_ref),'optic_flow');
 
             ave_im{n,t}=mean(mov_mc,3);

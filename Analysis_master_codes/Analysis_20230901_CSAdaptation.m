@@ -67,8 +67,8 @@ end
 save('Result_V2CheRiffST_20230902.mat','fpath','Result','-v7.3')
 
 %%
-
-%load('Result_V2CheRiffST_20230902.mat','fpath','Result','-v7.3')
+clear cellnumber drug_ind
+load('/Volumes/cohen_lab/Lab/Labmembers/Byung Hun Lee/Data/20230901/Result_V2CheRiffST_20230902.mat')
 containString={'Awake','ket','CPP'};
 for i=1:length(Result)
     sp=split(Result{i}.fpath,'_');
@@ -108,46 +108,47 @@ end
 
 %%
 
-figure; clf;
+f1=figure; clf;
 tiledlayout(5,1)
-noi=3; DAQ_rate=0.00001;  
+noi=11; Waveform=1;
+DAQ_rate=0.00001;  
+load([fpath{1} '/output_data.mat'])
+legend_label={'Iso','Awake','Iso/Ket','Iso/CPP'};
+CamTrigger=find(Device_Data{1, 2}.Counter_Inputs.data(2:end)-Device_Data{1, 2}.Counter_Inputs.data(1:end-1));
+
 cmap=distinguishable_colors(4);
-Waveform=0;
 t=CamTrigger*DAQ_rate;
 g=1;
 disp([num2str(Cell_list(noi)) 'th Cell'])
 ax1=nexttile([4,1]);
 for d=1:4
+    if ~isempty(Result_NList{noi,d})
 BlueShape=sum(Result_NList{noi,d}.Blue>0,2)>10000; %0 = pulse Ramp, 1=triangle
 w=find(BlueShape==Waveform);
-[~, arg]= max(sum(Result_NList{noi,d}.spike(w,2)));
+[~, arg]= sort(sum(Result_NList{noi,d}.spike(w,:),2),'descend');
 
-    if ~isempty(Result_NList{noi,d})
-plot(t,rescale(Result_NList{noi,d}.trace(w(arg),:))+g,'color',cmap(d,:))
+    if ~isempty(w)
+BlueWvf=rescale(Result_NList{noi,d}.Blue(w(arg(1)),:));        
+plot(t,rescale(Result_NList{noi,d}.trace(w(arg(1)),:))+g,'color',cmap(d,:))
 hold all
 g=g+1;
     end
+    end
 end
-legend({'Iso','Awake','Iso/Ket','Iso/CPP'})
-ax2=nexttile([1,1]);
-plot(t,rescale(Result_NList{noi,d}.Blue(w(arg),:)),'color',[0 0.6 1])
-linkaxes([ax1 ax2],'x')
-%%
-tiledlayout(length(l)*2,2)
-g=1;
-for i=l
-    nexttile([1 1])
-    imshow2(imfuse(Result{i}.ref_im,Result{i}.c_ftprnt),[])
-    title(fpath{i},'Interpreter','none')
-end
-ax1=[];
-ax1=[ax1 nexttile([2 2])];
-for i=l
-plot(rescale(Result{i}.trace)-g)
-g=g+1;
+ind=find(cellfun(@isempty,Result_NList(noi,:))==0);
+legend(legend_label(ind),'location','northeastoutside')
+axis off
+ax2=nexttile([1,1]);    
+plot(t,BlueWvf,'color',[0 0.6 1])
 hold all
-end
-ax1=[ax1 nexttile([1 2])];
-plot(Result{i}.Blue,'color',[0 0.5 1])
-axis tight
-linkaxes(ax1,'x')
+plot([t(end-1100) t(end-100)],[-1 -1],'color','k','linewidth',3)
+text(mean([t(end-1100) t(end-100)]),-0.5,'1 sec','horizontalalignment','center')
+axis off
+linkaxes([ax1 ax2],'x')
+set(f1, 'Position', [100, 100, 800, 400]);
+
+saveas(f1,[num2str(noi) 'thCell_' num2str(Waveform) '.fig'])
+print(f1, [num2str(noi) 'thCell_' num2str(Waveform) '.jpg'],'-djpeg', ['-r', num2str(600)]);
+
+
+
