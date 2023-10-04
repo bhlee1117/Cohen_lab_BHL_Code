@@ -175,16 +175,17 @@ for i=1:length(VirFile)
     clear FR
     for n=1:size(mov_trace_hi)
     %[FR(:,:,n) V]=get_LapFR_VU(double(mov_trace_hi(n,:)),t_DAQ,30,VRdata,0.005,1,115);
-    [FR(:,:,n) V]=get_LapFR_VU_DAQ(double(movsum(sp(n,:),1000)),t_DAQ,30,VRdata,0,1,115);
+    [FR(:,:,n) V]=get_LapFR_VU(double(movsum(sp(n,:),1000)),t_DAQ,50,VRdata,0.001,1,115);
     end
-    [LickFR V]=get_LapFR_VU(double(Lick_trace),t_VR,30,VRdata,0,1,115);
+    [LickFR V]=get_LapFR_VU(double(Lick_trace),t_VR,50,VRdata,0,1,115);
 Lap_FR=[Lap_FR; FR];
 Lap_V=[Lap_V; V*mperVR;];
 
 end
 %%
-noi=1;
-figure(3); clf;
+for noi=1:size(ROI,1)
+figure(noi); clf;
+tiledlayout(2,6)
 ax1=[];
 ax1=[ax1 nexttile([1 1])];
 imagesc(Lap_FR(:,:,noi)); hold all;
@@ -210,7 +211,7 @@ plot(mean(Lap_V,1,'omitnan'))
 linkaxes(ax1,'x')
 axis tight
 
-nexttile([1 1])
+nexttile([1 6])
 t_DAQ_scaled=[t_VR(1): (t_VR(end)-t_VR(1))/(size(mov_trace,2)-1):t_VR(end)];
 plot(t_DAQ_scaled,mov_trace_hi(noi,:),'k',t_DAQ_scaled(find(sp(noi,:))),mov_trace_hi(noi,find(sp(noi,:))),'r.')
 hold all
@@ -218,6 +219,6 @@ plot(t_VR,VRdata(12,:)*15)
 plot(t_VR,rescale(VRdata(5,:))*15)
 
 filename=char(VirFile);
-saveas(gca,[filename(1:end-5) '.fig'])
+saveas(gca,[filename(1:end-5) '_' num2str(noi) '.fig'])
 
-
+end

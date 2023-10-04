@@ -43,6 +43,8 @@ end
 save('Result_V2CheRiffST_Ketamine_20230827.mat','fpath','Result','l','-v7.3')
 
 %%
+
+load('Result_V2CheRiffST_Ketamine_20230827.mat')
 figure; clf;
 l=[10 14];
 tiledlayout(length(l)*2,2)

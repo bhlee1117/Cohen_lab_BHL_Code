@@ -1,19 +1,23 @@
-% Analysis on AAV expression sample and plot, YQ601, ISO vs Ketamine
-% 2023/08/27, Byung Hun Lee
-cd /Volumes/cohen_lab/Lab/Labmembers/Byung Hun Lee/Data/20230825_ketVSiso_YQ601
+% Analysis on AAV expression sample and plot, in house YQ201
+% 2023/07/11, Byung Hun Lee
+
 clear
 [fpath] = uigetfile_n_dir;
 %%
-for i=7:length(fpath)
+for i=9:length(fpath)
     load([fpath{i} '/output_data.mat'])
     load([fpath{i} '/mcTrace.mat'],'mcTrace')
     sz=double(Device_Data{1, 4}.ROI([2 4]));
     mov_mc=double(readBinMov([fpath{i} '/mc.bin'],sz(2),sz(1)));
     Blue=Device_Data{1, 2}.buffered_tasks(1, 1).channels(1, 2).data;
-    Blue=Device_Data{1, 2}.buffered_tasks(1, 1).channels(1, 2).data;
-    Encoder=Device_Data{1, 2}.buffered_tasks(1, 3).channels;
+    Blue_shutter=Device_Data{1, 2}.buffered_tasks(1, 2).channels(1, 1).data;
+    Blue=Blue.*Blue_shutter;
+    Encoder=Device_Data{1, 2}.buffered_tasks(1, 3).channels.data;
+    Encoder=movsum([0 abs(Encoder(2:end)-Encoder(1:end-1))],100);
     CamTrigger=find(Device_Data{1, 2}.Counter_Inputs.data(2:end)-Device_Data{1, 2}.Counter_Inputs.data(1:end-1));
     Blue=Blue(CamTrigger);
+    Encoder=Encoder(CamTrigger);
+
     nFrames=size(mov_mc,3);
     T_mean=squeeze(mean(mov_mc,[1 2]));
     avgImg=mean(mov_mc,3);
@@ -36,33 +40,21 @@ c_ftprnt=mask_footprint(sz/2,mov_res,[],40);
 Result{i}.c_ftprnt=imgaussfilt(c_ftprnt,2.5);
 Result{i}.trace=[(tovec(mov_res)'*tovec(Result{i}.c_ftprnt))'];
 Result{i}.Blue=Blue;
+Result{i}.Encoder=Encoder;
 Result{i}.ref_im=avgImg;
 
 end
 
-save('Result_V2CheRiffST_Ketamine_20230827.mat','fpath','Result','l','-v7.3')
+save('Result_V2CheRiffST_20230714.mat','fpath','Result','l','-v7.3')
 
 %%
-figure; clf;
-l=[10 14];
-tiledlayout(length(l)*2,2)
+figure;
 g=1;
 for i=l
-    nexttile([1 1])
-    imshow2(imfuse(Result{i}.ref_im,Result{i}.c_ftprnt),[])
-    title(fpath{i},'Interpreter','none')
-end
-ax1=[];
-ax1=[ax1 nexttile([2 2])];
-for i=l
-plot(rescale(Result{i}.trace)-g)
+plot(rescale(Result{i}.trace)+g)
 g=g+1;
 hold all
 end
-ax1=[ax1 nexttile([1 2])];
-plot(Result{i}.Blue,'color',[0 0.5 1])
-axis tight
-linkaxes(ax1,'x')
 
 %%
 Result_onlyGood=Result;

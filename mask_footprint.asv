@@ -27,7 +27,7 @@ mov_res_vec = tovec(mov_res(:,:,ref_time));
 
 clear traces c_ftprnt
 
-n_comp = 3; g=1; nFrames=size(mov_res,3); % take 3 PCs per ROI
+>>>>n_comp = 3; g=1; nFrames=size(mov_res,3); % take 3 PCs per ROI
 c_ftprnt = zeros(size(mov_res,1)*size(mov_res,2),nROI2);
 
 for j = 1:nROI2

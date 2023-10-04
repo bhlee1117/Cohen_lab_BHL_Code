@@ -1,5 +1,7 @@
-function show_traces_align_Position_Virmen(traces_F,traces_sp,pos,Window,Virmen_data,noi)
-
+function show_traces_align_Position_Virmen(traces_F,traces_sp,pos,Window,Virmen_data,noi,Blue)
+if nargin<7
+    Blue=zeros(1,size(traces_F,2));
+end
 scale=-15;
 vel_thresh=-10;
 
@@ -24,7 +26,8 @@ t=[1:size(traces_F,2)];
 
 figure;
 ax1=[];
-cmap=turbo(size(laps,1));
+%cmap=turbo(size(laps,1));
+cmap=repmat([0.2 0.2 0.2],size(laps,1),1);
 
 % find the frames that passing the position
 b=bwlabel(Virmen_data(:,5)>pos);
@@ -48,11 +51,13 @@ for n=noi
         if ~isnan(pos_reach_time(l))
     try
         plot_tr=traces_F(n,pos_reach_time(l)+Window);
+        plot_blue=Blue(1,pos_reach_time(l)+Window);
     plot_sp=traces_sp(n,pos_reach_time(l)+Window);
     plot(Window,plot_tr+l*scale,'color',cmap(l,:))
     hold all
     plot(Window(find(plot_sp)),plot_tr(find(plot_sp))+l*scale,'r.')
-    plot(Window,zeros(length(Window),1)+l*scale,'color',[0.7 0.7 0.7])
+    %plot(Window,zeros(length(Window),1)+l*scale,'color',[0.7 0.7 0.7])
+    plot(Window,plot_blue*5+l*scale,'color',[0 0.5 1])
     end
         end
     end

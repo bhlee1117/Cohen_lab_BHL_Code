@@ -8,7 +8,7 @@ f=figure('units','normalized','outerposition',[0 0 1 1]);
 %ax1=nexttile([8 1]);
 ax1=subplot(10,1,1:8);
 noi=[1:size(traces,1)];
-t=[1:size(traces,2)]/frmrate; scale=15;
+t=[1:size(traces,2)]/frmrate; scale=30;
 %tr=Result{i}.traces_res-median(Result{i}.traces_res,2); fprnt=Result{i}.c_ftprnt;
 tr=traces-movmedian(traces,150,2);
 %tr=tr./get_threshold(tr,1);
@@ -25,7 +25,14 @@ set(gca,'ytick',[1:size(noi,2)]*scale,'yticklabel',noi)
 %axis off
 
 ax2=subplot(10,1,9:10);
-plot(t,otherT)
+
+if size(otherT,1)>size(otherT,2)
+    otherT=otherT';
+end
+for j=1:size(otherT,1)
+plot(t,otherT(j,:))
+hold all
+end
 ylim([min(otherT(:)) max(otherT(:))])
 
 linkaxes([ax1 ax2],'x')

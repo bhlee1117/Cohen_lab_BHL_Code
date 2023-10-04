@@ -6,10 +6,10 @@ clc;
 [fpath_optopatch] = uigetfile_n_dir(); %load optopatch data
 
 %%
-fop=[1 2 2 2];
-spike_threshold=4.2;
+fop=[1 1 1 1];
+spike_threshold=3;
 
-for i=1:length(fpath_optopatch)
+for i=unique(fop)
     load(fullfile(fpath_optopatch{i},"output_data.mat"))
     load(fullfile(fpath_optopatch{i},"mcTrace01.mat"))
     sz=double(Device_Data{1, 3}.ROI([2 4]));
@@ -95,7 +95,7 @@ for i=1:length(fpath)
         end
         
         % load ROI reference
-        mov_seg=readBinMov_times_ROI([fpath{i} '/frames1.bin'],sz(1),sz(2),ref_time,ROI);
+        mov_seg=double(readBinMov_times_ROI([fpath{i} '/frames1.bin'],sz(1),sz(2),ref_time,ROI));
 
         % motion correction of reference
         options_rigid = NoRMCorreSetParms('d1',size(mov_seg,1),'d2',size(mov_seg,2),'bin_width',200,'max_shift',block_size,'us_fac',50,'init_batch',200);
@@ -111,14 +111,14 @@ for i=1:length(fpath)
         for t=1:size(t_seg,1)
             mcTrace_block{n,t}=[];
             mov=vm(readBinMov_times_ROI([fpath{i} '/frames1.bin'],sz(1),sz(2),[t_seg(t,1):t_seg(t,2)],ROI));
-            [mov_mc,xyField]=optical_flow_motion_correction_LBH(mov,double(mov_ref),'normcorre');
+            [mov_mc,xyField]=optical_flow_motion_correction_LBH(mov,double(mov_ref),'optic_flow');
 
             ave_im{n,t}=mean(mov_mc,3);
             mov_mc=vm(mov_mc);
             mov_mc.transpose.savebin([fpath{i} '/mc' num2str(n,'%02d') '_' num2str(t,'%02d') '.bin'])
 
-            %mcTrace = squeeze(mean (xyField,[1 2])); %optic flow
-            mcTrace_block{n,t}=xyField; % Normcorre
+            mcTrace_block{n,t} = squeeze(mean (xyField,[1 2]))'; %optic flow
+            %mcTrace_block{n,t}=xyField; % Normcorre
         end
 
 

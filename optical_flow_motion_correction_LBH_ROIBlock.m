@@ -1,4 +1,4 @@
-function [mov_mc,flow_xy]= optical_flow_motion_correction_LBH(mov,mov_temp,method)
+function [mov_mc,flow_xy]= optical_flow_motion_correction_LBH_ROIBlock(mov,mov_temp,method)
 
 switch method
     case 'optic_flow'
@@ -35,7 +35,7 @@ toc
 d = d1*d2;          
 
  gSig = 5; 
- gSiz = 10; 
+ gSiz = 8; 
 % gSig = 7; 
 % gSiz = 15; 
 psf = fspecial('gaussian', round(gSiz), gSig);
@@ -46,6 +46,7 @@ Y = imfilter(single(mov),psf,'same');
 %Y = single(mov);
 %Ypc = Yf - Y;
 bound = 2*ceil(gSiz/2);
+Y_template=imfilter(single(mov_temp),psf,'same');
 
 
 %total number of pixels
@@ -53,26 +54,32 @@ bound = 2*ceil(gSiz/2);
 %     'grid_size',[150,150],'mot_uf',4,'correct_bidir',false, ...
 %     'overlap_pre',32,'overlap_post',32,'max_shift',50);
 
-options_rigid = NoRMCorreSetParms('d1',d1-bound,'d2',d2-bound,'bin_width',200,'max_shift',50,'mot_uf',4);
+%options_rigid = NoRMCorreSetParms('d1',d1-bound,'d2',d2-bound,'bin_width',200,'max_shift',30,'mot_uf',4);
+
+options_rigid = NoRMCorreSetParms('d1',d1-bound,'d2',d2-bound,'bin_width',200, ...
+    'mot_uf',4,'correct_bidir',false, ...
+    'overlap_pre',20,'overlap_post',32,'max_shift',30,'init_batch',200);
 
 % options_rigid = NoRMCorreSetParms('d1',d1-bound,'d2',d2-bound,'bin_width',200, ...
 %     'grid_size',[50, 50],'mot_uf',4,'correct_bidir',false, ...
 %     'overlap_pre',32,'overlap_post',32,'max_shift',40);
     
 tic; 
-[mov_mc,shifts2,template2] = normcorre(Y(bound/2+1:end-bound/2,bound/2+1:end-bound/2,:),options_rigid,mov_temp(bound/2+1:end-bound/2,bound/2+1:end-bound/2,:)); 
+%[mov_mc,shifts2,template2] = normcorre(Y(bound/2+1:end-bound/2,bound/2+1:end-bound/2,:),options_rigid,Y_template(bound/2+1:end-bound/2,bound/2+1:end-bound/2,:)); 
+[mov_mc,shifts2,template2] = normcorre_batch(Y(bound/2+1:end-bound/2,bound/2+1:end-bound/2,:),options_rigid,Y_template(bound/2+1:end-bound/2,bound/2+1:end-bound/2,:)); 
 toc 
-
-try
-    tic; mov_mc = apply_shifts(mov,shifts2,options_rigid,bound/2,bound/2); toc 
-catch
-disp('Size not matched')
-    tic; 
-options_rigid = NoRMCorreSetParms('d1',d1,'d2',d2,'bin_width',200,'max_shift',50,'mot_uf',4);    
-[mov_mc,shifts2,template2] = normcorre(mov,options_rigid,mov_temp); 
-toc 
-
-end
+% options_rigid = NoRMCorreSetParms('d1',d1,'d2',d2,'bin_width',200,'max_shift',50,'mot_uf',4);    
+% [mov_mc,shifts2,template2] = normcorre(mov,options_rigid,mov_temp); 
+% try
+tic; mov_mc = apply_shifts(mov,shifts2,options_rigid,bound/2,bound/2); toc 
+% catch
+% disp('Size not matched')
+%     tic; 
+% options_rigid = NoRMCorreSetParms('d1',d1,'d2',d2,'bin_width',200,'max_shift',50,'mot_uf',4);    
+% [mov_mc,shifts2,template2] = normcorre(mov,options_rigid,mov_temp); 
+% toc 
+% 
+% end
 
 shifts_r = squeeze(cat(3,shifts2(:).shifts));
 shifts_nr = cat(ndims(shifts2(1).shifts)+1,shifts2(:).shifts);
