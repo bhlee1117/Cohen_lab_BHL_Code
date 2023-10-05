@@ -52,7 +52,7 @@ for j = 1:nROI2
 % 
 % nKeep = 10;
 % eigImgs = zeros(size(mov_res,2), size(mov_res,1), nKeep);
-% for j = 1:nKeep;
+% for j = 1:10;
 %     eigImgs(:,:,j) = mean(mov_res.*reshape(eigTraces(j,:), [1, 1, size(mov_res,3)]),3);
 % end;
 % figure; clf;

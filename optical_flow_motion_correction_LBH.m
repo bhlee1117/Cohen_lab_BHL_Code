@@ -53,14 +53,13 @@ bound = 2*ceil(gSiz/2);
 %     'grid_size',[150,150],'mot_uf',4,'correct_bidir',false, ...
 %     'overlap_pre',32,'overlap_post',32,'max_shift',50);
 
-options_rigid = NoRMCorreSetParms('d1',d1-bound,'d2',d2-bound,'bin_width',200,'max_shift',50,'mot_uf',4);
+%options_rigid = NoRMCorreSetParms('d1',d1-bound,'d2',d2-bound,'bin_width',200,'max_shift',50,'mot_uf',4);
 
-% options_rigid = NoRMCorreSetParms('d1',d1-bound,'d2',d2-bound,'bin_width',200, ...
-%     'grid_size',[50, 50],'mot_uf',4,'correct_bidir',false, ...
-%     'overlap_pre',32,'overlap_post',32,'max_shift',40);
+options_rigid = NoRMCorreSetParms('d1',d1-bound,'d2',d2-bound,'bin_width',200, ...
+    'grid_size',[150, 150],'mot_uf',4,'correct_bidir',false, 'max_shift',40);
     
 tic; 
-[mov_mc,shifts2,template2] = normcorre(Y(bound/2+1:end-bound/2,bound/2+1:end-bound/2,:),options_rigid,mov_temp(bound/2+1:end-bound/2,bound/2+1:end-bound/2,:)); 
+[mov_mc,shifts2,template2] = normcorre_batch(Y(bound/2+1:end-bound/2,bound/2+1:end-bound/2,:),options_rigid,mov_temp(bound/2+1:end-bound/2,bound/2+1:end-bound/2,:)); 
 toc 
 
 try
@@ -69,7 +68,7 @@ catch
 disp('Size not matched')
     tic; 
 options_rigid = NoRMCorreSetParms('d1',d1,'d2',d2,'bin_width',200,'max_shift',50,'mot_uf',4);    
-[mov_mc,shifts2,template2] = normcorre(mov,options_rigid,mov_temp); 
+[mov_mc,shifts2,template2] = normcorre_batch(mov,options_rigid,mov_temp); 
 toc 
 
 end
@@ -81,12 +80,13 @@ shifts_x = squeeze(shifts_nr(:,2,:))';
 shifts_y = squeeze(shifts_nr(:,1,:))';
 
 if size(shifts_y,1) > size(shifts_y,2)
-flow_xy=[shifts_x shifts_y];
+flow_xy.xymean=[shifts_x shifts_y];
 else
-flow_xy=[shifts_x; shifts_y];
-flow_xy=flow_xy';
+flow_xy.xymean=[shifts_x; shifts_y];
+flow_xy.xymean=flow_xy.xymean';
 end
 
+flow_xy.shifts=shifts2;
 
 % apply the shifts to the removed percentile
 

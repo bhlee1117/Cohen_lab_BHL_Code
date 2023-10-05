@@ -8,6 +8,7 @@ new_bin=interpolateBin;
 
 % Lap change
 lap_end=[0; find(abs(Virmen_data(8,2:end)-Virmen_data(8,1:end-1))>0)'; size(Virmen_data,2)];
+Virmen_data(5,lap_end(1:end-1)+1)=0;
 laps=[lap_end(1:end-1)+1 lap_end(2:end)];
 
 %Cumulative track
@@ -41,7 +42,10 @@ end
 laps_int(ll,2)=size(Virmen_data_int,2);
 lap_trace(laps_int(ll-1,2)+1:end)=ll;
 
-Virmen_data_int(8,:)=round(Virmen_data_int(8,:));
+
+
+Virmen_data_int(8,:)=cumsum([0 (Virmen_data_int(5,2:end)-Virmen_data_int(5,1:end-1))<-lap_dist*0.9])+1;
+%Virmen_data_int(8,:)=round(Virmen_data_int(8,:));
 Virmen_data_int(11,:)=round(Virmen_data_int(11,:));
 
 % Calculate speed
