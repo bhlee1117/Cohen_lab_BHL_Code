@@ -18,12 +18,16 @@ myVideo = VideoWriter([filename],"MPEG-4"); %open video file
 %myVideo = VideoWriter([filename],"Uncompressed AVI");
 myVideo.FrameRate = rate;  %can adjust this, 5 - 10 works well for me
 open(myVideo)
+
+Trace=Trace(stack);
 try
-for i=stack
+for i=1:length(stack)
     clf;
     tiledlayout(4,1)
     nexttile([3 1])
-    imshow2(movie(:,:,i),range)
+    imshow2(movie(:,:,stack(i)),range)
+    colormap('turbo')
+    colorbar
     axis tight off equal
     hold on
     if ~isempty(dmd_mask_sequence_rois)
@@ -37,7 +41,7 @@ for i=stack
     plot([i i],[min(Trace) max(Trace)],'color','r')
     axis tight
     end
-    title([num2str(i/frmrate) ' ms'])
+    title([num2str(stack(i)/frmrate) ' ms'])
     %title([num2str(i*frmrate) '\mum'],'HorizontalAlignment','left')
     pause(0.005) %Pause and grab frame
 

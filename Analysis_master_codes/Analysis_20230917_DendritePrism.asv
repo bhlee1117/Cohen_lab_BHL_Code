@@ -1,6 +1,6 @@
 clear
 clc;
-sourcePath='/Volumes/BHL_WD18TB/20230815_20230903_VRs';
+sourcePath='/Volumes/cohen_lab/Lab/Labmembers/Byung Hun Lee/Data/20230917';
 cd(sourcePath)
 [fpath] = uigetfile_n_dir(); %only Treadmill data
 %% Parameter setting and get cell coordinate

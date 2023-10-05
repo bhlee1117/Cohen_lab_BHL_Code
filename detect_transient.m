@@ -15,7 +15,8 @@ for i=1:size(traces_hi,1) %neuron
     for t=1:n
     tr_ind=find(transients==t);
     t2=find(transients_back==transients_back(tr_ind(end)));
-    transients_final(tr_ind(1):t2(end))=1;
+    %transients_final(tr_ind(1):t2(end))=1;
+    transients_final(t2(1):t2(end))=1;
     end
     [transients_final n]=bwlabel(transients_final);
     

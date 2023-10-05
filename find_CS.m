@@ -2,7 +2,7 @@ function [CS_list CS_spike]=find_CS(traces,spike,t_thresh,area_th)
 if nargin<4
    area_th=0;
 end
-t_thresh=t_thresh/1.25; %ms
+t_thresh=t_thresh; %ms
 s_t=find(spike);
 ISI=s_t(2:end)-s_t(1:end-1);
 s_cluster=bwlabel(ISI<t_thresh);

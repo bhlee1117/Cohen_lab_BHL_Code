@@ -1,12 +1,12 @@
 clear
 clc;
-sourcePath='/Volumes/BHL_WD18TB/20230815_20230903_VRs';
+sourcePath='/Volumes/BHL_WD18TB/20230917_BHLm077_78_vrPrism';
 cd(sourcePath)
 [fpath] = uigetfile_n_dir(); %only Treadmill data
 %% Parameter setting and get cell coordinate
 block_size=25;
 
-for i=1:2%:length(fpath)
+for i=1%:length(fpath)
     clear bs ROI
     load(fullfile(fpath{i},"output_data.mat"))
     sz=double(Device_Data{1, 3}.ROI([2 4]));
@@ -38,7 +38,7 @@ end
 %% motion correction
 time_size=150000; %segment size
 
-for i=2:length(fpath)
+for i=1:length(fpath)
     clear mcTrace_block ave_im
     %load the center positions
     load(fullfile(fpath{i},"output_data.mat"))
