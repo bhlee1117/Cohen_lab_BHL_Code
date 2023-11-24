@@ -38,7 +38,7 @@ for i=1:length(stack)
     nexttile([1 1])
     plot(Trace)
     hold all
-    plot([i i],[min(Trace) max(Trace)],'color','r')
+    plot([i i],[min(Trace(:)) max(Trace(:))],'color','r')
     axis tight
     end
     title([num2str(stack(i)/frmrate) ' ms'])

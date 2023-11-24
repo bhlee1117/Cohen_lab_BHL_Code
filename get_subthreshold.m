@@ -1,15 +1,20 @@
-function voltage_sub=get_subthreshold(voltage,spike,dialate_size)
-if nargin<3
-    dialate_size=3;
-end
+function tr_sub=get_subthreshold(tr,sp,dilate,avgwnd)
+tr_sub=tr;
+se = strel('square', dilate); % 0 degree means horizontal
+seg_wind=[-30:30];
+    for s=find(sp)
+        try
+    tmp=zeros(1,length(tr));
+    tmp(s)=1;
+    sp_di = imdilate(tmp, se);
+    tr_sub(find(sp_di))=NaN;
+    tr_sub_seg=tr_sub(s+seg_wind);
+    valid_point=find(~isnan(tr_sub_seg));
+    tr_sub_seg=interp1(valid_point,tr_sub_seg(valid_point),[1:length(seg_wind)],'linear');
+    tr_sub(s+seg_wind)=tr_sub_seg;
+        end
+    end
 
-se = strel('line',dialate_size,0);
-spike_dialated=imdilate(spike>0,se);
-voltage(spike_dialated==1)=NaN;
+    tr_sub=movmean(tr_sub,avgwnd);
 
-voltage_sub=zeros(size(voltage));
-for i=1:size(voltage,1)
-    t=find(~isnan(voltage(i,:)));
-    voltage_sub(i,:)=interp1(t,voltage(i,t),[1:size(voltage,2)],'linear');
-end
 end

@@ -1,0 +1,9 @@
+function out = smoothdim(A,smoothing,dim)
+
+for i = 1:smoothing
+    
+end
+
+
+
+end

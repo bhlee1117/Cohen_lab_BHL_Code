@@ -8,7 +8,7 @@ f=figure('units','normalized','outerposition',[0 0 1 1]);
 %ax1=nexttile([8 1]);
 ax1=subplot(10,1,1:8);
 noi=[1:size(traces,1)];
-t=[1:size(traces,2)]/frmrate; scale=30;
+t=[1:size(traces,2)]/frmrate; scale=20;
 %tr=Result{i}.traces_res-median(Result{i}.traces_res,2); fprnt=Result{i}.c_ftprnt;
 tr=traces-movmedian(traces,150,2);
 %tr=tr./get_threshold(tr,1);

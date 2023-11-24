@@ -8,7 +8,7 @@ new_bin=interpolateBin;
 
 % Lap change
 lap_end=[0; find(abs(Virmen_data(8,2:end)-Virmen_data(8,1:end-1))>0)'; size(Virmen_data,2)];
-Virmen_data(5,lap_end(1:end-1)+1)=0;
+Virmen_data(5,lap_end(2:end-1)+1)=0;
 laps=[lap_end(1:end-1)+1 lap_end(2:end)];
 
 %Cumulative track
@@ -20,13 +20,16 @@ for l2=2:size(laps,1)
     cumTrack=[cumTrack Virmen_data(5,laps(l2,1):laps(l2,2))+(l2-1)*lap_dist];
 end
 Virmen_data(end+1,:)=cumTrack;
-
+omit_window=[-3:3];
+t_VR_omit=t_VR; t_VR_omit(laps(1:end-1,2)+omit_window)=[];
+cumTrack_omit=cumTrack; cumTrack_omit(laps(1:end-1,2)+omit_window)=[];
 % interpolate
 Virmen_data_int(1,:)=new_bin;
-for i=2:size(Virmen_data,1)
+for i=2:size(Virmen_data,1)-1
     Virmen_data_int(i,:)=interp1(t_VR,Virmen_data(i,:),new_bin,'linear');
 end
-Virmen_data_int(5,:)=Virmen_data_int(end,:);
+Virmen_data_int(size(Virmen_data,1),:)=interp1(t_VR_omit,cumTrack_omit,new_bin,'linear');
+Virmen_data_int(5,:)=Virmen_data_int(end,:); %cumTrack
 
 ll=1; laps_int=[1];
 lap_trace=zeros(1,size(Virmen_data_int,2));
@@ -35,7 +38,7 @@ while ~isempty(find(Virmen_data_int(5,:)>lap_dist))
 sub_ind=find(Virmen_data_int(5,:)>lap_dist);
 laps_int(ll,2)=sub_ind(1);
 lap_trace(laps_int(ll,1):laps_int(ll,2))=ll;
-Virmen_data_int(5,sub_ind)=Virmen_data_int(5,sub_ind)-lap_dist;
+Virmen_data_int(5,sub_ind(1):end)=Virmen_data_int(5,sub_ind(1):end)-lap_dist;
 ll=ll+1;
 laps_int(ll,1)=sub_ind(1)+1;
 end

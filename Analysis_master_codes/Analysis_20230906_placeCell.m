@@ -1,12 +1,12 @@
 clear
 clc;
-sourcePath='/Volumes/BHL_WD18TB/20230815_20230903_VRs';
+sourcePath='/Volumes/cohen_lab/Lab/Labmembers/Byung Hun Lee/Data/20230917_BHLm78_Prism_VU_VR/112801BHLm078_optopatch_VR';
 cd(sourcePath)
 [fpath] = uigetfile_n_dir(); %only Treadmill data
 %% Parameter setting and get cell coordinate
 block_size=25;
 
-for i=1:2%:length(fpath)
+for i=1:length(fpath)
     clear bs ROI
     load(fullfile(fpath{i},"output_data.mat"))
     sz=double(Device_Data{1, 3}.ROI([2 4]));

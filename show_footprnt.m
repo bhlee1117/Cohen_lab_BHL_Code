@@ -5,6 +5,8 @@ if nargin<3
 end
 %figure; tiledlayout(2,1)
 %a=randn(size(c_ftprnt,3),1); [~,b]=sort(a);
+c_ftprnt=mat2gray(c_ftprnt);
+mov_mc=mat2gray(mov_mc);
 b=[1:size(c_ftprnt,3)];
 %ax1=nexttile([1 1]);
 ax1=subplot(2,1,1);
