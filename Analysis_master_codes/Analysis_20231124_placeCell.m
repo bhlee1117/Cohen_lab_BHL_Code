@@ -2,16 +2,20 @@ clear
 clc;
 cd '/Volumes/BHL_WD18TB/YQ601_PlaceCellResults';
 [~, fpath, raw] = xlsread(['/Volumes/cohen_lab/Lab/Labmembers/Byung Hun Lee/Data/' ...
-    'PlaceCellData_Arrangement.xlsx'], 'Sheet1', 'C8:C27');
+    'PlaceCellData_Arrangement.xlsx'], 'Sheet1', 'C8:C42');
 
 [~, ~, NeuronsToUse]=xlsread(['/Volumes/cohen_lab/Lab/Labmembers/Byung Hun Lee/Data/' ...
-    'PlaceCellData_Arrangement.xlsx'], 'Sheet1', 'L8:M27');
+    'PlaceCellData_Arrangement.xlsx'], 'Sheet1', 'L8:M42');
 
 NeuronsToUse=cellfun(@(x) (str2num(num2str(x))),NeuronsToUse,'UniformOutput',false);
+
+save_figto='/Volumes/BHL_WD18TB/YQ601_PlaceCellResults';
+place_bin=150;
+velocity_threshold=0.002;
 %% Parameter setting and get cell coordinate
 block_size=30;
 
-for i=[15]%1:length(fpath)
+for i=1:length(fpath)
     clear bs ROI
     load(fullfile(fpath{i},"output_data.mat"))
     sz=double(Device_Data{1, 3}.ROI([2 4]));
@@ -44,7 +48,7 @@ end
 time_size=150000; %segment size
 overlap=500;
 
-for i=[6]%1:length(fpath)
+for i=1:length(fpath)
     clear mcTrace_block ave_im
     %load the center positions
     load(fullfile(fpath{i},"output_data.mat"))
@@ -203,7 +207,7 @@ linkaxes([ax1 ax2],'x')
 time_size=150000; %segment size
 overlap=500;
 
-for i=6%:length(fpath)
+for i=1:length(fpath)
     %load files
     Result=[];
     load(fullfile(fpath{i},'Analysis_parameter.mat'))
@@ -364,7 +368,7 @@ theta_pass_frq=[5 11];
 freq_lowhigh4=theta_pass_frq/(Fs/2);
 [b4, a4] = butter(4, freq_lowhigh4, 'bandpass');
 figure; clf;
-for i=8%1:length(fpath)
+for i=1:length(fpath)
     clear traces_res_filtered noise noise_intp norm_trace sp_height SpHeight_intp sp_time
     tN=[1:time_bin:size(PC_Result{i}.traces,2)]; tN=[tN size(PC_Result{i}.traces,2)];
     sp_time=zeros(size(PC_Result{i}.traces,1),size(PC_Result{i}.traces,2));
@@ -436,8 +440,7 @@ end
 
 
 %%
-place_bin=150;
-velocity_threshold=0.002;
+
 for g=1:length(fpath)
     g
     [sz_fprntY, sz_fprntX, nNeurons]=size(PC_Result{g}.c_ftprnt);
@@ -494,7 +497,7 @@ end
 
 set(f1, 'Position', [100, 100, 800, 400]);
 saveas(f1,fullfile(save_figto ,['PF_map' '.fig']))
-print(f1, fullfile(save_figto ,['PF_map' '.jpg']),'-djpeg', ['-r', num2str(400)]);
+%print(f1, fullfile(save_figto ,['PF_map' '.jpg']),'-djpeg', ['-r', num2str(400)]);
 
 f2=figure(2); clf;
 cmap=turbo(length(PC_Result));
@@ -512,13 +515,11 @@ for i=1:length(PC_Result)
         g=g+1;
     end
 end
-
-save(fullfile(save_figto,['PF_Result_20231117.mat']),'PC_Result','-v7.3')
+save(fullfile(save_figto,['PF_Result_20231126.mat']),'PC_Result','-v7.3')
 %% Load Data
-save_figto='/Volumes/BHL_WD18TB/YQ601_PlaceCellResults';
-load(fullfile(save_figto,['PF_Result_20231117.mat']))
+load(fullfile(save_figto,['PF_Result_20231126.mat']))
 
-%% Load good cells
+%% Calculate Firing rate change upon stimulation
 FRMat_Time=[]; VolMat_Time=[];
 FRMat_Pos=[]; VolMat_Pos=[];
 
@@ -528,7 +529,7 @@ UnstimulationVoltageMat=[];
 UnstimulationSpikeMat=[];
 AverageLapN=5;
 TimeWindow=[-10000:10000];
-PositionWindow=[-11.5 11.5]; %bin units
+PositionWindow=[-12 12]; %VR units
 Wvf_window=[-500:1500];
 Source_file=[];
 
@@ -536,15 +537,16 @@ g=1; %Each stimulation
 for i=1:size(NeuronsToUse,1)
     if ~isnan(NeuronsToUse{i,1})
 
-        NeuronInterest=NeuronsToUse{i,1};
+        NOI=NeuronsToUse{i,1};
         StimLaps=unique(double(PC_Result{i}.Blue>0).*PC_Result{i}.VR(8,:)); StimLaps=StimLaps(2:end);
         BlueLap=zeros(1,max(PC_Result{i}.VR(8,:)));
         World1Lap=unique(PC_Result{i}.VR(8,:).*(PC_Result{i}.VR(2,:)==1)); World1Lap=World1Lap(2:end);
         BlueLap(StimLaps)=1;
         BlueLap=bwlabel(~BlueLap); BlueLap(World1Lap)=NaN;
         LapOfInterest=[];
-        Lap_FR_vec=reshape(PC_Result{i}.Lap_FR(:,:,NeuronInterest)',1,[]);
-
+        %Lap_FR_vec=reshape(PC_Result{i}.Lap_FR(:,:,NeuronInterest)',1,[]);
+        
+        for NeuronInterest=NOI
         for b=1:max(BlueLap)-1
             LapOfInterest{b,1}=find(BlueLap==b); %before
             if length(LapOfInterest{b,1})>AverageLapN
@@ -557,7 +559,8 @@ for i=1:size(NeuronsToUse,1)
 
             StimulationWaveform_indicator{g}=[];
             StimulationWaveform_actuator{g}=[];
-
+            Stimulation_Lap{g}=[];
+            Stimulation_Pos{g}=[];
             for StimulationLap=LapOfInterest{b,1}(end)+1:LapOfInterest{b,2}(1)-1
 
                 StimOnFrame = find(PC_Result{i}.VR(8,:)==StimulationLap & PC_Result{i}.Blue>0,1);
@@ -565,6 +568,8 @@ for i=1:size(NeuronsToUse,1)
                 StimOnFrame_Tau = StimOnFrame + Wvf_window;
                 StimulationWaveform_indicator{g}=[StimulationWaveform_indicator{g}; PC_Result{i}.normTraces(NeuronInterest,StimOnFrame_Tau)];
                 StimulationWaveform_actuator{g}=[StimulationWaveform_actuator{g}; PC_Result{i}.Blue(StimOnFrame_Tau)];
+                Stimulation_Lap{g}=StimulationLap;
+                Stimulation_Pos{g}=StimOnPosition;
 
             end
 
@@ -608,23 +613,38 @@ for i=1:size(NeuronsToUse,1)
             Source_file(g)=i;
             g=g+1;
         end
+        end
     end
 end
 
-
-
+%% Plot Firing rate change for all the cases
+t=[-10:0.001:10];
+Bin_time=500; %0.5 sec
+t_bin=t([1:Bin_time:end-1])+Bin_time/1000/2;
+for stim_type=1:3
+    figure(stim_type); clf;
+        StimTypeSort=find(Stimulation_type==stim_type);
+dFRTrace=cellfun(@(x) movsum(x,Bin_time,2,'omitnan')/Bin_time*1000, FRMat_Time(StimTypeSort,:),'UniformOutput',false);
+dFRTrace=cellfun(@(x) mean(x(:,Bin_time/2+1:Bin_time:end),1), dFRTrace,'UniformOutput',false);
+beforeFR=cell2mat(dFRTrace(:,1)); AfterFR=cell2mat(dFRTrace(:,2));
+for s=1:length(StimTypeSort)
+nexttile([1 1])
+plot(t_bin,beforeFR(s,:)); hold all
+plot(t_bin,AfterFR(s,:));
+end
+end
 %% Firing rate change
 
 figure(3); clf;
-cmap=distinguishable_colors(3);   
+cmap=distinguishable_colors(3);  cmap_light=cmap*1.2; cmap_light(cmap_light>1)=1; 
 Stimulation_type=cell2mat(cellfun(@(x) max(max(bwlabel(x>0.1),[],2)),StimulationWaveform_actuator,'UniformOutput',false));
 Stimulation_type(Stimulation_type>2 & Stimulation_type<10)=2; 
 Stimulation_type(Stimulation_type>10)=3;
-Bin_time=500; %0.1 sec
+Bin_time=500; %0.5 sec
 Mean_time=[-2000 2000];
 MeanFR_stimtype=[]; MeanFR_stimtype_Pos=[];
 
-tiledlayout(3,6)
+tiledlayout(5,6)
 for stim_type=1:3
     nexttile([1 2])
     StimTypeSort=find(Stimulation_type==stim_type);
@@ -642,6 +662,7 @@ ylabel('\Delta Firing rate (Hz)')
 xlabel('Time (s)')
 MeanFR_stimtype{stim_type}=cell2mat(cellfun(@(x) mean(sum(x(:,round(end/2)+Mean_time(1):round(end/2)+Mean_time(2)),2,'omitnan')/(Mean_time(2)-Mean_time(1))*1000,1,'omitnan'), FRMat_Time(StimTypeSort,:),'UniformOutput',false));
 MeanFR_stimtype_Pos{stim_type}=cell2mat(cellfun(@(x) mean(x,1,'omitnan'),FRMat_Pos(StimTypeSort,:),'UniformOutput',false));
+ylim([-3 6])
 end
 
 nexttile([2 3])
@@ -660,12 +681,65 @@ for stim_type=1:3
 plot(MeanFR_stimtype_Pos{stim_type}(:,1),MeanFR_stimtype_Pos{stim_type}(:,2),'.','color',cmap(stim_type,:),'markersize',20)
 hold all
 end
-plot([0 21],[0 21],'--','color','k','linewidth',2)
+plot([0 30],[0 30],'--','color','k','linewidth',2)
 title(['Mean Response within ± 12 cm of' char(10) 'Stimulation Onset Position'])
 xlabel('Firing rate before stimulation')
 ylabel('Firing rate after stimulation')
 axis tight
 
+
+nexttile([2 3])
+LapBinSize=6;
+for stim_type=1:3
+StimTypeSort=find(Stimulation_type==stim_type);
+ZapLap=cell2mat(Stimulation_Lap(StimTypeSort));
+thingsToPlot=MeanFR_stimtype_Pos{stim_type}(:,2)./MeanFR_stimtype_Pos{stim_type}(:,1);
+thingsToPlot(thingsToPlot==inf)=NaN;
+%plot(ZapLap,MeanFR_stimtype_Pos{stim_type}(:,2)-MeanFR_stimtype_Pos{stim_type}(:,1),'.','color',cmap(stim_type,:),'markersize',20)
+plot(ZapLap,thingsToPlot,'.','color',cmap_light(stim_type,:),'markersize',7)
+hold all
+Average_FR_Ratio=[]; Std_FR_Ratio=[];
+for b=1:ceil(max(ZapLap)/LapBinSize)
+    bin_list=find(ceil(ZapLap/LapBinSize)==b);
+    Average_FR_Ratio(b)=mean(thingsToPlot(bin_list),'omitnan');
+    Std_FR_Ratio(b)=std(thingsToPlot(bin_list),'omitnan');
+end
+ZapLap_bin=[1:ceil(max(ZapLap)/LapBinSize)]*LapBinSize-LapBinSize/2;
+errorbar(ZapLap_bin,Average_FR_Ratio,Std_FR_Ratio,'color',cmap(stim_type,:),'linewidth',2,'marker','+','capsize',10)
+end
+%set(gca,'yscale','log')
+plot([0 35],[1 1],'--','color','k','linewidth',2)
+xlabel('Stimulation Lap #')
+ylabel(['Firing rate change:' char(10) 'Post/pre stimulation'])
+axis tight
+ylim([0 10])
+
+nexttile([2 3])
+PosBinSize=0.25*115;
+for stim_type=1:3
+StimTypeSort=find(Stimulation_type==stim_type);
+ZapPos=cell2mat(Stimulation_Pos(StimTypeSort));
+thingsToPlot=MeanFR_stimtype_Pos{stim_type}(:,2)./MeanFR_stimtype_Pos{stim_type}(:,1);
+thingsToPlot(thingsToPlot==inf)=NaN;
+%plot(ZapLap,MeanFR_stimtype_Pos{stim_type}(:,2)-MeanFR_stimtype_Pos{stim_type}(:,1),'.','color',cmap(stim_type,:),'markersize',20)
+plot(ZapPos*2/115,thingsToPlot,'.','color',cmap_light(stim_type,:),'markersize',7)
+hold all
+Average_FR_Ratio=[]; Std_FR_Ratio=[];
+for b=1:ceil(max(ZapPos)/PosBinSize)
+    bin_list=find(ceil(ZapPos/PosBinSize)==b);
+    Average_FR_Ratio(b)=mean(thingsToPlot(bin_list),'omitnan');
+    Std_FR_Ratio(b)=std(thingsToPlot(bin_list),'omitnan');
+end
+ZapPos_bin=[1:ceil(max(ZapPos)/PosBinSize)]*PosBinSize-PosBinSize/2;
+errorbar(ZapPos_bin*2/115,Average_FR_Ratio,Std_FR_Ratio,'color',cmap(stim_type,:),'linewidth',2,'marker','+','capsize',10)
+end
+%set(gca,'yscale','log')
+plot([0 2],[1 1],'--','color','k','linewidth',2)
+plot([1.6 1.6],[0 10],'--','color','r','linewidth',2)
+xlabel('Stimulation position (m)')
+ylabel(['Firing rate change:' char(10) 'Post/pre stimulation'])
+axis tight
+ylim([0 10])
 
 
 %% Complex spike detection
@@ -706,9 +780,9 @@ for g=1:length(PC_Result)
     end
 end
     
-save(fullfile(save_figto,['PF_Result_20231117.mat']),'PC_Result','-v7.3')
+save(fullfile(save_figto,['PF_Result_20231126.mat']),'PC_Result','-v7.3')
 
-%%
+%% Show Complex spike firing map
 cmap=[0.5 0.05 0.15;0.1 0.1 0.1]/5;
 f1=figure(1); clf;
 coarse_bin=3;
@@ -761,224 +835,38 @@ end
 
 f3=figure(3); clf;
 NtoPlot=[3 3;4 3;5 1;6 1;9 1;18 1;15 1];
-tiledlayout(2,size(NtoPlot,1))
-for n=1:NtoPlot
-    Lap_tmp_CS=repmat(PC_Result{i}.Lap_CS(:,:,n),1,3);
+tiledlayout(4,4)
+for n=1:size(NtoPlot,1)
+
+    Lap_tmp_CS=repmat(PC_Result{NtoPlot(n,1)}.Lap_CS(:,:,NtoPlot(n,2)),1,3);
         Lap_tmp_CS=movmean(Lap_tmp_CS,coarse_bin,2);
         Lap_tmp_CS=(Lap_tmp_CS(:,pos_bin+1:2*pos_bin));
         
 
-        Lap_tmp_SS=repmat(PC_Result{i}.Lap_FR(:,:,n),1,3);
-        Lap_tmp_SS=movmean(Lap_tmp_SS,coarse_bin,2);
-        Lap_tmp_SS=(Lap_tmp_SS(:,pos_bin+1:2*pos_bin));
+        Lap_tmp_FR=repmat(PC_Result{NtoPlot(n,1)}.Lap_FR(:,:,NtoPlot(n,2)),1,3);
+        Lap_tmp_FR=movmean(Lap_tmp_FR,coarse_bin,2);
+        Lap_tmp_FR=(Lap_tmp_FR(:,pos_bin+1:2*pos_bin));
         
-        composite_LR=(squeeze(sum(cat(3,Lap_tmp_CS,Lap_tmp_SS).*reshape(cmap,1,1,[],3),3)));
-    nexttile([1 1])
+        composite_LR=(squeeze(sum(cat(3,Lap_tmp_CS,Lap_tmp_FR).*reshape(cmap,1,1,[],3),3)));
 
-    nexttile([1 1])
+    nexttile(n+(n>4)*4,[1 1])
+    imagesc(composite_LR)
+    set(gca,'xtick',[0:75:150],'xticklabel',[0:75:150]*2/150)
+    xlabel('Position (m)')
+    ylabel('VR trial')
+    
+    nexttile(n+(n>4)*4+4,[1 1])
+    % plot(mean(PC_Result{NtoPlot(n,1)}.Lap_CS(:,:,NtoPlot(n,2)),1,'omitnan'),'color',cmap(1,:)*10); hold all
+    % plot(mean(PC_Result{NtoPlot(n,1)}.Lap_FR(:,:,NtoPlot(n,2)),1,'omitnan'),'color',cmap(2,:)*10)
+    plot(mean(Lap_tmp_CS,1,'omitnan'),'color',cmap(1,:)*10); hold all
+    plot(mean(Lap_tmp_FR,1,'omitnan'),'color',cmap(2,:)*10)
+    %plot(mean(Lap_tmp_FR-Lap_tmp_CS,1,'omitnan'),'color',[0 0.4 0.8])
+    set(gca,'xtick',[0:75:150],'xticklabel',[0:75:150]*2/150)
+    xlabel('Position (m)')
+    ylabel('Firing rate (Hz)')
+
+   % nexttile(size(NtoPlot,1)*2+n,[1 1])
+   % errorbar_shade([1:pos_bin],mean(Lap_tmp_CS./Lap_tmp_FR,1,'omitnan'),std(Lap_tmp_CS./Lap_tmp_FR,0,1,'omitnan'),cmap(1,:)*10)
 end
-
-
-%% 
-
-for i=1:length(PC_Result)
-    [~, StimN]=max(mean(PC_Result{i}.spike(:,find(PC_Result{i}.Blue>0)),2)./mean(PC_Result{i}.spike,2));
-
-    Stimulation_lap=unique((PC_Result{g}.VR(12,:)==1).*PC_Result{g}.VR(8,:));
-    bwStimlap=zeros(max(PC_Result{g}.VR(8,:)),1); bwStimlap(Stimulation_lap(2:end))=1;
-    bwStimlap=bwlabel(bwStimlap);
-    NStim=sum(bwStimlap>0);
-    bwUnStimlap=bwlabel(bwStimlap==0);
-    [~, Lap_start]=unique(PC_Result{g}.VR(8,:));
-    VRworld=PC_Result{g}.VR(2,Lap_start);
-
-    for sl=1:max(bwUnStimlap)
-        sl_tmp=find(bwUnStimlap==sl & VRworld'==2);
-        if length(sl_tmp)>5
-            sl_tmp=sl_tmp(1:5);
-        end
-        FR_field(sl,:)=mean(PC_Result{g}.Lap_FR(sl_tmp,:,n),1,'omitnan');
-        Sub_field(sl,:)=mean(PC_Result{g}.Lap_sub(sl_tmp,:,n),1,'omitnan');
-        lgn=[lgn, {['Lap ' num2str(sl_tmp(1)) '-' num2str(sl_tmp(end))]}];
-
-    end
-
-
-end
-
-
-%% Plot
-for g=1:length(PC_Result)
-    [~,stim_Start]=unique(PC_Result{g}.VR(8,:).*round(PC_Result{g}.VR(12,:)));
-    stim_Start=stim_Start(2:end);
-    wnd=[-200:1200];
-    [sz_fprntY, sz_fprntX, nNeurons]=size(PC_Result{g}.c_ftprnt);
-    for n=1:nNeurons
-
-        Stimulation_lap=unique((PC_Result{g}.VR(12,:)==1).*PC_Result{g}.VR(8,:));
-        bwStimlap=zeros(max(PC_Result{g}.VR(8,:)),1); bwStimlap(Stimulation_lap(2:end))=1;
-        bwStimlap=bwlabel(bwStimlap);
-        NStim=sum(bwStimlap>0);
-        bwUnStimlap=bwlabel(bwStimlap==0);
-        [~, Lap_start]=unique(PC_Result{g}.VR(8,:));
-        VRworld=PC_Result{g}.VR(2,Lap_start);
-
-        f1=figure;
-        tiledlayout(2,4)
-        nexttile([1 1])
-        imshow2(imfuse(PC_Result{g}.c_ftprnt(:,:,n),PC_Result{g}.ref_im{n}),[])
-        title(fpath{g},'Interpreter','none')
-
-        nexttile([1 1])
-        plot(rescale2(reshape(PC_Result{g}.normTraces(n,stim_Start+repmat(wnd,NStim,1)),NStim,[]),2)'-[1:NStim]*1.5);
-        hold all
-        plot(rescale2(reshape(PC_Result{g}.VR(12,stim_Start+repmat(wnd,NStim,1)),NStim,[]),2)'-[1:NStim]*1.5,'color',[0 0.5 1]);
-        axis off
-
-        nexttile([1 1])
-        imagesc(PC_Result{g}.Lap_FR(:,:,n)); colormap('turbo');
-        title(['Stimulation at ' num2str(Stimulation_lap(2:end)) 'th Lap'])
-        set(gca,'xtick',[0:10:50],'xticklabel',[0:10:50]*4)
-        xlabel('Position (cm)')
-        ylabel('VR trial')
-
-        nexttile([1 1])
-        imagesc(PC_Result{g}.Lap_sub(:,:,n)); colormap('turbo');
-        set(gca,'xtick',[0:10:50],'xticklabel',[0:10:50]*4)
-        xlabel('Position (cm)')
-        ylabel('VR trial')
-
-
-        clear StimStart lgd FR_field Sub_field
-        lgn=[];
-        for sl=1:max(bwUnStimlap)
-            sl_tmp=find(bwUnStimlap==sl & VRworld'==2);
-            if length(sl_tmp)>5
-                sl_tmp=sl_tmp(1:5);
-            end
-            FR_field(sl,:)=mean(PC_Result{g}.Lap_FR(sl_tmp,:,n),1,'omitnan');
-            Sub_field(sl,:)=mean(PC_Result{g}.Lap_sub(sl_tmp,:,n),1,'omitnan');
-            lgn=[lgn, {['Lap ' num2str(sl_tmp(1)) '-' num2str(sl_tmp(end))]}];
-
-        end
-        ax1=[];
-        ax1=[ax1 nexttile([1 1])];
-        plot(FR_field')
-        set(gca,'xtick',[0:10:50],'xticklabel',[0:10:50]*4)
-        xlabel('Position (cm)')
-        ylabel('Firing rate (Hz)')
-
-        ax1=[ax1 nexttile([1 1])];
-        plot(Sub_field')
-        set(gca,'xtick',[0:10:50],'xticklabel',[0:10:50]*4)
-        xlabel('Position (cm)')
-        ylabel('Subthreshold')
-        legend(lgn,'Location','northwestoutside');
-
-        ax1=[ax1 nexttile([1 1])];
-        plot((FR_field(2:end,:)-FR_field(1:end-1,:))')
-        set(gca,'xtick',[0:10:50],'xticklabel',[0:10:50]*4)
-        xlabel('Position (cm)')
-        ylabel('\Delta Firing Rate (Hz)')
-
-        ax1=[ax1 nexttile([1 1])];
-        plot((Sub_field(2:end,:)-Sub_field(1:end-1,:))')
-        set(gca,'xtick',[0:10:50],'xticklabel',[0:10:50]*4)
-        xlabel('Position (cm)')
-        ylabel('\Delta Subthreshold')
-        legend({'Stim Sq#1','Stim Ps#1','Stim Sq#2'},'Location','northwestoutside')
-
-        linkaxes(ax1,'x')
-        axis tight
-        set(f1, 'Position', [100, 100, 1400, 1000]);
-        set(findall(gcf,'-property','FontSize'),'FontSize',14);
-
-        saveas(f1,fullfile(fpath{g} ,[num2str(n) 'thCell' '.fig']))
-        print(f1, fullfile(fpath{g} ,[num2str(n) 'thCell' '.jpg']),'-djpeg', ['-r', num2str(600)]);
-    end
-end
-
-
-%% find CS
-
-goi=[1 2]; place_bin=50;
-
-spike_time=find(spike); spike_height=tr(spike_time);
-
-pass_frq=[15];
-Fs=1000;
-
-freq_lowhigh=pass_frq/(Fs/2);
-[b, a] = butter(4, freq_lowhigh, 'low');
-tr_pass = filtfilt(b, a, tr);
-figure(2); clf; show_t=[750000:850000];
-plot(t(show_t),tr(show_t)); hold all
-plot(t(show_t),tr_pass(show_t));
-plot(t(show_t),zeros(length(show_t),1));
-
-[trans tr_trace]=detect_transient(tr_pass,[3 0.5],spike);
-CS_ind=find(trans.spike_number>2 & trans.mean_ISI<40);
-CS_trace=ismember(tr_trace,CS_ind);
-figure(3); clf;
-plot(t,tr)
-hold all
-tr_nan=tr; tr_nan(CS_trace==0)=NaN;
-plot(t,tr_nan,'r')
-
-CS_trace_spike=spike.*bwlabel(CS_trace);
-
-
-
-
-
-for g=goi
-    [sz_fprntY, sz_fprntX, nNeurons]=size(Result{g}.c_ftprnt);
-    sz=size(Result{g}.FOV);
-
-    Result{g}.c_fprnt_merge=zeros(sz(1),sz(2),nNeurons);
-    [~, n_sort]=sort(Result{g}.centers(:,1),'ascend');
-    Result{g}.n_sort = n_sort;
-    tr_cat=[tr_cat Result{g}.normTraces(n_sort,:)];
-    sp_cat=[sp_cat Result{g}.spike(n_sort,:)];
-    if ~isempty(vr_cat)
-        addVR=Result{g}.VR;
-        addVR(8,:)=vr_cat(8,end)+addVR(8,:);
-    else
-        addVR=Result{g}.VR;
-    end
-    vr_cat=[vr_cat addVR];
-
-    for n=1:length(n_sort)
-        offset=round(Result{g}.centers(n_sort(n),:)+[-floor(sz_fprntY/2):1:floor(sz_fprntY/2); -floor(sz_fprntX/2):1:floor(sz_fprntX/2)]');
-        Result{g}.c_fprnt_merge(offset(:,2),offset(:,1),n)=Result{g}.c_ftprnt(:,:,n_sort(n))';
-        [Result{g}.Lap_FR(:,:,n) Result{g}.Lap_V]=PlaceTrigger_average(Result{g}.spike(n_sort(n),:),place_bin,Result{g}.VR,0.003,115);
-        [Result{g}.Lap_F(:,:,n) Result{g}.Lap_V]=PlaceTrigger_average(Result{g}.normTraces(n_sort(n),:),place_bin,Result{g}.VR,0.003,115);
-        [Result{g}.Lap_sub(:,:,n) Result{g}.Lap_V]=PlaceTrigger_average(Result{g}.subThreshold(n_sort(n),:),place_bin,Result{g}.VR,0.003,115);
-    end
-    figure;
-    show_footprnt(Result{g}.c_fprnt_merge,mat2gray(Result{g}.FOV))
-end
-
-%%
-i=1;
-show_traces_spikes(Result{i}.normTraces,Result{i}.spike,[Result{i}.VR(5,:)/30; Result{i}.Blue]);
-figure;
-for n=1:size(Result{i}.Lap_FR,3)
-    nexttile([1 1])
-    fr=repmat(Result{i}.Lap_FR(:,:,n),1,3);
-    fr=movmean(fr,5,2);
-    s=size(Result{i}.Lap_FR(:,:,n));
-    imagesc(fr(:,s(2)+1:s(2)*2))
-    colormap('turbo')
-    title(num2str(n))
-end
-
-
-
-
-
-
-
-
-
+legend({'Complex spike','All spike'})
 

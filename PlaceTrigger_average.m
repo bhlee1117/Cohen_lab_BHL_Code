@@ -63,15 +63,19 @@ Lap_V=NaN(max(lap_spot_stay(:)),place_bin);
 
 for p=1:place_bin
     for l=1:max(lap_spot_stay(p,:))
+
+        AtPosL=find(lap_spot_stay(p,:)==l);
+        AtPosL_Run=find(lap_spot_stay(p,:)==l & ~not_running);
+
         if ~isempty(find(lap_spot_stay(p,:)==l)) %only the laps the mouse went to the place bin
 
             %Lap_FR(l,p,:)=mean(spike_run(noi,find(lap_spot_stay(p,:)==l)),2,'omitnan')/(1.25*1e-3);
-            lg(p,l)=length(find(lap_spot_stay(p,:)==l & ~not_running)); % number of frames stayed in l th lap, p position bin
-            lgV(p,l)=length(find(lap_spot_stay(p,:)==l));
+            lg(p,l)=length(AtPosL_Run); % number of frames stayed in l th lap, p position bin
+            lgV(p,l)=length(AtPosL);
             if lg(p,l)==0
                 Lap_FR(l,p,:)=NaN;
             else
-                Lap_FR(l,p,:)=sum(spike_run(1,find(lap_spot_stay(p,:)==l)),2,'omitnan')/(lg(p,l)*rate); %number of spike divided by stayed time
+                Lap_FR(l,p,:)=sum(spike_run(1,AtPosL),2,'omitnan')/(lg(p,l)*rate); %number of spike divided by stayed time
             end
 
             if lgV(p,l)==0
@@ -80,7 +84,7 @@ for p=1:place_bin
                 Lap_V(l,p,:)=NaN;
             else
                 %Lap_V(l,p,:)=sum(vel_trace(noi,find(lap_spot_stay(p,:)==l)),2,'omitnan')/(lgV(p,l)*rate); %number of spike divided by stayed time
-                Lap_V(l,p,:)=mean(vel_trace(1,find(lap_spot_stay(p,:)==l)),2,'omitnan');%/(lgV(p,l)*rate); %number of spike divided by stayed time
+                Lap_V(l,p,:)=mean(vel_trace(1,AtPosL),2,'omitnan');%/(lgV(p,l)*rate); %number of spike divided by stayed time
             end
         end
     end

@@ -557,7 +557,7 @@ for i=1:size(NeuronsToUse,1)
 
             StimulationWaveform_indicator{g}=[];
             StimulationWaveform_actuator{g}=[];
-
+            Stimulation_Lap{g}=[];
             for StimulationLap=LapOfInterest{b,1}(end)+1:LapOfInterest{b,2}(1)-1
 
                 StimOnFrame = find(PC_Result{i}.VR(8,:)==StimulationLap & PC_Result{i}.Blue>0,1);
@@ -565,6 +565,7 @@ for i=1:size(NeuronsToUse,1)
                 StimOnFrame_Tau = StimOnFrame + Wvf_window;
                 StimulationWaveform_indicator{g}=[StimulationWaveform_indicator{g}; PC_Result{i}.normTraces(NeuronInterest,StimOnFrame_Tau)];
                 StimulationWaveform_actuator{g}=[StimulationWaveform_actuator{g}; PC_Result{i}.Blue(StimOnFrame_Tau)];
+                Stimulation_Lap{g}=StimulationLap;
 
             end
 
