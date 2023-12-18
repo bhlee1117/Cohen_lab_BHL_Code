@@ -425,7 +425,6 @@ end
 ref_ROI={[2],[4],[2 3]};
 figure(2); clf;
 tiledlayout(6,1)
-ax1=[];
 for g=1:length(fpath)
     g
     ref_trace=mean(PC_Result{g}.normTraces(ref_ROI{g},:),1);
@@ -433,19 +432,19 @@ for g=1:length(fpath)
     t=[1:length(ref_trace)];
     spike_time=find(spike); spike_height=ref_trace(spike_time);
 
-tr_sub=get_subthreshold(ref_trace,spike,5,15);
-show_t=[450000:550000];
-ax1=[ax1 nexttile([1 1])];
+tr_sub=get_subthreshold(ref_trace-movmedian(ref_trace,1000),spike,5,15);
+show_t=[410000:450000];
+nexttile([1 1])
 plot(t(show_t),ref_trace(show_t)); hold all
 plot(t(show_t),tr_sub(show_t));
 plot(t(show_t),zeros(length(show_t),1));
 legend({'F trace','Subthreshold'})
 
-[trans tr_trace]=detect_transient(tr_sub,[4 0.8],spike);
+[trans tr_trace]=detect_transient(tr_sub,[4 0.5],spike);
 CS_ind=find(trans.spike_number>2 & trans.mean_ISI<40);
 PC_Result{g}.CS_trace=ismember(tr_trace,CS_ind);
 
-ax1=[ax1 nexttile([1 1])];
+nexttile([1 1])
 plot(t(show_t),ref_trace(show_t))
 hold all
 tr_nan=ref_trace; tr_nan(PC_Result{g}.CS_trace==0)=NaN;
@@ -461,7 +460,6 @@ end
 %fileInd=ceil(CS_time/time_segment);
 %frameInd=mod(CS_time,time_segment);
 end
-linkaxes(ax1,'xy')
 %% Show Complex spikes
 figure;
 tiledlayout(1,2)
