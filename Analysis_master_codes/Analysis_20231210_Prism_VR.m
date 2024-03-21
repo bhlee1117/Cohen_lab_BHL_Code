@@ -1,8 +1,8 @@
 clear
 clc;
 cd '/Volumes/BHL_WD18TB/PP72_PlaceCellResults';
-[~, fpath, raw] = xlsread(['/Volumes/cohen_lab/Lab/Labmembers/Byung Hun Lee/Data/' ...
-    'PlaceCellData(Prism)_Arrangement.xlsx'], 'Sheet1', 'C5:C7');
+[~, fpath, raw] = xlsread(['/Volumes/BHL_WD18TB/' ...
+    'PrismPCdata_Arrangement.xlsx'], 'Sheet1', 'C5:C7');
 
 % [~, ~, NeuronsToUse]=xlsread(['/Volumes/cohen_lab/Lab/Labmembers/Byung Hun Lee/Data/' ...
 %     'PlaceCellData_Arrangement.xlsx'], 'Sheet1', 'L8:M42');
@@ -61,7 +61,7 @@ for j=1:length(f_seg)-1
 end
 end
 
-%%
+%% Get footprint
 
 for f=1%:length(fpath)
 disp(fpath{f}); Result=[];
@@ -190,7 +190,7 @@ save(fullfile(fpath{f},'PC_Result.mat'),'Result','fpath','-v7.3')
 end
 %% Load Virmen data
 
-for f=1:length(fpath)
+for f=1%:length(fpath)
 
 load(fullfile(fpath{f},'PC_Result.mat'))
 fileList = dir(fullfile(fpath{f}, '*.data'));
@@ -236,7 +236,7 @@ exclude_frq=[241.7 242]; %monitor
 exclude_frq2=[25 65.7]; %motion
     time_bin=15000; Fs=1000; ref_trace=[2 4 4]; %2nd trunk is the reliable trace
 
-for f=1:length(fpath)
+for f=1%:length(fpath)
     nTime=size(PC_Result{f}.traces,2);
     nROI=size(PC_Result{f}.traces,1);
 freq_lowhigh=exclude_frq/(Fs/2);
@@ -350,16 +350,18 @@ end
 
 end
 % 
- save(fullfile(save_figto,'Result_PC_Prism_20231210.mat'),'PC_Result','fpath','-v7.3')
+ save(fullfile(save_figto,'Result_PC_Prism_20240106.mat'),'PC_Result','fpath','-v7.3')
 % 
 % %save(fullfile(fpath,'Result_20230928.mat'),'Result','fpath','-v7.3')
 
+%%
 
+load(fullfile(save_figto,'Result_PC_Prism_20240106.mat'))
 %% Place averaged
 place_bin=150;
 velocity_threshold=-0.002;
 ref_ROI={[2],[4],[2 3]};
-for g=1:length(fpath)
+for g=1%:length(fpath)
     g
     
     PC_Result{g}.Lap_FR=[]; PC_Result{g}.Lap_sub=[]; PC_Result{g}.Lap_theta=[];
@@ -369,7 +371,9 @@ for g=1:length(fpath)
     PC_Result{g}.ref_spike=find_spike_bh(ref_trace-movmedian(ref_trace,300),5,3);
 
         [PC_Result{g}.Lap_FR PC_Result{g}.Lap_V]=PlaceTrigger_average(PC_Result{g}.ref_spike,place_bin,PC_Result{g}.VR,velocity_threshold,115);
-        [PC_Result{g}.Lap_F PC_Result{g}.Lap_V]=PlaceTrigger_average(ref_trace,place_bin,PC_Result{g}.VR,velocity_threshold,115);
+for n=1:size(PC_Result{g}.normTraces,1)
+        [PC_Result{g}.Lap_F(:,:,n) PC_Result{g}.Lap_V]=PlaceTrigger_average(PC_Result{g}.normTraces(n,:),place_bin,PC_Result{g}.VR,velocity_threshold,115);
+end
         ref_subthreshold=movmean(mean(PC_Result{g}.subThreshold(ref_ROI{g},:),1),1000);
         
         [PC_Result{g}.Lap_sub PC_Result{g}.Lap_V]=PlaceTrigger_average(ref_subthreshold,place_bin,PC_Result{g}.VR,velocity_threshold,115);
@@ -401,7 +405,7 @@ saveas(f1,fullfile(save_figto ,['PF_map' '.fig']))
 %print(f1, fullfile(save_figto ,['PF_map' '.jpg']),'-djpeg', ['-r', num2str(400)]);
 
 
-%% Spike triggered averaged
+%% Spike triggered average
 nFront=20; nBack=50;
 nTau=[-nFront:nBack];
 tiledlayout(1,length(PC_Result))
@@ -420,9 +424,64 @@ for i=1:length(PC_Result)
    arrayfun(@(l,c) set(l,'Color',c{:}),l,num2cell(turbo(nROI),2))
 end
 
+%% Spike triggered average movie
+nFront=20; nBack=50;
+nTau=[-nFront:nBack];
+for f=1:3
+load([fpath{f} '/output_data.mat'])
+sz=double(Device_Data{1, 3}.ROI([2 4]));
+frm_end=max(Device_Data{1, 2}.Counter_Inputs(1, 1).data);
+f_seg=[[1:time_segment:frm_end] frm_end+1]; f_seg(2:end)=f_seg(2:end)-1;
+
+fileInd=ceil(find(PC_Result{f}.ref_spike)/time_segment);
+frameInd=mod(find(PC_Result{f}.ref_spike),time_segment);
+%line up movie segments at simple spike
+STA_movie_align=[];
+for j=unique(fileInd)
+    mov_mc=double(readBinMov([fpath{f} '/mc_ShutterReg' num2str(j,'%02d') '.bin'],sz(2),sz(1)));
+    load([fpath{f} '/mcTrace' num2str(j,'%02d') '.mat']);
+
+    if j==length(f_seg)-1
+        mc=mcTrace.xymean;
+    else
+        mov_mc=mov_mc(:,:,1:time_segment);
+        mc=mcTrace.xymean(1:time_segment,:);
+    end
+
+    mov_res= mov_mc-mean(mov_mc,3);
+    bkg = zeros(2, size(mov_mc,3));
+    bkg(1,:) = linspace(-1, 1, size(mov_mc,3));  % linear term
+    bkg(2,:) = linspace(-1, 1, size(mov_mc,3)).^2;  % quadratic term
+    mov_res = SeeResiduals(mov_res,mc);
+    mov_res = SeeResiduals(mov_res,mc.^2);
+    mov_res = SeeResiduals(mov_res,mc(:,1).*mc(:,3));
+    mov_res= SeeResiduals(mov_res,bkg,1);
+
+    for k=find(fileInd==j)
+    try 
+        STA_movie_align = cat(3,STA_movie_align, tovec(mov_res(:,:,frameInd(k)+nTau)));
+    end
+    end
+end
+PC_Result{f}.STA_movie_align=STA_movie_align;
+end
+
+%% Write STA movie
+STAmov=[]; MaxSize=452;
+for f=1:length(PC_Result)
+    movTmp=zeros(size(PC_Result{f}.ref_im,1),MaxSize,size(PC_Result{f}.STA_movie_align,2));
+    bd=(MaxSize-size(PC_Result{f}.ref_im,2))/2;
+    movTmp(:,bd+1:MaxSize-bd,:)=toimg(mean(PC_Result{f}.STA_movie_align,3),size(PC_Result{f}.ref_im,1),size(PC_Result{f}.ref_im,2));
+    STAmov=[STAmov; movTmp];
+end
+writeMov([save_figto,'/STA_movie_total'],-STAmov,[],10,1,[])
+writeMov_wTrace([save_figto,'/STA_movie_total'],-STA,[],10,1,[],[],Result{1}.normTrace(5,segment_dsp))
+
+
+
 %% detect complex spikes
 
-ref_ROI={[2],[4],[2 3]};
+ref_ROI={[2],[3 4],[3]};
 figure(2); clf;
 tiledlayout(6,1)
 ax1=[];
@@ -434,7 +493,7 @@ for g=1:length(fpath)
     spike_time=find(spike); spike_height=ref_trace(spike_time);
 
 tr_sub=get_subthreshold(ref_trace,spike,5,15);
-show_t=[450000:550000];
+show_t=[350000:550000];
 ax1=[ax1 nexttile([1 1])];
 plot(t(show_t),ref_trace(show_t)); hold all
 plot(t(show_t),tr_sub(show_t));
@@ -442,7 +501,7 @@ plot(t(show_t),zeros(length(show_t),1));
 legend({'F trace','Subthreshold'})
 
 [trans tr_trace]=detect_transient(tr_sub,[4 0.8],spike);
-CS_ind=find(trans.spike_number>2 & trans.mean_ISI<40);
+CS_ind=find(trans.spike_number>2 & trans.mean_ISI<30);
 PC_Result{g}.CS_trace=ismember(tr_trace,CS_ind);
 
 ax1=[ax1 nexttile([1 1])];
@@ -462,6 +521,40 @@ end
 %frameInd=mod(CS_time,time_segment);
 end
 linkaxes(ax1,'xy')
+
+%% realign by footprint's location from soma (1st footprint)
+for f=1:length(PC_Result)
+centroid_ftprnt = get_coord(PC_Result{f}.ftprnt);
+dist_centroid = distance_mat(centroid_ftprnt(1,:),centroid_ftprnt);
+[~, PC_Result{f}.dist_order]=sort(dist_centroid,'ascend');
+end
+%%
+f=1;
+figure; clf;
+nBack = -50;
+nFront = 100;
+tau = nBack:nFront;
+fgauss=fspecial('gaussian',[1 3],1);
+%renormTrace=rescale2(PC_Result{f}.normTraces(PC_Result{f}.dist_order,:),2);
+renormTrace=rescale2(PC_Result{f}.normTraces,2);
+for i=31:40%length(PC_Result{f}.CS_time)
+nexttile([1 1])
+nROI=size(PC_Result{f}.normTraces,1);
+trace_seg=renormTrace(:,PC_Result{f}.CS_time(i)+tau);
+%trace_seg=rescale2(trace_seg,2);
+trace_seg_filter=conv2(trace_seg,fgauss,'same');
+imagesc(trace_seg_filter);
+hold all
+colormap(Aurora)
+caxis([0.25 0.9])
+line=plot(-trace_seg'+[1:nROI]+0.5);
+arrayfun(@(l,c) set(l,'Color',c{:}),line,num2cell(jet(nROI),2))
+title(['Complex spike #' num2str(i)])
+end
+
+
+
+
 %% Show Complex spikes
 figure;
 tiledlayout(1,2)

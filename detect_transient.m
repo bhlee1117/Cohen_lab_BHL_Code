@@ -16,21 +16,28 @@ for i=1:size(traces_hi,1) %neuron
         transients_final(i,t2(1):t2(end))=1;
     end
     [transients_final(i,:) n]=bwlabel(double(transients_final(i,:)));
-
-    for t=1:n-1 %transients
-        tr_ind=find(transients_final(i,:)==t);
-        trans(i).length(t)=length(tr_ind);
-        trans(i).amp(t)=max(traces_hi(i,tr_ind));
-        trans(i).int(t)=sum(traces_hi(i,tr_ind));
-        sp_seg=spike_trace(i,tr_ind);
-        trans(i).spike_number(t)=sum(sp_seg);
-        if sum(sp_seg)>1
-            sp_seg_time=find(sp_seg);
-            trans(i).mean_ISI(t)=mean(sp_seg_time(2:end)-sp_seg_time(1:end-1));
-        else
-            trans(i).mean_ISI(t)=NaN;
+    if n>1
+        for t=1:n %transients
+            tr_ind=find(transients_final(i,:)==t);
+            trans(i).length(t)=length(tr_ind);
+            trans(i).amp(t)=max(traces_hi(i,tr_ind));
+            trans(i).int(t)=sum(traces_hi(i,tr_ind));
+            sp_seg=spike_trace(i,tr_ind);
+            trans(i).spike_number(t)=sum(sp_seg);
+            if sum(sp_seg)>1
+                sp_seg_time=find(sp_seg);
+                trans(i).mean_ISI(t)=mean(sp_seg_time(2:end)-sp_seg_time(1:end-1));
+            else
+                trans(i).mean_ISI(t)=NaN;
+            end
         end
+        trans(i).interval=transients_final(i,:);
+    else
+        trans(i).length=[];
+        trans(i).amp=[];
+        trans(i).int=[];
+        trans(i).spike_number=[];
+        trans(i).mean_ISI=[];
+        trans(i).interval=[];
     end
-    trans(i).interval=transients_final(i,:);
-end
 end

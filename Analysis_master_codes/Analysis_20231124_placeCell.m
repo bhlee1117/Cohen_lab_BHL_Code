@@ -747,15 +747,20 @@ Fs=1000; pass_frq=15;
 freq_lowhigh=pass_frq/(Fs/2);
 [b, a] = butter(4, freq_lowhigh, 'low');
 
-for i=1:length(PC_Result)
-tr_highpass=PC_Result{i}.normTraces-movmedian(PC_Result{i}.normTraces,300,2);
+for i=8:length(PC_Result)
+    tr_highpass=[];
+    for j=1:size(PC_Result{i}.normTraces,1)
+tr_highpass(j,:)=PC_Result{i}.normTraces(j,:)-movprc(PC_Result{i}.normTraces(j,:),300,30);
+    end
 nNeuron=size(PC_Result{i}.normTraces,1);
-tr_pass = cellfun(@(x) filtfilt(b, a, x),mat2cell(tr_highpass,ones(1,nNeuron)),'UniformOutput',false);
-tr_pass=cell2mat(tr_pass);
+
+%tr_pass = cellfun(@(x) filtfilt(b, a, x),mat2cell(tr_highpass,ones(1,nNeuron)),'UniformOutput',false);
+%tr_pass=cell2mat(tr_pass);
+tr_pass=tr_highpass;
 [trans tr_trace]=detect_transient(tr_pass,[3 0.5],PC_Result{i}.spike);
 CS_trace=[];
 for n=1:nNeuron
-CS_ind=find(trans(n).spike_number>2 & trans(n).mean_ISI<20);
+CS_ind=find(trans(n).spike_number>2 & trans(n).mean_ISI<18);
 CS_trace(n,:)=ismember(tr_trace(n,:),CS_ind);
 end
 PC_Result{i}.CS_trace=CS_trace;
@@ -780,7 +785,7 @@ for g=1:length(PC_Result)
     end
 end
     
-save(fullfile(save_figto,['PF_Result_20231126.mat']),'PC_Result','-v7.3')
+save(fullfile(save_figto,['PF_Result_20240111.mat']),'PC_Result','-v7.3')
 
 %% Show Complex spike firing map
 cmap=[0.5 0.05 0.15;0.1 0.1 0.1]/5;

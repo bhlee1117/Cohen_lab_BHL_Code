@@ -85,7 +85,6 @@ Result{i}.ROIpoly=ROIpoly;
 load(fullfile(fpath{i},['/mcTrace' num2str(1,'%02d') '.mat']));
 frm_end=max(Device_Data{1, 2}.Counter_Inputs(1, 1).data);
 
-frm_rate=double((CamTrigger(2)-CamTrigger(1))*DAQ_rate);
 mov_mc=double(readBinMov([fpath{i} '/mc_ShutterReg' num2str(1,'%02d') '.bin'],sz(2),sz(1)));
 Result{i}.ref_im=mean(mov_mc,3);
 [clickyROI, original_trace]=clicky(mov_mc);
@@ -192,7 +191,7 @@ Result{i}.traces=Result{i}.traces(:,1:length(CamTrigger)-1);
 Result{i}.mcTrace=Result{i}.mcTrace(1:length(CamTrigger)-1,:);
 
 end
-save('Result_DendStim_20231114.mat','Result','fpath','-v7.3')
+save('Result_DendStim_20240107.mat','Result','fpath','-v7.3')
 %% Clean up and norm
 
    % figure(2); clf;
@@ -230,9 +229,9 @@ Result{2}.normTrace(n,:)=filtfilt(b2,a2,Result{2}.traces(n,:));
     Result{i}.spike=find_spike_bh(Result{i}.normTrace-movmedian(Result{i}.normTrace,300,2),5,3);
  end
 % 
- save('Result_DendStim_20231114.mat','Result','fpath','-v7.3')
+ save('Result_DendStim_20240107.mat','Result','fpath','-v7.3')
 %%
- load('Result_DendStim_20231114.mat')
+ load('Result_DendStim_20240107.mat')
 %%
 
 noi=[1]; nTau=[-30:60];
@@ -401,4 +400,185 @@ ylabel('Normalized local amplitude')
 nexttile([2 3])
 imagesc(rescale2(Result{2}.normTrace,2))
 colormap('turbo')
+
+
+%% Putative dSpike
+
+i=1; segment_dsp=[9100:9200]; segment_CS=[6600:6700];
+load(fullfile(fpath{i},"output_data.mat"))
+sz=double(Device_Data{1, 4}.ROI([2 4]));
+frm_end=max(Device_Data{1, 2}.Counter_Inputs(1, 1).data);
+f_seg=[[1:time_segment:frm_end] frm_end+1]; f_seg(2:end)=f_seg(2:end)-1;
+take_window=repmat([1 time_segment],length(f_seg)-1,1);
+take_window(2:end,1)=take_window(2:end,1)+overlap; take_window(1:end-1,2)=take_window(1:end-1,2)+overlap;
+take_window(end)=mod(f_seg(end),time_segment);
+mc=[]; mov_mc=[];
+
+CamCounter=Device_Data{1, 2}.Counter_Inputs(1, 1).data;
+CamTrigger=find(CamCounter(2:end)-CamCounter(1:end-1));
+
+Result{i}.Blue=Device_Data{1, 2}.buffered_tasks(1, 1).channels(1, 2).data;
+Result{i}.Blue=Result{i}.Blue(CamTrigger);
+
+for j=1:length(f_seg)-1
+    j
+    mov=double(readBinMov([fpath{i} '/mc_ShutterReg' num2str(j,'%02d') '.bin'],sz(2),sz(1)));
+    load([fpath{i} '/mcTrace' num2str(j,'%02d') '.mat']);
+
+        mov=mov(:,:,[take_window(j,1):take_window(j,2)]);
+        mc=[mc; mcTrace.xymean([take_window(j,1):take_window(j,2)],:)];
+
+        mov_mc(:,:,end+1:end+size(mov,3))=mov;
+end
+mov_mc=mov_mc(:,:,2:end);
+
+    mov_mc_vec=tovec(mov_mc(bound:end-bound,bound:end-bound,:)); 
+    mov_mc_vec=(mov_mc_vec-mean(mov_mc_vec,1))./std(mov_mc_vec,0,1);
+
+    mov_res= mov_mc-mean(mov_mc,3);
+    bkg = zeros(1, size(mov_mc,3));
+%     bkg(1,:) = linspace(-1, 1, size(mov_mc,3));  % linear term
+%     bkg(2,:) = linspace(-1, 1, size(mov_mc,3)).^2;  % quadratic term
+    bkg(1,:)=movmedian(get_blueoffTrace(squeeze(mean(mov_mc,[1 2])),Result{i}.Blue,30),3000);
+    mov_res = SeeResiduals(mov_res,mc);
+    mov_res = SeeResiduals(mov_res,mc.^2);
+    mov_res = SeeResiduals(mov_res,mc(:,1).*mc(:,3));
+    mov_res= SeeResiduals(mov_res,bkg,1);
+
+% dSpike Case
+
+    clear mov_res_filt_dsp
+for z=1:length(segment_dsp)
+mov_res_filt_dsp(:,:,z)=imgaussfilt(mov_res(:,:,segment_dsp(z)),2);
+end
+
+nFrames2=size(mov_res_filt_dsp,3);
+datDS = imresize(mov_res_filt_dsp(10:end-10,10:end-10,:), 0.3, 'bilinear', 'Antialiasing',true);
+datDS = datDS - medfilt1(datDS, 20, [], 3);
+
+MovVec = tovec(datDS);
+covMat = MovVec*MovVec';
+[V, D] = eig(covMat);
+D = diag(D);
+D = D(end:-1:1);
+V = V(:,end:-1:1);
+vSign = sign(max(V) - max(-V));  % make the largest value always positive
+V = V.*vSign;
+eigTraces = V'*MovVec;
+figure(8); clf
+for i=1:10
+plot(rescale(eigTraces(i,:)')+i-0.5)
+hold all
+end
+
+nKeep = 10;
+eigImgs = zeros(sz(2), sz(1), nKeep);
+for j = 1:nKeep;
+    eigImgs(:,:,j) = mean(mov_res_filt_dsp.*reshape(eigTraces(j,:), [1, 1, nFrames2]),3);
+end;
+figure; clf;
+for j = 1:nKeep;
+    nexttile([1 1]);
+    imshow2(eigImgs(3:end-3,3:end-3,j), []);
+    title(num2str(j))
+end;
+
+keep_ind=[1:3];
+[ics, mixmat, sepmat] = sorted_ica(eigTraces(keep_ind,:)',length(keep_ind));
+figure(9); clf
+stackplot(ics)
+
+eigImgsVec = tovec(eigImgs(:,:,keep_ind));
+footPrintsVec = eigImgsVec*sepmat';
+footPrints = toimg(footPrintsVec, [sz(2), sz(1)]);
+figure(10); clf
+for j = 1:length(keep_ind);
+    nexttile([1 1]);
+    imshow2(footPrints(3:end-3,3:end-3,j), []);
+    title(num2str(j))
+end;
+
+dsp_img=mat2gray(mean(mov_res_filt_dsp(10:end-10,10:end-10,:).*reshape(ics(:,1),1,1,[]),3));
+
+% CS case
+clear mov_res_filt_CS
+for z=1:length(segment_CS)
+mov_res_filt_CS(:,:,z)=imgaussfilt(mov_res(:,:,segment_CS(z)),2);
+end
+
+nFrames2=size(mov_res_filt_CS,3);
+datDS = imresize(mov_res_filt_CS(10:end-10,10:end-10,:), 0.3, 'bilinear', 'Antialiasing',true);
+datDS = datDS - medfilt1(datDS, 20, [], 3);
+
+MovVec = tovec(datDS);
+covMat = MovVec*MovVec';
+[V, D] = eig(covMat);
+D = diag(D);
+D = D(end:-1:1);
+V = V(:,end:-1:1);
+vSign = sign(max(V) - max(-V));  % make the largest value always positive
+V = V.*vSign;
+eigTraces = V'*MovVec;
+figure(8); clf
+for i=1:10
+plot(rescale(eigTraces(i,:)')+i-0.5)
+hold all
+end
+
+nKeep = 10;
+eigImgs = zeros(sz(2), sz(1), nKeep);
+for j = 1:nKeep;
+    eigImgs(:,:,j) = mean(mov_res_filt_CS.*reshape(eigTraces(j,:), [1, 1, nFrames2]),3);
+end;
+figure; clf;
+for j = 1:nKeep;
+    nexttile([1 1]);
+    imshow2(eigImgs(3:end-3,3:end-3,j), []);
+    title(num2str(j))
+end;
+
+keep_ind=[1:4];
+[ics, mixmat, sepmat] = sorted_ica(eigTraces(keep_ind,:)',length(keep_ind));
+figure(9); clf
+stackplot(ics)
+
+eigImgsVec = tovec(eigImgs(:,:,keep_ind));
+footPrintsVec = eigImgsVec*sepmat';
+footPrints = toimg(footPrintsVec, [sz(2), sz(1)]);
+figure(10); clf
+for j = 1:length(keep_ind);
+    nexttile([1 1]);
+    imshow2(footPrints(3:end-3,3:end-3,j), []);
+    title(num2str(j))
+end;
+
+keep_ind_ics=[1 2];
+
+CS_img=1-mat2gray(squeeze(sum(mean(mov_res_filt_CS(10:end-10,10:end-10,:).*reshape(ics(:,keep_ind_ics),1,1,[],length(keep_ind_ics)),3),4)));
+
+avgImg=mat2gray(medfilt2(Result{1}.ref_im,[3 3]));
+avgImg=avgImg(10:end-10,10:end-10);
+imshow2(avgImg,[])
+
+figure; clf;
+
+nexttile([1 1])
+dsp_img_filt=medfilt2(dsp_img.*avgImg,[5 5]);
+imshow2(dsp_img_filt,[]); colormap("turbo")
+axis equal
+nexttile([1 1])
+CS_img_filt=medfilt2(CS_img.*avgImg,[5 5]);
+imshow2(CS_img_filt,[]); colormap("turbo")
+axis equal
+nexttile([1 1])
+imshow2(imfuse(dsp_img_filt,CS_img_filt),[])
+
+nexttile([1 1])
+[kymo_trace_dSp, kymoROI]=polyLineKymo2(-imgaussfilt3(mov_res_filt_dsp(10:end-10,10:end-10,:).*avgImg,[1.5 1.5 0.1]),50,35,avgImg);
+[kymo_trace_CS]=polyLineKymo2(-imgaussfilt3(mov_res_filt_CS(10:end-10,10:end-10,:).*avgImg,[1.5 1.5 0.1]),50,35,avgImg);
+
+imagesc([(kymo_trace_dSp)' (kymo_trace_CS)'])
+colormap('turbo'); axis off tight
+
+%%
 

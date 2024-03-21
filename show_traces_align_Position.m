@@ -3,7 +3,7 @@ function show_traces_align_Position(traces_F,traces_sp,pos,Window,VR_data,noi)
 figure;
 tiledlayout(length(noi),1)
 %traces_F=rescale(traces_F);
-scale=25;
+scale=15;
 ls=unique(VR_data(8,:));
 cmap=turbo(length(ls));
 for l=1:length(ls)

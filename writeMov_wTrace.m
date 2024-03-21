@@ -19,7 +19,7 @@ myVideo = VideoWriter([filename],"MPEG-4"); %open video file
 myVideo.FrameRate = rate;  %can adjust this, 5 - 10 works well for me
 open(myVideo)
 
-Trace=Trace(stack);
+%Trace=Trace(stack);
 try
 for i=1:length(stack)
     clf;

@@ -87,7 +87,7 @@ ROImage_rmv = poly2mask(roi(:,1)', roi(:,2)', sz(1), sz(2));
 
 DMDmask= (BWfinal | ROImage) & ~ROImage_rmv;
 
-ROImage = poly2mask(roi(:,1)', roi(:,2)', sz(2), sz(1));
+ROImage = poly2mask(roi(:,1)', roi(:,2)', sz(1), sz(2));
 DMDmask= BWfinal | ROImage;
 
 figure(1); clf;

@@ -85,7 +85,7 @@ CamTrig=Device_Data{1, 2}.Counter_Inputs.data;
 CamTrig=find(CamTrig(2:end)-CamTrig(1:end-1)>0);
 Frm_rate=(CamTrig(2)-CamTrig(1))/CamDAQ_rate;
 mov=double(readBinMov_times([fpath '/frames1.bin'],sz(2),sz(1),[1:10]));
-%%
+
 figure(3); clf;
 imshow2(mean(mov,3),[])
 g=1; coord=[];

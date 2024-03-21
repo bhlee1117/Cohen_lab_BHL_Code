@@ -49,14 +49,14 @@ bound = 2*ceil(gSiz/2);
 
 
 %total number of pixels
-% options_rigid = NoRMCorreSetParms('d1',d1-bound,'d2',d2-bound,'bin_width',200, ...
-%     'grid_size',[150,150],'mot_uf',4,'correct_bidir',false, ...
-%     'overlap_pre',32,'overlap_post',32,'max_shift',50);
+options_rigid = NoRMCorreSetParms('d1',d1-bound,'d2',d2-bound,'bin_width',200, ...
+    'grid_size',[150,150],'mot_uf',4,'correct_bidir',false, ...
+    'overlap_pre',64,'overlap_post',64,'max_shift',50);
 
 %options_rigid = NoRMCorreSetParms('d1',d1-bound,'d2',d2-bound,'bin_width',200,'max_shift',50,'mot_uf',4);
 
-options_rigid = NoRMCorreSetParms('d1',d1-bound,'d2',d2-bound,'bin_width',100, ...
-   'grid_size',[150, 150],'mot_uf',4,'correct_bidir',false, 'max_shift',40);
+ % options_rigid = NoRMCorreSetParms('d1',d1-bound,'d2',d2-bound,'bin_width',200, ...
+ %   'grid_size',[64, 64],'mot_uf',4,'correct_bidir',false, 'max_shift',40);
     
 tic; 
 [mov_mc,shifts2,template2] = normcorre_batch(Y(bound/2+1:end-bound/2,bound/2+1:end-bound/2,:),options_rigid,mov_temp(bound/2+1:end-bound/2,bound/2+1:end-bound/2,:)); 

@@ -1,7 +1,7 @@
 function show_footprnt(c_ftprnt,mov_mc,colr)
 
 if nargin<3
-    colr = flip(max(colormap(jet(size(c_ftprnt,3))),0),1); colr(colr>1)=1;
+    colr = max(colormap(turbo(size(c_ftprnt,3))),0); colr(colr>1)=1;
 end
 %figure; tiledlayout(2,1)
 %a=randn(size(c_ftprnt,3),1); [~,b]=sort(a);

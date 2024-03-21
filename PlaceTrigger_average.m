@@ -1,5 +1,14 @@
-function [Lap_FR Lap_V]=PlaceTrigger_average(spike,place_bin,Virmen_data,vel_thresh,lap_dist)
+function [Lap_FR Lap_V]=PlaceTrigger_average(spike,place_bin,Virmen_data,vel_thresh,lap_dist,rate_switch)
+if nargin<6
+    rate_switch='rate';
+end
 
+switch rate_switch
+    case 'rate'
+        disp('Calculate firing rate')
+    case 'spike'
+        disp('Calculate number of spike')
+end
 %take VR time
 t_VR = Virmen_data(1,:);
 rate=t_VR(3)-t_VR(2);
@@ -72,10 +81,15 @@ for p=1:place_bin
             %Lap_FR(l,p,:)=mean(spike_run(noi,find(lap_spot_stay(p,:)==l)),2,'omitnan')/(1.25*1e-3);
             lg(p,l)=length(AtPosL_Run); % number of frames stayed in l th lap, p position bin
             lgV(p,l)=length(AtPosL);
-            if lg(p,l)==0
+            if lg(p,l)==0   % mouse ran so fast that hard to capture at the position
                 Lap_FR(l,p,:)=NaN;
             else
+                switch rate_switch
+                    case 'rate'
                 Lap_FR(l,p,:)=sum(spike_run(1,AtPosL),2,'omitnan')/(lg(p,l)*rate); %number of spike divided by stayed time
+                    case 'spike'
+                Lap_FR(l,p,:)=sum(spike_run(1,AtPosL),2,'omitnan'); %number of spike divided by stayed time
+                end
             end
 
             if lgV(p,l)==0

@@ -1,8 +1,8 @@
 clear
 clc;
-cd '/Volumes/cohen_lab/Lab/Labmembers/Byung Hun Lee/Data/20231123_BHLm112_Prism'
+cd '/Volumes/cohen_lab-1/Lab/Labmembers/Byung Hun Lee/Data/20231001'
 fpath = uigetfile_n_dir;
-save_to='/Volumes/cohen_lab/Lab/Labmembers/Byung Hun Lee/Data/20231123_BHLm112_Prism';
+save_to='/Volumes/cohen_lab-1/Lab/Labmembers/Byung Hun Lee/Data/20231001';
 %%
 for i=1:length(fpath)
 load(fullfile(fpath{i},'output.mat'))
@@ -10,11 +10,11 @@ nRow = output{2}(1);
 nCol = output{2}(2);
 [mov1,nframe] = readBinMov(fullfile(fpath{i},'frames.bin'),nCol,nRow);
 
-mov2 = zeros(nRow,nCol,size(mov1,3));
+mov2 = zeros(nRow,nCol,size(mov1,3)/2);
 
 % %Clean signal
-for ii = 1:nframe
-    mov2(:,:,ii) = medfilt2(mov1(:,:,ii),[3,3]);
+for ii = 1:nframe/2
+    mov2(:,:,ii) = medfilt2(mov1(:,:,2*ii-1),[3,3]);
 end
 %rotate and flip to get right direction
 % Perform HiLo
@@ -24,7 +24,7 @@ end
     HiloMov = double(HiloMov);
     
     imwrite(uint16(HiloMov(:,:,1)),fullfile(fpath{i},'HiLoMov.tiff'),'tiff')
-    for ii=2:nframe
+    for ii=2:nframe/2
     imwrite(uint16(HiloMov(:,:,ii)),fullfile(fpath{i},'HiLoMov.tiff'),'tiff','WriteMode','append')
     end
 end

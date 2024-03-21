@@ -227,7 +227,7 @@ Result{2}.normTrace(n,:)=filtfilt(b2,a2,Result{2}.traces(n,:));
 % 
  save('Result_SomaStim_20231114.mat','Result','fpath','-v7.3')
 %%
- load('Result_SomaStim_20231114.mat')
+ load('Result_DendStim_20240107.mat')
 %%
 
 noi=[1]; nTau=[-30:60];

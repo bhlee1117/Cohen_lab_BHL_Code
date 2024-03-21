@@ -5,7 +5,7 @@ load(fullfile(save_to,"20210104_Data.mat"))
 
 %% show traces
 
-for f=1:6
+for f=1%:6
 
     f1=figure(10); clf;
 f2=figure(11); clf;
@@ -29,7 +29,7 @@ VR_data(5,:) = VR_trace;
 VR_data(8,:) = Lap_trace;
 VR_data(11,:) = Cum_trace;  
 VR_data(12,:) = [0 Cum_trace(2:end)-Cum_trace(1:end-1)];  
-sign={'off->on','on->off','off->off'};
+sign={'off->on','on->off','on->on'};
 
 for n=find(isPC)'
 
@@ -52,11 +52,11 @@ colormap(turbo)
 end
 end
     end
-    set(f1, 'Position', [100, 100, 1200, 800]);
+    set(f1, 'Position', [100, 100, 1500, 600]);
 saveas(f1,fullfile(save_to ,['Arc_on_file' num2str(f) '_day' num2str(d) '.fig']))
 print(f1, fullfile(save_to ,['Arc_on_file' num2str(f) '_day' num2str(d) '.jpg']),'-djpeg', ['-r', num2str(400)]);
 
-set(f2, 'Position', [100, 100, 1200, 800]);
+set(f2, 'Position', [100, 100, 1500, 600]);
 saveas(f2,fullfile(save_to ,['Arc_off_file' num2str(f) '_day' num2str(d) '.fig']))
 print(f2, fullfile(save_to ,['Arc_off_file' num2str(f) '_day' num2str(d) '.jpg']),'-djpeg', ['-r', num2str(400)]);
 

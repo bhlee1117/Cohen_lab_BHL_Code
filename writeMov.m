@@ -34,8 +34,8 @@ if Dwave(i)
     plot(15,15,'.','color',[0 0.6 1],'markersize',32)
 end
     end
-    %title([num2str(i/frmrate) ' ms'])
-    title([num2str(i*frmrate) ' \mum'],'HorizontalAlignment','left')
+    title([num2str(i/frmrate) ' ms'])
+    %title([num2str(i*frmrate) ' \mum'],'HorizontalAlignment','left')
     pause(0.005) %Pause and grab frame
 
     frame = getframe(gcf); %get frame
