@@ -18,6 +18,6 @@ binary_dilation=ones(1,length(tr));
         end
     end
 
-    tr_sub=movmean(tr_sub,avgwnd);
+    tr_sub=movmean(tr_sub,avgwnd,'omitnan');
 
 end

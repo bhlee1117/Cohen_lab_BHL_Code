@@ -1,4 +1,4 @@
-function trace_blueoff=get_blueoffTrace(trace,Blue,erode_sz)
+function [trace_blueoff trace]=get_blueoffTrace(trace,Blue,erode_sz)
 if length(trace)==length(Blue)
 
 t=[1:length(trace)];

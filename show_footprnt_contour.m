@@ -13,7 +13,9 @@ b=[1:size(c_ftprnt,3)];
 imshow2(mov_mc); hold all
 for i=1:size(c_ftprnt,3)
 ROIcontour = bwboundaries(c_ftprnt(:,:,i));
-plot(ROIcontour{1}(:,2),ROIcontour{1}(:,1),'color',colr(i,:),'LineWidth',1.5)
+for j=1:length(ROIcontour)
+plot(ROIcontour{j}(:,2),ROIcontour{j}(:,1),'color',colr(i,:),'LineWidth',1.5)
+end
 end
 
 coord=get_coord(c_ftprnt);

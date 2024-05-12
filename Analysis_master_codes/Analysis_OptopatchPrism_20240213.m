@@ -1,11 +1,11 @@
 
 clear
 clc;
-cd '/Volumes/BHL_WD18TB/Arranged_Data/Prism_OptopatchResult';
-[~, ~, raw] = xlsread(['/Volumes/BHL_WD18TB/' ...
+cd '/Volumes/BHL18TB_D1/Arranged_Data/Prism_OptopatchResult';
+[~, ~, raw] = xlsread(['/Volumes/BHL18TB_D1/' ...
     'Prism_OptopatchData_Arrangement.xlsx'], 'Sheet1', 'B5:K86');
 
-save_to='/Volumes/BHL_WD18TB/Arranged_Data/Prism_OptopatchResult';
+save_to='/Volumes/BHL18TB_D1/Arranged_Data/Prism_OptopatchResult';
 fpath=raw(:,1);
 Mouse=cell2mat(raw(:,2));
 NeuronInd=cell2mat(raw(:,5));
@@ -280,7 +280,7 @@ save([save_to 'OP_Result_20240212'],"OP_Result",'fpath','-v7.3')
 %% STAs
 nTau=[-10:20];
 
-for i=[80 81]%1:length(OP_Result)
+for i=[72]%1:length(OP_Result)
 OP_Result{i}.normTrace=OP_Result{i}.traces./get_threshold(OP_Result{i}.traces,1);
 OP_Result{i}.spike=find_spike_bh(OP_Result{i}.normTrace-movmedian(OP_Result{i}.normTrace,300,2),5,3);
 
@@ -338,7 +338,9 @@ mov_res = SeeResiduals(mov_res,OP_Result{i}.mc.^2);
 mov_res = SeeResiduals(mov_res,OP_Result{i}.mc(:,1).*OP_Result{i}.mc(:,end));
 mov_res= SeeResiduals(mov_res,bkg,1);
 
-OP_Result{i}.STAmovie=squeeze(mean(reshape(mov_res(:,:,sTau),sz(2),sz(1),[],length(nTau)),3));
+STA_tmp=reshape(mov_res(:,:,sTau),sz(2),sz(1),[],length(nTau));
+%STA_tmp=STA_tmp-mean(STA_tmp(:,:,:,[1:3]),4);
+OP_Result{i}.STAmovie=squeeze(mean(STA_tmp,3));
 end
 end
 

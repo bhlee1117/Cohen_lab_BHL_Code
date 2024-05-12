@@ -3,7 +3,7 @@ function [trans transients_final]=detect_transient2(traces_hi,thres,spike_trace,
 thres_on=thres(1);
 thres_off=thres(2);
 if nargin<4
-Prox_spike_tau=15;
+Prox_spike_tau=15; %how close spike will be combined to the transient
 end
 for i=1:size(traces_hi,1) %neuron
 
@@ -42,8 +42,10 @@ for i=1:size(traces_hi,1) %neuron
             if sum(sp_seg)>1
                 sp_seg_time=find(sp_seg);
                 trans(i).mean_ISI(t)=mean(sp_seg_time(2:end)-sp_seg_time(1:end-1));
+                trans(i).ISI{t}=sp_seg_time(2:end)-sp_seg_time(1:end-1);
             else
                 trans(i).mean_ISI(t)=NaN;
+                trans(i).ISI{t}=NaN;
             end
         end
         trans(i).interval=transients_final(i,:);

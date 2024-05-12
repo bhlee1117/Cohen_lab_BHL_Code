@@ -10,11 +10,15 @@ if size(dddd,2)==3
 if size(dddd,2)==4
     p_list=p_list(1:6,:); end
 
+if isempty(y_lim)
+    xx=cell2mat(dddd');
+    y_lim=max(xx(:));
+end
 if iscell(dddd)
     M=[]; S=[];
     for g=1:size(dddd,2)
         M=[M mean(dddd{g},1,'omitnan')];
-        S=[S  std(dddd{g},'omitnan')/sqrt(size(dddd{g},1))];
+        S=[S  std(dddd{g},'omitnan')];%/sqrt(size(dddd{g},1))];
     end
 %     b=bar(GG,M,'Barwidth',0.7,'LineWidth',2);
      hold all
@@ -22,11 +26,13 @@ if iscell(dddd)
 %     for j=1:size(dddd,2)
 %         b.CData(j,:)= cmap(j,:);
 %     end
+
+cmap=distinguishable_colors(length(dddd));
     for g=1:size(dddd,2)
         G=GG(g)+randn(size(dddd{g},1),1)*0.02;
         if dot_sw
             for u=1:size(dddd{g},1)
-                plot(G,dddd{g},'marker','.','color',[0.7 0.7 0.7],'markersize',5,'linestyle','none')
+                plot(G,dddd{g},'marker','.','color',cmap(g,:),'markersize',8,'linestyle','none')
                 hold all
             end
         end

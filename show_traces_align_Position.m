@@ -1,4 +1,4 @@
-function show_traces_align_Position(traces_F,traces_sp,pos,Window,VR_data,noi)
+function ax2=show_traces_align_Position(traces_F,traces_sp,pos,Window,VR_data,noi)
 
 figure;
 tiledlayout(length(noi),1)
@@ -16,7 +16,7 @@ end
 end
 
 for n=noi
-      nexttile([1 1])
+      ax2=nexttile([1 1]);
     for l=1:length(ls)
         if ~isnan(pos_time(l))
     try

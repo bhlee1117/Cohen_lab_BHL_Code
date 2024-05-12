@@ -5,9 +5,9 @@ end
 
 switch rate_switch
     case 'rate'
-        disp('Calculate firing rate')
-    case 'spike'
-        disp('Calculate number of spike')
+        disp('Calculate rate of data')
+    case 'sum'
+        disp('Calculate sum of data')
 end
 %take VR time
 t_VR = Virmen_data(1,:);
@@ -87,7 +87,7 @@ for p=1:place_bin
                 switch rate_switch
                     case 'rate'
                 Lap_FR(l,p,:)=sum(spike_run(1,AtPosL),2,'omitnan')/(lg(p,l)*rate); %number of spike divided by stayed time
-                    case 'spike'
+                    case 'sum'
                 Lap_FR(l,p,:)=sum(spike_run(1,AtPosL),2,'omitnan'); %number of spike divided by stayed time
                 end
             end
