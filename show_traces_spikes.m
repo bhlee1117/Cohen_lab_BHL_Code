@@ -10,12 +10,12 @@ f=figure('units','normalized','outerposition',[0 0 1 1]);
 %ax1=nexttile([8 1]);
 ax1=subplot(10,1,1:8);
 
-t=[1:size(traces,2)]/frmrate; scale=14;
+t=[1:size(traces,2)]/frmrate; scale=max(prctile(traces,99,2))*2;
 %tr=Result{i}.traces_res-median(Result{i}.traces_res,2); fprnt=Result{i}.c_ftprnt;
-tr=traces-movmedian(traces,150,2);
+%tr=traces-movmedian(traces,150,2);
 %tr=tr./get_threshold(tr,1);
-tr=(traces-median(traces,2,'omitnan'))./get_threshold(tr,1);
-
+%tr=(traces-median(traces,2,'omitnan'))./get_threshold(tr,1);
+tr=traces;
 lines=plot(t,tr(noi,:)'+[1:size(noi,2)]*scale); 
 arrayfun(@(l,c) set(l,'Color',c{:}),lines,num2cell(line_color,2))
 %arrayfun(@(l,c) set(l,'Color',c{:}),lines,num2cell(line_color,2))

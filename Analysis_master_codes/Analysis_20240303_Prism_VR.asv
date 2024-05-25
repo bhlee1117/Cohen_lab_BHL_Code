@@ -446,14 +446,14 @@ for f=[18]
     SpikeClassMat=zeros(3,size(tr,2));
     SpikeClassMat(1,:)=sp_soma.*(1-CS_trace); %bAPs
     SpikeClassMat(2,CS_spike_time(2:end))=1; %Complex spikes
-    SpikeClassMat(3,:)=sp_total.*(1-bAP_ind).*(1-CS_trace); %dSpikes
+    SpikeClassMat(3,:)=sp_total.*(1-bAP_ind).*(1-Result.CStrace); %dSpikes
     SpikeClassMat(3,:)=[0 (SpikeClassMat(3,2:end)-SpikeClassMat(3,1:end-1))==1]; %remove consecutive spikes
 
     Result.spike=[sp_soma; sp(2:end,:)];
     Result.SpClass=SpikeClassMat;
     Result.CStrace=CS_trace;
     show_traces_spikes(Result.normTraces,Result.spike,[Result.SpClass; Result.motionReject]);
-    %save(fullfile(fpath{f},'PC_Result.mat'),'Result','fpath','-v7.3')
+    save(fullfile(fpath{f},'PC_Result.mat'),'Result','fpath','-v7.3')
 end
 
 %% Save the STA movies
@@ -508,7 +508,7 @@ for f=[18]
             for k=find(fileInd{c}==j)
                 if frameInd{c}(k)+nTau{c}(1)>1 && frameInd{c}(k)+nTau{c}(end)<size(mov_res,3)
                     mov_seg=mov_res(bound:end-bound,bound:end-bound,frameInd{c}(k)+nTau{c});
-                    %mov_seg=mat2gray(mov_seg);
+                    mov_seg=mat2gray(mov_seg);
                     STA_movie_align{c} = cat(3,STA_movie_align{c}, mov_seg);
                     g(c)=g(c)+1;
                     StackedSpike{c}(1,g(c))=1;

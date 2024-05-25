@@ -1,4 +1,4 @@
-function errorbar_shade(x,y,error,cmap)
+function h= errorbar_shade(x,y,error,cmap)
 if nargin<4
     cmap=distinguishable_colors(1);
 end
@@ -14,6 +14,6 @@ x2 = tovec([x, fliplr(x)]);
 inBetween = tovec([curve1, fliplr(curve2)]);
 fill(x2, inBetween, cmap , 'FaceAlpha', 0.3,'LineStyle','none');
 hold on;
-plot(x, y, 'color', cmap , 'LineWidth', 2);
+h= plot(x, y, 'color', cmap , 'LineWidth', 2);
 
 end

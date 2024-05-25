@@ -1,4 +1,4 @@
-function writeMov(filename,movie,stack2,rate,frmrate,range,dmd_mask_sequence_rois,Dwave)
+function writeMov4d(filename,movie,stack2,rate,frmrate,range,dmd_mask_sequence_rois,Dwave)
 if nargin < 7;
     dmd_mask_sequence_rois=[];
     Dwave=[];
@@ -6,7 +6,7 @@ end
 
 
 %if isempty(stack)
-    stack=[1:size(movie,3)];
+    stack=[1:size(movie,4)];
 %end
 
 if isempty(range)
@@ -21,12 +21,12 @@ myVideo.FrameRate = rate;  %can adjust this, 5 - 10 works well for me
 myVideo.Quality= 100;
 open(myVideo)
 
-try
+%try
 for i=stack
     clf;
-    
+    i
     pbaspect([size(double(movie),2) size(double(movie),1) 1]*2)
-    imshow2(movie(:,:,i),range)
+    imshow2(squeeze(movie(:,:,:,i)),range)
     axis tight off equal
     hold on
     if ~isempty(dmd_mask_sequence_rois)
@@ -50,7 +50,7 @@ colormap(turbo)
     writeVideo(myVideo, frame);
     %pause(0.1)
 end
-end
+%end
 close(myVideo);
 close(figure(1));
 end
