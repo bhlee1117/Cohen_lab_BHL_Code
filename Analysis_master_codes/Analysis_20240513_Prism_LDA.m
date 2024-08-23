@@ -149,51 +149,52 @@ linkaxes(ax1,'xy')
 %% 
 cmap=distinguishable_colors(6);
 prespike_time=50; %ms
-sum_bin= 7; %ms
-training_fraction=0.5; noi=setdiff([1:nROI],9);
+sum_bin= 12; %ms
+training_fraction=0.45; noi=setdiff([1:nROI],[8 9]);
 LDA_CSmat=STA_CSmat(dist_order(noi),:,-nTau{2}(1)-prespike_time:-nTau{2}(1)-1);
 LDA_SSmat=STA_SSmat(dist_order(noi),:,-nTau{1}(1)-prespike_time:-nTau{1}(1)-1);
 LDA_CSmat=movsum(LDA_CSmat,sum_bin,3); LDA_SSmat=movsum(LDA_SSmat,sum_bin,3); 
 LDA_SSmat=tovec(permute(LDA_SSmat(:,:,[round(sum_bin/2):sum_bin:end]),[1 3 2])); 
 LDA_CSmat=tovec(permute(LDA_CSmat(:,:,[round(sum_bin/2):sum_bin:end]),[1 3 2]));
+SS_nSet= size(LDA_SSmat,2); CS_nSet=size(LDA_CSmat,2);
 
 featureInput=[LDA_SSmat LDA_CSmat]';
 featureClass=[zeros(1,size(STA_SSmat,2)) (zeros(1,size(STA_CSmat,2))+1)]';
-trainingset=randi(size(featureClass,1),1,round(size(featureClass,1)*training_fraction));
-predictset=setdiff([1:size(featureInput,1)],trainingset);
+maxlda=0; maxlog=0;
+for iter=1:1000
+[nSet, minarg]=min([SS_nSet CS_nSet]);
+randSS=randi(SS_nSet,1,nSet); randCS=randi(CS_nSet,1,nSet);
+trainingset=[randSS(1:round(nSet*training_fraction)) randCS(1:round(nSet*training_fraction))+SS_nSet];
+predictset=[randSS(round(nSet*training_fraction)+1:end) randCS(round(nSet*training_fraction)+1:end)+SS_nSet];
 randomInput = median(featureInput) + 2*range(featureInput) .* (rand(5000,size(featureInput,2))-0.5);
 
 mdl = fitcdiscr(featureInput(trainingset,:), featureClass(trainingset));
 mlg = fitglm(featureInput(trainingset,:), featureClass(trainingset), 'Distribution', 'binomial', 'Link', 'logit');
 
-covMat = featureInput'*featureInput;
-[V, D] = eig(covMat);
-D = diag(D);
-D = D(end:-1:1);
-V = V(:,end:-1:1);
-vSign = sign(max(V) - max(-V));  % make the largest value always positive
-V = V.*vSign;
-figure(22); clf;
-for i=1:20
-nexttile([1 1]);
-imagesc(reshape(V(:,i),length(noi),[]))
-title(num2str(i));
-end
-colormap(turbo)
-
-eigTraces=featureInput*V;
-randTraces=randomInput*V;
-
 coefficients = mdl.Coeffs(1,2).Linear;
-%featureInput_reduced = featureInput * mdl.Coeffs(1,2).Linear;
 featureInput_reduced = featureInput * mdl.Mu';
 
-predictedLabels = predict(mlg, featureInput(predictset,:)) > 0.5;
-predictedLabels2 = predict(mdl, featureInput) > 0.5;
-randomLabels=predict(mdl, randomInput)>0.5;
-accuracy = mean((predictedLabels) == featureClass(predictset))
+predictedLabels_lda = predict(mdl, featureInput(predictset,:)) > 0.5;
+predictedLabels_logit = predict(mlg, featureInput(predictset,:)) > 0.5;
+%randomLabels=predict(mdl, randomInput)>0.5;
+accuracy_lda(iter) = mean((predictedLabels_lda) == featureClass(predictset));
+accuracy_logit(iter) = mean((predictedLabels_logit) == featureClass(predictset));
 
-figure(20); clf; cax=[-1 3];
+if accuracy_lda(iter)>maxlda
+max_mdl=mdl;
+end
+
+if accuracy_logit(iter)>maxlog
+max_mlg=mlg;
+end
+
+maxlda=max(accuracy_lda);
+maxlog=max(accuracy_logit);
+end
+%%
+
+figure(20); clf; cax=[-1 5];
+[pattcorr, p]=corr(max_mdl.Mu(1,:)',max_mdl.Mu(2,:)');
 nexttile([1 1])
 imagesc(reshape(squeeze(mean(LDA_SSmat,2)),length(noi),[]),cax)
 title('STA of SS')
@@ -201,33 +202,94 @@ nexttile([1 1])
 imagesc(reshape(squeeze(mean(LDA_CSmat,2)),length(noi),[]),cax)
 title('STA of CS')
 nexttile([1 1])
-imagesc(reshape(mdl.Mu(1,:),length(noi),[]),cax)
+imagesc(reshape(max_mdl.Mu(1,:),length(noi),[]),cax)
 title('LDA mean for SS')
 nexttile([1 1])
-imagesc(reshape(mdl.Mu(2,:),length(noi),[]),cax)
+imagesc(reshape(max_mdl.Mu(2,:),length(noi),[]),cax)
 title('LDA mean for CS')
+nexttile([1 1])
+imagesc(reshape(max_mdl.Mu(1,:),length(noi),[])-reshape(squeeze(mean(LDA_SSmat,2)),length(noi),[]))
+title('LDA mean - STA for SS')
+colorbar
+nexttile([1 1])
+imagesc(reshape(max_mdl.Mu(2,:),length(noi),[])-reshape(squeeze(mean(LDA_CSmat,2)),length(noi),[]))
+title('LDA mean - STA for CS')
+colorbar
+colormap(turbo)
+nexttile([1 1])
+imagesc(reshape(table2array(max_mlg.Coefficients(2:end,1)),length(noi),[]))
+title('Weight vector for Logistic Regression')
+colormap(turbo)
+nexttile([1 1])
+imagesc(reshape(max_mdl.Coeffs(1,2).Linear,length(noi),[]))
+title('Weight vector from LDA')
 colormap(turbo)
 
-figure(19); clf;
-ax3=nexttile([1 1]);
-show_ind=[4 5 6]; cmap_random=[0.3 0.3 1;1 0.3 0.3];
-scatter3(randTraces(randomLabels==0,show_ind(1)), randTraces(randomLabels==0,show_ind(2)),randTraces(randomLabels==0,show_ind(3)), 5, 'filled');hold all
-scatter3(randTraces(randomLabels==1,show_ind(1)), randTraces(randomLabels==1,show_ind(2)),randTraces(randomLabels==1,show_ind(3)), 5, 'filled');hold all
-xlabel(['PC#' num2str(show_ind(1))]);
-ylabel(['PC#' num2str(show_ind(2))]);
-zlabel(['PC#' num2str(show_ind(3))]);
-title('Random Data'); grid on;
+figure(21); clf; 
+nexttile([1 1])
+h=histogram(accuracy_lda,30);
+xlabel('Accuracy')
+ylabel('# of trial')
+title("Linear discrimination analysis")
+nexttile([1 1])
+h=histogram(accuracy_logit,30);
+xlabel('Accuracy')
+ylabel('# of trial')
+title("Logistic Regression")
+
+mdl_project=featureInput*max_mdl.Mu';
+mdl_Corr=corr(featureInput',max_mdl.Mu');
+mdl_Corr_rand=corr(randomInput',max_mdl.Mu');
+mdl_project_rand=randomInput*max_mdl.Mu';
+predictedLabels_randlda = predict(max_mdl, randomInput) > 0.5;
+figure(30); clf; ax1=[];
+ax1=[ax1 nexttile([1 1])];
+h=histogram(mdl_Corr(1:SS_nSet,1),30,'Normalization','probability'); hold all
+histogram(mdl_Corr(SS_nSet+1:end,1),h.BinEdges,'Normalization','probability')
+hold all
+plot([pattcorr pattcorr],[0 0.2],'r')
+xlabel('Corrlation coefficient')
+title('Correlation btw pattern #1 and SS/CS')
 legend({'SS','CS'})
-ax4=nexttile([1 1]);
-scatter3(eigTraces(featureClass==0,show_ind(1)), eigTraces(featureClass==0,show_ind(2)), eigTraces(featureClass==0,show_ind(3)), 20, 'filled'); hold all
-scatter3(eigTraces(featureClass==1,show_ind(1)), eigTraces(featureClass==1,show_ind(2)), eigTraces(featureClass==1,show_ind(3)), 20, 'filled'); hold all
-xlabel(['PC#' num2str(show_ind(1))]);
-ylabel(['PC#' num2str(show_ind(2))]);
-zlabel(['PC#' num2str(show_ind(3))]);
-title('LDA Data'); grid on;
+ax1=[ax1 nexttile([1 1])];
+histogram(mdl_Corr(1:SS_nSet,2),h.BinEdges,'Normalization','probability'); hold all
+histogram(mdl_Corr(SS_nSet+1:end,2),h.BinEdges,'Normalization','probability')
+plot([pattcorr pattcorr],[0 0.2],'r')
+xlabel('Corrlation coefficient')
 legend({'SS','CS'})
-linkprop([ax3, ax4], {'CameraPosition', 'CameraTarget', 'CameraUpVector', 'CameraViewAngle'});
+title('Correlation btw pattern #2 and SS/CS')
+ax1=[ax1 nexttile([1 1])];
+histogram(mdl_Corr(1:SS_nSet,1),h.BinEdges,'Normalization','probability'); hold all
+histogram(mdl_Corr(1:SS_nSet,2),h.BinEdges,'Normalization','probability')
+plot([pattcorr pattcorr],[0 0.2],'r')
+xlabel('Corrlation coefficient')
+legend({'Patt #1','Patt #2'})
+title('Correlation btw SS and pattern')
+ax1=[ax1 nexttile([1 1])];
+histogram(mdl_Corr(SS_nSet+1:end,1),h.BinEdges,'Normalization','probability'); hold all
+histogram(mdl_Corr(SS_nSet+1:end,2),h.BinEdges,'Normalization','probability')
+plot([pattcorr pattcorr],[0 0.2],'r')
+xlabel('Corrlation coefficient')
+legend({'Patt #1','Patt #2'})
+title('Correlation btw CS and pattern')
+linkaxes(ax1,'x')
+
 %%
+
+cmap=distinguishable_colors(6);
+prespike_time=50; %ms
+sum_bin= 5; %ms
+training_fraction=0.45; noi=setdiff([1:nROI],[8 9]);
+LDA_CSmat=STA_CSmat(dist_order(noi),:,-nTau{2}(1)-prespike_time:-nTau{2}(1)-1);
+LDA_SSmat=STA_SSmat(dist_order(noi),:,-nTau{1}(1)-prespike_time:-nTau{1}(1)-1);
+LDA_CSmat=movsum(LDA_CSmat,sum_bin,3); LDA_SSmat=movsum(LDA_SSmat,sum_bin,3); 
+LDA_SSmat=tovec(permute(LDA_SSmat(:,:,[round(sum_bin/2):sum_bin:end]),[1 3 2])); 
+LDA_CSmat=tovec(permute(LDA_CSmat(:,:,[round(sum_bin/2):sum_bin:end]),[1 3 2]));
+SS_nSet= size(LDA_SSmat,2); CS_nSet=size(LDA_CSmat,2);
+
+featureInput=[LDA_SSmat LDA_CSmat]';
+featureClass=[zeros(1,size(STA_SSmat,2)) (zeros(1,size(STA_CSmat,2))+1)]';
+
 covMat = featureInput*featureInput';
 [V, D] = eig(covMat);
 D = diag(D);
@@ -237,32 +299,63 @@ vSign = sign(max(V) - max(-V));  % make the largest value always positive
 V = V.*vSign;
 eigImgs = (V'*featureInput);
 
-figure(21); clf;
-nexttile([1 1])
-plot(cumsum(D)/sum(D))
+% figure(21); clf;
+% nexttile([1 1])
+% plot(cumsum(D)/sum(D))
 
 figure(22); clf;
 for i=1:20
 nexttile([1 1]);
 imagesc(reshape(eigImgs(i,:),length(noi),[]))
-title(num2str(i));
+title(['PC #' num2str(i) ' , Fraction: ' num2str(D(i)/sum(D),2)]);
 end
 colormap(turbo)
 
-pc_ind=[1:8];
+pc_ind=[1:20];
 pairs=[1 2; 1 3; 1 4; 1 5; 1 6; 1 7; 2 3; 2 4; 2 5; 2 6; 2 7; 3 4; 3 5; 3 6;3 7;...
        4 5; 4 6; 4 7; 5 6; 5 7; 6 7; 7 8; 7 9; 7 10];
-proj_val=V;
-trainingset=randi(size(featureClass,1),1,round(size(featureClass,1)*training_fraction));
-predictset=setdiff([1:size(featureInput,1)],trainingset);
-pclda = fitcdiscr(proj_val(trainingset,pc_ind), featureClass(trainingset));
+featureInputPCA=V(:,pc_ind);
+SS_nSet= size(LDA_SSmat,2); CS_nSet=size(LDA_CSmat,2);
 
-predictedLabels = predict(pclda, proj_val(predictset,pc_ind));
-accuracy = mean(predictedLabels == featureClass(predictset))
+featureClass=[zeros(1,size(STA_SSmat,2)) (zeros(1,size(STA_CSmat,2))+1)]';
+maxldaPCA=0; maxlogPCA=0;
+for iter=1:1000
 
-pcldaImgs=pclda.Mu*eigImgs(pc_ind,:);
+[nSet, minarg]=min([SS_nSet CS_nSet]);
+randSS=randi(SS_nSet,1,nSet); randCS=randi(CS_nSet,1,nSet);
+trainingset=[randSS(1:round(nSet*training_fraction)) randCS(1:round(nSet*training_fraction))+SS_nSet];
+predictset=[randSS(round(nSet*training_fraction)+1:end) randCS(round(nSet*training_fraction)+1:end)+SS_nSet];
+randomInput = median(featureInputPCA) + 2*range(featureInputPCA) .* (rand(5000,size(featureInputPCA,2))-0.5);
 
-figure(23); clf; cax=[-1 3];
+mdl = fitcdiscr(featureInputPCA(trainingset,:), featureClass(trainingset));
+mlg = fitglm(featureInputPCA(trainingset,:), featureClass(trainingset), 'Distribution', 'binomial', 'Link', 'logit');
+
+coefficients = mdl.Coeffs(1,2).Linear;
+featureInput_reduced = featureInputPCA * mdl.Mu';
+
+predictedLabels_lda = predict(mdl, featureInputPCA(predictset,:)) > 0.5;
+predictedLabels_logit = predict(mlg, featureInputPCA(predictset,:)) > 0.5;
+%randomLabels=predict(mdl, randomInput)>0.5;
+accuracy_ldaPCA(iter) = mean((predictedLabels_lda) == featureClass(predictset));
+accuracy_logitPCA(iter) = mean((predictedLabels_logit) == featureClass(predictset));
+
+if accuracy_ldaPCA(iter)>maxldaPCA
+max_mdlPCA=mdl;
+end
+
+if accuracy_logitPCA(iter)>maxlogPCA
+max_mlgPCA=mlg;
+end
+
+maxldaPCA=max(accuracy_ldaPCA);
+maxlogPCA=max(accuracy_logitPCA);
+end
+
+
+%%
+
+figure(20); clf; cax=[-1 5];
+LDAmu2img=max_mdlPCA.Mu*eigImgs(pc_ind,:);
 nexttile([1 1])
 imagesc(reshape(squeeze(mean(LDA_SSmat,2)),length(noi),[]),cax)
 title('STA of SS')
@@ -270,28 +363,83 @@ nexttile([1 1])
 imagesc(reshape(squeeze(mean(LDA_CSmat,2)),length(noi),[]),cax)
 title('STA of CS')
 nexttile([1 1])
-imagesc(reshape(pcldaImgs(1,:),length(noi),[]),cax)
+imagesc(reshape(LDAmu2img(1,:),length(noi),[]),cax)
 title('LDA mean for SS')
 nexttile([1 1])
-imagesc(reshape(pcldaImgs(2,:),length(noi),[]),cax)
+imagesc(reshape(LDAmu2img(2,:),length(noi),[]),cax)
 title('LDA mean for CS')
+nexttile([1 1])
+imagesc(reshape(LDAmu2img(1,:),length(noi),[])-reshape(squeeze(mean(LDA_SSmat,2)),length(noi),[]))
+title('LDA mean - STA for SS')
+colorbar
+nexttile([1 1])
+imagesc(reshape(LDAmu2img(2,:),length(noi),[])-reshape(squeeze(mean(LDA_CSmat,2)),length(noi),[]))
+title('LDA mean - STA for CS')
+colorbar
 colormap(turbo)
-% 
-% 
-% X_lda = proj_val(:,pc_ind) * pclda.Coeffs(1,2).Linear;
-%     minX = min(X_lda);
-%     maxX = max(X_lda);
-% [x1Grid, x2Grid] = meshgrid(linspace(minX(1), maxX(1), 50), ...
-%                            linspace(minX(2), maxX(2), 50));
-% gridPoints = [x1Grid(:), x2Grid(:)];
-% coeffInv = pinv(pclda.Coeffs(1,2).Linear');
-% originalSpaceGridPoints = gridPoints * coeffInv;
-% predictedLabels = predict(pclda, originalSpaceGridPoints);
-% labelGrid = reshape(predictedLabels, size(x1Grid));
-% 
-% figure(23); clf;
-% imagesc(linspace(minX(1), maxX(1), 50), linspace(minX(2), maxX(2), 50), labelGrid);
-% set(gca, 'YDir', 'normal'); % Adjust the y-axis to display correctly
-% colormap('jet'); hold all
-% scatter(X_lda(:,1), X_lda(:,2), 10, cmap(featureClass,:), 'filled'); hold all
-% 
+nexttile([1 1])
+imagesc(reshape(table2array(max_mlg.Coefficients(2:end,1)),length(noi),[]))
+title('Weight vector for Logistic Regression')
+colormap(turbo)
+nexttile([1 1])
+imagesc(reshape(max_mdl.Coeffs(1,2).Linear,length(noi),[]))
+title('Weight vector for Logistic Regression')
+colormap(turbo)
+
+figure(21); clf; 
+nexttile([1 1])
+h=histogram(accuracy_ldaPCA,30);
+xlabel('Accuracy')
+ylabel('# of trial')
+title("Linear discrimination analysis")
+nexttile([1 1])
+h=histogram(accuracy_logitPCA,30);
+xlabel('Accuracy')
+ylabel('# of trial')
+title("Logistic Regression")
+
+mdl_projectPCA=featureInputPCA*max_mdlPCA.Mu';
+mdl_CorrPCA=corr(featureInputPCA',max_mdlPCA.Mu');
+[pattcorr, p]=corr(max_mdlPCA.Mu(1,:)',max_mdlPCA.Mu(2,:)');
+figure(30); clf; ax1=[];
+ax1=[ax1 nexttile([1 1])];
+h=histogram(mdl_CorrPCA(1:SS_nSet,1),30,'Normalization','probability'); hold all
+histogram(mdl_CorrPCA(SS_nSet+1:end,1),h.BinEdges,'Normalization','probability')
+hold all
+plot([pattcorr pattcorr],[0 0.2],'r')
+xlabel('Corrlation coefficient')
+title('Correlation btw pattern #1 and SS/CS')
+legend({'SS','CS'})
+ax1=[ax1 nexttile([1 1])];
+histogram(mdl_CorrPCA(1:SS_nSet,2),h.BinEdges,'Normalization','probability'); hold all
+histogram(mdl_CorrPCA(SS_nSet+1:end,2),h.BinEdges,'Normalization','probability')
+plot([pattcorr pattcorr],[0 0.2],'r')
+xlabel('Corrlation coefficient')
+legend({'SS','CS'})
+title('Correlation btw pattern #2 and SS/CS')
+ax1=[ax1 nexttile([1 1])];
+histogram(mdl_CorrPCA(1:SS_nSet,1),h.BinEdges,'Normalization','probability'); hold all
+histogram(mdl_CorrPCA(1:SS_nSet,2),h.BinEdges,'Normalization','probability')
+plot([pattcorr pattcorr],[0 0.2],'r')
+xlabel('Corrlation coefficient')
+legend({'Patt #1','Patt #2'})
+title('Correlation btw SS and pattern')
+ax1=[ax1 nexttile([1 1])];
+histogram(mdl_CorrPCA(SS_nSet+1:end,1),h.BinEdges,'Normalization','probability'); hold all
+histogram(mdl_CorrPCA(SS_nSet+1:end,2),h.BinEdges,'Normalization','probability')
+plot([pattcorr pattcorr],[0 0.2],'r')
+xlabel('Corrlation coefficient')
+legend({'Patt #1','Patt #2'})
+title('Correlation btw CS and pattern')
+linkaxes(ax1,'x')
+
+pc_pair=[1 5;1 7;1 13;1 15;1 20;5 7;5 13;5 15;5 20;7 13;7 15;7 20;13 15;13 20;15 20];
+figure(31); clf;
+for p=1:size(pc_pair,1)
+    nexttile([1 1])
+    plot(V(1:SS_nSet,pc_pair(p,1)),V(1:SS_nSet,pc_pair(p,2)),'.'); hold all
+    plot(V(SS_nSet+1:end,pc_pair(p,1)),V(SS_nSet+1:end,pc_pair(p,2)),'.'); hold all
+    xlabel(['PC #' num2str(pc_pair(p,1))])
+    ylabel(['PC #' num2str(pc_pair(p,2))])
+end
+legend({'SS','CS'});

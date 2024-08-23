@@ -19,7 +19,7 @@ alignedMovFN = {'STA_Mat_SS','STA_Mat_CS','STA_Mat_dSP'};
 
 %% Motion correction
 
-for f=[16:19]% 15 4 5 7]%length(fpath)
+for f=[18]% 15 4 5 7]%length(fpath)
     f
     load(fullfile(fpath{f},"output_data.mat"))
     sz=double(Device_Data{1, 3}.ROI([2 4]));
@@ -188,7 +188,7 @@ end
 
 %% Signal extraction
 
-for f=[19]%length(fpath)
+for f=[18]%length(fpath)
     load(fullfile(fpath{f},'PC_Result.mat'),'Result');
     load([fpath{f} '/output_data.mat'])
     sz=double(Device_Data{1, 3}.ROI([2 4])); blueDMDcontour=[];
@@ -230,8 +230,9 @@ for f=[19]%length(fpath)
         load([fpath{f} '/mcTrace' num2str(j,'%02d') '.mat']);
 
         mov_mc=mov_mc(:,:,[take_window(j,1):take_window(j,2)]);
-        mc=mcTrace.xymean([take_window(j,1):take_window(j,2)],:);
-
+        mc= movmean(mcTrace.xymean-movmedian(mcTrace.xymean,500,1),3,1);
+        mc=mc([take_window(j,1):take_window(j,2)],:);
+        
         mov_mc_vec=tovec(mov_mc(bound:end-bound,bound:end-bound,:));
         mov_mc_vec=(mov_mc_vec-mean(mov_mc_vec,1))./std(mov_mc_vec,0,1);
 
@@ -283,7 +284,7 @@ exclude_frq=[241.7 242]; %monitor
 exclude_frq2=[25 65.7]; %motion
 time_bin=15000; Fs=1000; ref_trace=[2 4 4 2 3 2 1 1 1 3 1 1 1 1 1 1 1 1 1 1 1 1 1]; %2nd trunk is the reliable trace
 
-for f=[19]%:length(fpath)
+for f=[18]%:length(fpath)
     load(fullfile(fpath{f},'PC_Result.mat'),'Result')
     nTime=size(Result.traces,2);
     nROI=size(Result.traces,1);

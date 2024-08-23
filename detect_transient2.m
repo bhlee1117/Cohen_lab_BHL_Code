@@ -1,4 +1,7 @@
 function [trans transients_final]=detect_transient2(traces_hi,thres,spike_trace,Prox_spike_tau)
+% The difference between 'detect_transient' function is detect_transient2
+% gives an output transients which includes preceding spikes within
+% proximal tau.
 
 thres_on=thres(1);
 thres_off=thres(2);

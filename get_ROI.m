@@ -3,16 +3,17 @@ if nargin<2
     appendmask=[];
     val=0;
 end
+cax=[prctile(avgImg(:),3) prctile(avgImg(:),99.9)];
 figure(333); clf;
     
     if ~isempty(appendmask)
     appendcontour=bwboundaries(max(appendmask,[],3));
     appendcontour=cell2mat(appendcontour);
     avgImg(max(appendmask,[],3)>0)=0;
-    imshow2(avgImg,[]); hold all
+    imshow2(avgImg,cax); hold all
     plot(appendcontour(:,2),appendcontour(:,1),'w.')
     else
-        imshow2(avgImg,[]); hold all
+        imshow2(avgImg,cax); hold all
     end
 
     g=1; ROIpoly=[];

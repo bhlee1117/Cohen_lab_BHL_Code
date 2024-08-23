@@ -68,4 +68,5 @@ for k = 1:nSeg;
     end;
 end;
 kymo = apply_clicky(roi, mov);  % add a 'no' as the third argument to not show the results.
-kymoROI = trail;
+kymoROI = roi;
+close(figure(1));

@@ -22,7 +22,7 @@ save_at='/Volumes/cohen_lab/Lab/Labmembers/Byung Hun Lee/Updates/2024/20240408_M
 f=11; load(fullfile(fpath{f},'PC_Result.mat'),'Result')
 nROI=size(Result.normTraces,1);
 nTau={[-20:20],[-60:200],[-20:20]}; %SS, CS, dSP
-spclass_ind=3;
+spclass_ind=1;
 %load aligned movie somatic spike
 alignmovlist=dir(fullfile(fpath{f},[alignedMovFN{spclass_ind} '*.tiff']));
 AlignMov=[];

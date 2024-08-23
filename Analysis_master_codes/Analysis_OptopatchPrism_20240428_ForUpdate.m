@@ -3,7 +3,7 @@ clear
 clc;
 cd '/Volumes/BHL18TB_D1/Arranged_Data/Prism_OptopatchResult';
 [~, ~, raw] = xlsread(['/Volumes/cohen_lab/Lab/Labmembers/Byung Hun Lee/Data/' ...
-    'Prism_OptopatchData_Arrangement.xlsx'], 'Sheet1', 'B5:K94');
+    'Prism_OptopatchData_Arrangement.xlsx'], 'Sheet1', 'B5:K104');
 
 save_to='/Volumes/BHL18TB_D1/Arranged_Data/Prism_OptopatchResult';
 fpath=raw(:,1);

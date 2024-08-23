@@ -1,4 +1,7 @@
-function [blueDMDimg bluePatt]=get_blueDMDPatt(Device_Data)
+function [blueDMDimg bluePatt]=get_blueDMDPatt(Device_Data,mode)
+if nargin<2
+    mode='normal';
+end
 try
 Rfixed = imref2d(size(Device_Data{1, 6}.refimage.img));
 catch
@@ -12,11 +15,20 @@ catch
 Rfixed = imref2d([sensorsize sensorsize]);    
 end
 inverseTform = invert(Device_Data{1, 6}.tform);
+switch mode
+    case 'normal'
 revertedImage = imwarp(double(Device_Data{1, 6}.Target), inverseTform,'OutputView',Rfixed);
-
+    case 'stack'
+Pattern=double(Device_Data{1, 6}.pattern_stack)==1;        
+revertedImage = imwarp(Pattern, inverseTform,'OutputView',Rfixed);        
+end
 if cam==2
-blueDMDimg=imcrop(revertedImage,double(Device_Data{1, 3}.ROI([1 3 2 4]))+[0 0 -1 -1]);
+for z=1:size(revertedImage,3)
+    blueDMDimg(:,:,z)=imcrop(revertedImage(:,:,z),double(Device_Data{1, 3}.ROI([1 3 2 4]))+[0 0 -1 -1]);
+end
 else
 blueDMDimg=imcrop(revertedImage,double(Device_Data{1, 4}.ROI([1 3 2 4]))+[0 0 -1 -1]);
 end
-bluePatt = bwboundaries(blueDMDimg);
+for z=1:size(revertedImage,3)
+bluePatt(z) = bwboundaries(blueDMDimg(:,:,z));
+end

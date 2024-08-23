@@ -425,7 +425,7 @@ save([save_to '/OP_Result_20240212'],"OP_Result",'fpath','-v7.3')
 %%
 
 %% Generate SNAPT movie
-for i=[71]
+for i=[133]
 mask=max(OP_Result{i}.Structure_bin,[],3)>0.01;
 maskSTA=max(-OP_Result{i}.STAmovie,[],3)./OP_Result{i}.ref_im>0.05;
 StrImg=max(OP_Result{i}.Structure,[],3);

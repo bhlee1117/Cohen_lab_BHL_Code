@@ -3,7 +3,7 @@ clear
 clc;
 cd '/Volumes/BHL18TB_D1/Arranged_Data/Prism_OptopatchResult';
 [~, ~, raw] = xlsread(['/Volumes/cohen_lab/Lab/Labmembers/Byung Hun Lee/Data/' ...
-    'Prism_OptopatchData_Arrangement.xlsx'], 'Sheet1', 'B5:K94');
+    'Prism_OptopatchData_Arrangement.xlsx'], 'Sheet1', 'B5:K104');
 
 save_to='/Volumes/BHL18TB_D1/Arranged_Data/Prism_OptopatchResult';
 fpath=raw(:,1);
@@ -101,7 +101,7 @@ end
 %% ROI setting
 
 [a, unqInd] = unique([Mouse NeuronInd] ,'row');
-for i=unqInd([25])'
+for i=unqInd([27])'
     nexttile([1 1])
     load(fullfile(fpath{i},"output_data.mat"))
     disp(fpath{i})
@@ -148,7 +148,7 @@ end
 
 %% Set Footprint
 bound=6;
-for i=85:88%length(fpath)
+for i=95:100%length(fpath)
     load([fpath{i} '/Result.mat'])
     load(fullfile(fpath{i},"output_data.mat"))
     switch char(CamType(i))
@@ -156,8 +156,9 @@ for i=85:88%length(fpath)
             sz=double(Device_Data{1, 4}.ROI([2 4]));
         case 'fusion'
             sz=double(Device_Data{1, 3}.ROI([2 4]));
-    end
-    ref_time=[2000:6000];
+    end 
+    
+    ref_time=[2000:4000];
     load(fullfile(fpath{i},['/mcTrace' num2str(1,'%02d') '.mat']));
 
     mov_mc=double(readBinMov_times([fpath{i} '/mc_ShutterReg' num2str(1,'%02d') '.bin'],sz(2),sz(1),ref_time));
@@ -170,13 +171,16 @@ for i=85:88%length(fpath)
     % mov_res = SeeResiduals(mov_res,mcTrace.xymean(ref_time,:).^2);
     % mov_res = SeeResiduals(mov_res,mcTrace.xymean(ref_time,1).*mcTrace.xymean(ref_time,2));
 
-    n_comp=5;
-    mov_filt=imgaussfilt3(mov_res,[3 3 0.1]);
+  n_comp=6;
+    mov_filt=imgaussfilt3(mov_res,[2 2 0.1]);
     movVec=tovec(mov_filt);
     Npoly=size(Result.ROIpoly,1);
     ftprnt = zeros(size(mov_filt,1)*size(mov_filt,2),Npoly);
     clear mask
+    figure(4); 
     for p=1:Npoly %each ROIs
+        clf; ax2=[];
+    tiledlayout(n_comp/2+2,2)
         mask(:,:,p) = poly2mask(Result.ROIpoly{p}(:,1), Result.ROIpoly{p}(:,2), sz(2), sz(1));
         pixelList=find(tovec(squeeze(mask(:,:,p))));
         subMov = movVec(pixelList,:);
@@ -187,8 +191,22 @@ for i=85:88%length(fpath)
         V = V(:,end:-1:1);
         vSign = sign(max(V) - max(-V));  % make the largest value always positive
         V = V.*vSign;
-        coeff = mat2gray(mean(abs(V(:,1:n_comp)).*D(1:n_comp)',2));
-        ftprnt(pixelList,p)=coeff;
+        eigTrace=subMov'*V;
+        nexttile([2 2])
+        plot(rescale2(eigTrace(:,1:n_comp),1)+[1:n_comp])
+        for n=1:n_comp
+    eigImg=NaN(size(mov_filt,1)*size(mov_filt,2),1);
+    ax2=[ax2 nexttile([1 1])];
+    eigImg(pixelList,1)=V(:,n);
+    eigImg=toimg(eigImg,size(mov_filt,1),size(mov_filt,2));
+    imshow2(im_merge(cat(3,Result.ref_im,eigImg),[1 1 1;1 0 0]),[])
+    title([num2str(n) ', Fraction: ' num2str(D(n)/sum(D),2)])
+        end
+linkaxes(ax2,'xy')
+n_take = input('#components to take: ', 's');
+n_take = str2num(n_take);
+coeff=subMov*mean(eigTrace(:,n_take)*V(:,n_take)',2);
+ftprnt(pixelList,p)=coeff;    
     end
 
     Result.ftprnt=toimg(ftprnt,sz(2),sz(1));

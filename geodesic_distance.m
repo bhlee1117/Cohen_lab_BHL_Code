@@ -45,7 +45,7 @@ r=r+1;
 end
 
 
-if abs(bwss(point1(2),point1(1)) - bwss(point2(2),point2(1)))>0
+if abs(bwss(point1(2),point1(1)) - bwss(point2(2),point2(1)))>0 %if the points are in different bwlabel
 
 r=1;
     while abs(bwss(point1(2),point1(1)) - bwss(point2(2),point2(1)))>0

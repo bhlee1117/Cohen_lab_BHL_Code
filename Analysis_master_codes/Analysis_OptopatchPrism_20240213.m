@@ -2,8 +2,8 @@
 clear
 clc;
 cd '/Volumes/BHL18TB_D1/Arranged_Data/Prism_OptopatchResult';
-[~, ~, raw] = xlsread(['/Volumes/BHL18TB_D1/' ...
-    'Prism_OptopatchData_Arrangement.xlsx'], 'Sheet1', 'B5:K86');
+[~, ~, raw] = xlsread(['/Volumes/cohen_lab/Lab/Labmembers/Byung Hun Lee/Data/Prism_OptopatchData_Arrangement.xlsx'], ...
+    'Sheet1', 'B5:K104');
 
 save_to='/Volumes/BHL18TB_D1/Arranged_Data/Prism_OptopatchResult';
 fpath=raw(:,1);
@@ -31,16 +31,21 @@ end
 
 %% MC
 
-for i=[74:82]%length(fpath)
+for i=[93:100]%length(fpath)
 
 load(fullfile(fpath{i},"output_data.mat"))
 
-ref_time=[6000:7000]; overlap=200;
+ref_time=[3000:4000]; overlap=200;
 time_segment=25000;
+
+DAQ_rate=Device_Data{1, 2}.buffered_tasks(1, 1).rate;
+CamDAQ_rate=Device_Data{1, 2}.Counter_Inputs.rate;
+CamTrig=Device_Data{1, 2}.Counter_Inputs.data;
+CamTrig2=find(CamTrig(2:end)-CamTrig(1:end-1)>0);
+Frm_rate=(CamTrig2(2)-CamTrig2(1))/CamDAQ_rate;
 
 frm_end=max(Device_Data{1, 2}.Counter_Inputs(1, 1).data);
 f_seg=[[1:time_segment:frm_end] frm_end+1]; f_seg(2:end)=f_seg(2:end)-1;
-
 
 switch char(CamType(i))
     case 'flash'
@@ -61,12 +66,11 @@ for j=1:length(f_seg)-1
 
     mov=double(readBinMov_times([fpath{i} '/frames1.bin'],sz(2),sz(1),[f_seg(j):f_seg(j+1)]));
 
-
     switch char(CamType(i))
     case 'flash'
 mov=rollingShutter_correction(mov,Device_Data{1, 4}.exposuretime,'flash');
     case 'fusion'
-mov=rollingShutter_correction(mov,Device_Data{1, 3}.exposuretime,'fusion');
+mov=rollingShutter_correction(mov,1/Frm_rate,'fusion');
     end
    
     mov=vm(mov(:,:,2:end));
@@ -98,7 +102,7 @@ end
 %% ROI setting
 
 [a, unqInd] = unique([Mouse NeuronInd] ,'row');
-for i=unqInd([2 5 6 7])'
+for i=unqInd([27])'
 nexttile([1 1])
 load(fullfile(fpath{i},"output_data.mat"))
 disp(fpath{i})
@@ -129,7 +133,7 @@ end
 close(figure(3));
 Result.ROIpoly=ROIpoly;
 Result.ref_im=avgImg;
-save(fullfile(fpath{i},'Result_20240210.mat'),'Result','-v7.3')
+save(fullfile(fpath{i},'Result.mat'),'Result','-v7.3')
 
 SameCellInd=find(Mouse==Mouse(i) & NeuronInd==NeuronInd(i));
 for j=SameCellInd'
@@ -139,7 +143,7 @@ mov_mc=double(readBinMov_times([fpath{j} '/mc_ShutterReg' num2str(1,'%02d') '.bi
 [offsetY offsetX]=calculate_shift(Result.ref_im,mean(mov_mc,3));
 ROIpoly_shift=cellfun(@(x) x+[offsetX offsetY],Result.ROIpoly,'UniformOutput',false);
 Result.ROIpoly=ROIpoly_shift;
-save([fpath{j} '/Result_20240210.mat'],'Result','-v7.3')
+save([fpath{j} '/Result.mat'],'Result','-v7.3')
 end
 end
 

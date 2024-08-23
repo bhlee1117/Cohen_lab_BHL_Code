@@ -16,7 +16,7 @@ APamp=imgaussfilt(max(dFMov,[],3),5);
 dFF=max(APamp./imgaussfilt(bkgImg,5),[],3);
 
 % perform spatial and PCA filtering to clean up movie
-filtsize = 7; sigma = 3;
+filtsize = 7; sigma = 2;
 spikemovfilt1 = spatialfilt(dSpikeMov, filtsize, sigma);  % Spatially filter to remove speckle noise
 spikemovfilt1(isnan(spikemovfilt1))=0;
 [spikemovfilt2, eigvecs, eigvals] = pcafilt(spikemovfilt1, 5);  % PCA filter to remove temporal noise

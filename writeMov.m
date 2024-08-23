@@ -43,7 +43,7 @@ end
     %set(gca, 'Position', [100, 100, 1700, 800]);
     %title([num2str(i*frmrate) ' \mum'],'HorizontalAlignment','left')
     %pause(0.005) %Pause and grab frame
-colormap(turbo)
+%colormap(turbo)
 %colormap(jet)
 %colormap(gen_colormap([0 0.5 1; 1 1 1; 1 0 0]))
     frame = getframe(gcf); %get frame
