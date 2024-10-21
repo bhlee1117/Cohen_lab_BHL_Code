@@ -1,6 +1,6 @@
 clear; clc;
-cd '/Volumes/BHL18TB_D2/20240730_Structure/20240731_structural_SD'
-folder='/Volumes/BHL18TB_D2/20240730_Structure/20240731_structural_SD';
+cd '/Volumes/BHL18TB_D2/20240920_SDimg'
+folder='/Volumes/BHL18TB_D2/20240920_SDimg';
  binFilePaths = findBinFiles(folder);
  [folderPart, fileName, fileExt] = fileparts(binFilePaths);
  %%

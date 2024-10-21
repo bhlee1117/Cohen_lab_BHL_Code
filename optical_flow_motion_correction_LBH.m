@@ -34,10 +34,10 @@ toc
 [d1,d2,T] = size(mov);                                % dimensions of dataset
 d = d1*d2;          
 
- gSig = 5; 
- gSiz = 10; 
-% gSig = 7; 
-% gSiz = 15; 
+ % gSig = 5; 
+ % gSiz = 10; 
+gSig = 7; 
+gSiz = 15; 
 psf = fspecial('gaussian', round(gSiz), gSig);
 ind_nonzero = (psf(:)>=max(psf(:,1)));
 psf = psf-mean(psf(ind_nonzero));
@@ -48,16 +48,16 @@ Y = imfilter(single(mov),psf,'same');
 bound = 2*ceil(gSiz/2);
 
 
-%total number of pixels
-options_rigid = NoRMCorreSetParms('d1',d1-bound,'d2',d2-bound,'bin_width',200, ...
-    'grid_size',[360,360],'mot_uf',4,'correct_bidir',false, ...
-    'overlap_pre',64,'overlap_post',64,'max_shift',50);
+% %total number of pixels
+% options_rigid = NoRMCorreSetParms('d1',d1-bound,'d2',d2-bound,'bin_width',200, ...
+%     'grid_size',[360,360],'mot_uf',4,'correct_bidir',false, ...
+%     'overlap_pre',64,'overlap_post',64,'max_shift',50);
 
 %options_rigid = NoRMCorreSetParms('d1',d1-bound,'d2',d2-bound,'bin_width',200,'max_shift',50,'mot_uf',4);
 
- % options_rigid = NoRMCorreSetParms('d1',d1-bound,'d2',d2-bound,'bin_width',200, ...
- %   'grid_size',[64, 64],'mot_uf',4,'correct_bidir',false, 'max_shift',40);
-    
+ options_rigid = NoRMCorreSetParms('d1',d1-bound,'d2',d2-bound,'bin_width',200, ...
+   'grid_size',[400, 400],'mot_uf',4,'correct_bidir',false, 'max_shift',40);
+
 tic; 
 [mov_mc,shifts2,template2] = normcorre_batch(Y(bound/2+1:end-bound/2,bound/2+1:end-bound/2,:),options_rigid,mov_temp(bound/2+1:end-bound/2,bound/2+1:end-bound/2,:)); 
 toc 

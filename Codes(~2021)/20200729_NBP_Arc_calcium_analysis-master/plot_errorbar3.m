@@ -16,11 +16,13 @@ if iscell(dddd)
         M=[M mean(dddd{g},1,'omitnan')];
         S=[S  std(dddd{g},'omitnan')/sqrt(size(dddd{g},1))];
     end
-    for g=1:size(dddd,2)
-        G=GG(g)+randn(size(dddd{g},1),1)*0.02;
-    end
+
     violin(dddd,'x',GG,'facecolor',cmap,'edgecolor',[],'mc',[],'medc',[],'bw',0.1,'plotlegend',0);
     hold all
+    % for g=1:size(dddd,2)
+    %     G=GG(g)+randn(size(dddd{g},1),1)*0.01;
+    %     scatter(G,dddd{g},5,repmat(cmap(g,:),size(dddd{g},1),1),'filled','MarkerFaceAlpha',0.2);
+    % end
     errorbar(GG,M,S,'LineWidth',2,'linestyle','none',...
         'color','k','Capsize',10,'marker','+','markersize',10)
     xlim([GG(1,1)-0.2 GG(end)+0.2])
@@ -55,14 +57,14 @@ for i=1:size(p_list,1)
                 star='***';
             end
         end
-        line(GG([p_list(i,:)]),[y_lim*0.72+y_lim*0.04*i y_lim*0.72+y_lim*0.04*i],'color','k','linewidth',2);
-        line(GG([p_list(i,1) p_list(i,1)]),[y_lim*0.62+y_lim*0.04*i y_lim*0.72+y_lim*0.04*i],'color','k','linewidth',2);
-        line(GG([p_list(i,2) p_list(i,2)]),[y_lim*0.62+y_lim*0.04*i y_lim*0.72+y_lim*0.04*i],'color','k','linewidth',2);
-        text(mean(GG(p_list(i,:))),y_lim*0.74+y_lim*0.04*i,star,'FontSize',13,'FontName','arial rounded mt bold',...
+        line(GG([p_list(i,:)]),[y_lim(2)*0.72+y_lim(2)*0.04*i y_lim(2)*0.72+y_lim(2)*0.04*i],'color','k','linewidth',2);
+        line(GG([p_list(i,1) p_list(i,1)]),[y_lim(2)*0.62+y_lim(2)*0.04*i y_lim(2)*0.72+y_lim(2)*0.04*i],'color','k','linewidth',2);
+        line(GG([p_list(i,2) p_list(i,2)]),[y_lim(2)*0.62+y_lim(2)*0.04*i y_lim(2)*0.72+y_lim(2)*0.04*i],'color','k','linewidth',2);
+        text(mean(GG(p_list(i,:))),y_lim(2)*0.74+y_lim(2)*0.04*i,star,'FontSize',13,'FontName','arial rounded mt bold',...
             'HorizontalAlignment', 'center')
     end
 end
-ylim([0 y_lim])
+ylim([y_lim])
 ylabel(ylab,'FontName','arial rounded mt bold','FontSize',13)
 set(gca,'XTick',GG,'XTickLabel',xtick...
     ,'FontName','arial rounded mt bold','FontSize',13,'LineWidth',2);

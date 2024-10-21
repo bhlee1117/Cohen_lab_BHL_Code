@@ -1,10 +1,10 @@
 clear
 clc;
-cd '/Volumes/BHL_WD18TB/Arranged_Data/NaV_InactivationResult';
+cd '/Volumes/BHL18TB_D2/Arranged_Data/NaV_InactivationResult';
 
-Blue_CAL=importdata('/Volumes/BHL_WD18TB/Arranged_Data/NaV_InactivationResult/BlueCalibration_BU.mat');
-Ad_Result=importdata('/Volumes/BHL_WD18TB/20230901_PP68_Adaptation_IsoKetCpp/Result_V2CheRiffST_20240110.mat');
-PC_Result=importdata('/Volumes/BHL_WD18TB/YQ601_PlaceCellResults/PF_Result_20240111.mat');
+Blue_CAL=importdata('/Volumes/BHL18TB_D2/Arranged_Data/NaV_InactivationResult/BlueCalibration_BU.mat');
+Ad_Result=importdata('/Volumes/BHL18TB_D2/20230901_PP68_Adaptation_IsoKetCpp/Result_V2CheRiffST_20240110.mat');
+PC_Result=importdata('/Volumes/BHL18TB_D2/YQ601_PlaceCellResults/PF_Result_20240111.mat');
 Slice_Result={'/Volumes/cohen_lab/Lab/Labmembers/Pojeong Park/Data/230731_PP070_Nav_inactivation/Cell1_PTX_50uM/173841PP070_P16_Cell1_soma_3sec_ramp+EFS_3V' ...
               '/Volumes/cohen_lab/Lab/Labmembers/Pojeong Park/Data/230731_PP070_Nav_inactivation/Cell1_PTX_50uM/174015PP070_P16_Cell1_soma_3sec_cons+EFS_3V'};
 
@@ -257,7 +257,7 @@ imagesc(composite_LR(ShowLap,PFcenter_bin,:))
 
 %%
 
-[~, ~, PF_list]=xlsread(['/Volumes/BHL_WD18TB/Arranged_Data/NaV_InactivationResult/' ...
+[~, ~, PF_list]=xlsread(['/Volumes/BHL18TB_D2/Arranged_Data/NaV_InactivationResult/' ...
     'PlaceFieldData_Arrangement_20210112.xlsx'], 'Sheet1', 'A5:E24');
 PF_list= cell2mat(PF_list);
 pos_bin=150;

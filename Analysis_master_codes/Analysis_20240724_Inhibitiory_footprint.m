@@ -194,8 +194,8 @@ tiledlayout(4,4)
 nexttile([1 1])
 
 basalTr=mean(NormTrace(BA_Rois{1},:),1); apicalTr=mean(NormTrace(BA_Rois{2},:),1);
-basalSubdVdt=get_slope(mean(subth_trace(BA_Rois{1},:),1),10);
-apicalSubdVdt=get_slope(mean(subth_trace(BA_Rois{2},:),1),10);
+% basalSubdVdt=get_slope(mean(subth_trace(BA_Rois{1},:),1),10);
+% apicalSubdVdt=get_slope(mean(subth_trace(BA_Rois{2},:),1),10);
 
 [BAcorr_bAP]=corr(basalTr(spike_time)',apicalTr(spike_time)');
 [BAcorr_nonbAP]=corr(basalTr(~spike_erode_trace)',apicalTr(~spike_erode_trace)');
@@ -257,26 +257,26 @@ xlabel('Time (ms)')
 ylabel('Blue')
 title('Subthreshold')
 
-%%
-putative_inh_time=[1930 2784 3820 6320]; nTau=[-200:200];
-Rfixed = imref2d([size(Result.ref_im,1) size(Result.ref_im,2)]);
-inverseTform = invert(Result.tform);
-revertedStruct = mat2gray(imwarp(Result.Structure, inverseTform,'OutputView',Rfixed));
-revertedStruct_bin = imwarp(Result.Structure_bin, inverseTform,'OutputView',Rfixed);
-revertedStruct_bin=revertedStruct_bin>0.05;
-for j=1:length(putative_inh_time)
-mov_func=imgaussfilt3(-mov_res(:,:,putative_inh_time(j)+nTau),[7 7 0.1])./imgaussfilt(Result.ref_im,3);
-  colorMov=grs2rgb(tovec(mov_func.*revertedStruct_bin),jet(300),-0.04,0.07);
-  colorMov=reshape(colorMov,size(mov_res,1),size(mov_res,2),length(nTau),[]);
-  colorMov=permute(colorMov,[1 2 4 3]);
- mov_show=colorMov.*revertedStruct*5;
- mov_show=mov_show(bound:end-bound,bound:end-bound,:,:);
- writeMov4d([fpath{100} '/PutativeInhibitMov_' num2str(j)],mov_show,nTau,10,1,[])
-end
+% %%
+% putative_inh_time=[1930 2784 3820 6320]; nTau=[-200:200];
+% Rfixed = imref2d([size(Result.ref_im,1) size(Result.ref_im,2)]);
+% inverseTform = invert(Result.tform);
+% revertedStruct = mat2gray(imwarp(Result.Structure, inverseTform,'OutputView',Rfixed));
+% revertedStruct_bin = imwarp(Result.Structure_bin, inverseTform,'OutputView',Rfixed);
+% revertedStruct_bin=revertedStruct_bin>0.05;
+% for j=1:length(putative_inh_time)
+% mov_func=imgaussfilt3(-mov_res(:,:,putative_inh_time(j)+nTau),[7 7 0.1])./imgaussfilt(Result.ref_im,3);
+%   colorMov=grs2rgb(tovec(mov_func.*revertedStruct_bin),jet(300),-0.04,0.07);
+%   colorMov=reshape(colorMov,size(mov_res,1),size(mov_res,2),length(nTau),[]);
+%   colorMov=permute(colorMov,[1 2 4 3]);
+%  mov_show=colorMov.*revertedStruct*5;
+%  mov_show=mov_show(bound:end-bound,bound:end-bound,:,:);
+%  writeMov4d([fpath{100} '/PutativeInhibitMov_' num2str(j)],mov_show,nTau,10,1,[])
+% end
 %%
 [~, BlueOffTime]=get_blueoffTrace(zeros(1,length(Result.Blue)),Result.Blue,100);
 BlueTime= {BlueOffTime,Result.Blue>0}; % Blue off: b=1; Blue on: b=2; Excitation: inh=1; inhibition: inh=2;
-thres=[0.005 0.002];
+thres=[0.005 0.001];
 basalSub=movmean(mean(subth_trace(BA_Rois{1},:),1),5,'omitnan'); basalSub(isnan(basalSub))=0;
 apicalSub=movmean(mean(subth_trace(BA_Rois{2},:),1),5,'omitnan'); apicalSub(isnan(apicalSub))=0;
 
@@ -335,22 +335,26 @@ title('Apical inhibition')
 legend({'Blue off','Blue on'})
 
 %%
-bound=13;
+bound=12;
 mov_blueOff=mov_res(:,:,BlueTime{1}); %off
 mov_blueOff=mov_blueOff.*(max(Result.bvMask,[],3)==0);
+mov_blueOff2=mov_res(:,:,BlueTime{1}); %off
 mov_blueOn=mov_res(:,:,BlueTime{2}); %on
 mov_blueOn=mov_blueOn.*(max(Result.bvMask,[],3)==0);
-
-inhibit_time=unique([find(ismember(bwlabel(transApical{2,2}.interval),find(transApical{2,2}.amp>0.012))) find(ismember(bwlabel(transBasal{2,2}.interval),find(transBasal{2,2}.amp>0.012)))]);
-excite_time=unique([find(ismember(bwlabel(transApical{1,1}.interval),find(transApical{1,1}.amp>0.012))) find(ismember(bwlabel(transBasal{1,1}.interval),find(transBasal{1,1}.amp>0.012)))]);
+mov_blueOn2=mov_res(:,:,BlueTime{2}); %on
+Amp_thres=0.012;
+inhibit_time=unique([find(ismember(bwlabel(transApical{2,2}.interval),find(transApical{2,2}.amp>Amp_thres))) find(ismember(bwlabel(transBasal{2,2}.interval),find(transBasal{2,2}.amp>Amp_thres)))]);
+excite_time=unique([find(ismember(bwlabel(transApical{1,1}.interval),find(transApical{1,1}.amp>Amp_thres))) find(ismember(bwlabel(transBasal{1,1}.interval),find(transBasal{1,1}.amp>Amp_thres)))]);
 
 mov_blueOn_inh=mov_blueOn(:,:,inhibit_time);
 mov_blueOff_exc=mov_blueOff(:,:,excite_time);
+mov_blueOn_inh2=mov_blueOn2(:,:,inhibit_time);
+mov_blueOff_exc2=mov_blueOff2(:,:,excite_time);
 
-subMov=mov_blueOn_exc(bound:end-bound,bound:end-bound,:);
+subMov=mov_blueOff_exc(bound:end-bound,bound:end-bound,:);
 subMov2=mov_blueOn_inh(bound:end-bound,bound:end-bound,:);
-subMov=tovec(imgaussfilt3(subMov,[1.5 1.5 0.1]));
-subMov2=tovec(imgaussfilt3(subMov2,[1.5 1.5 0.1]));
+subMov=tovec(imgaussfilt3(subMov,[2 2 0.1]));
+subMov2=tovec(imgaussfilt3(subMov2,[2 2 0.1]));
 
 subMov=subMov-mean(subMov,2);
 covMat=subMov'*subMov;
@@ -361,15 +365,15 @@ V = V(:,end:-1:1);
 vSign = sign(max(V) - max(-V));  % make the largest value always positive
 V = V.*vSign;
 
-nPCs=12;
-eigImg=toimg(tovec(mov_blueOn_exc)*V(:,1:nPCs),size(mov_res,1),size(mov_res,2));
+nPCs=6;
+eigImg_ext=toimg(tovec(mov_blueOff_exc2)*V(:,1:nPCs),size(mov_res,1),size(mov_res,2));
 figure(9); clf; 
 for n=1:nPCs
     nexttile([1 1])
-    imshow2(imgaussfilt(eigImg(:,:,n),2),[])
+    imshow2(imgaussfilt(eigImg_ext(5:end-5,5:end-5,n),2),[])
     title(['Exc. PC #', num2str(n), ' Fraction : ' num2str(D(n)/sum(D),2)])
 end
-colormap(turbo)
+colormap(gen_colormap([0 0.5 1; 1 1 1; 1 0 0]))
 
 subMov2=subMov2-mean(subMov2,2);
 covMat2=subMov2'*subMov2;
@@ -380,15 +384,30 @@ V2 = V2(:,end:-1:1);
 vSign = sign(max(V2) - max(-V2));  % make the largest value always positive
 V2 = V2.*vSign;
 
-nPCs=12;
-eigImg=toimg(tovec(mov_blueOn_inh)*V2(:,1:nPCs),size(mov_res,1),size(mov_res,2));
+nPCs=6;
+eigImg_inh=toimg(tovec(mov_blueOn_inh2)*V2(:,1:nPCs),size(mov_res,1),size(mov_res,2));
 figure(10); clf; 
 for n=1:nPCs
     nexttile([1 1])
-    imshow2(imgaussfilt(eigImg(:,:,n),2),[])
+    imshow2(imgaussfilt(eigImg_inh(5:end-5,5:end-5,n),2),[])
     title(['inh. PC #', num2str(n), ' Fraction : ' num2str(D(n)/sum(D),2)])
 end
-colormap(turbo)
+colormap(gen_colormap([0 0.5 1; 1 1 1; 1 0 0]))
+%%
+figure(11); clf;
+tiledlayout(2,2)
+invtform=invert(Result.tform);
+invStructure = imwarp(Result.Structure, invtform, 'OutputView', imref2d(size(Result.ref_im)));
+nexttile([1 1]);
+imshow2(grs2rgb(imgaussfilt(eigImg_ext(5:end-5,5:end-5,1),4),colormap(turbo),-50,50).*invStructure(5:end-5,5:end-5),[])
+nexttile([1 1]);
+imshow2(grs2rgb(imgaussfilt(eigImg_ext(5:end-5,5:end-5,2),4),colormap(turbo),-50,50).*invStructure(5:end-5,5:end-5),[])
+nexttile([1 1]);
+imshow2(grs2rgb(imgaussfilt(eigImg_inh(5:end-5,5:end-5,1),4),colormap(turbo),-50,50).*invStructure(5:end-5,5:end-5),[])
+nexttile([1 1]);
+imshow2(grs2rgb(imgaussfilt(eigImg_inh(5:end-5,5:end-5,2),4),colormap(turbo),-40,50).*invStructure(5:end-5,5:end-5),[])
+
+
 
 %% Skewness
 mov_blueOff=mov_res(:,:,find(BlueTime{1}==1 & spike_erode_trace==0)); %off

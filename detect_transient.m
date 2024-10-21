@@ -4,7 +4,6 @@ thres_on=thres(1);
 thres_off=thres(2);
 
 for i=1:size(traces_hi,1) %neuron
-
     [transients(i,:) n]=bwlabel(traces_hi(i,:)>thres_on);
     [transients_back(i,:)]=bwlabel(traces_hi(i,:)>thres_off);
     transients_final(i,:)=double(movmean(traces_hi(i,:),3)>thres_on);
@@ -38,6 +37,6 @@ for i=1:size(traces_hi,1) %neuron
         trans(i).int=[];
         trans(i).spike_number=[];
         trans(i).mean_ISI=[];
-        trans(i).interval=[];
+        trans(i).interval=zeros(1,size(traces_hi,2));
     end
 end

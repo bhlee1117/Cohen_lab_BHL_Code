@@ -1,4 +1,4 @@
-clear
+Sclear
 clc;
 cd '/Volumes/BHL18TB_D2/Arranged_Data/Prism_OptopatchResult';
 [~, ~, raw] = xlsread(['/Volumes/cohen_lab/Lab/Labmembers/Byung Hun Lee/Data/' ...

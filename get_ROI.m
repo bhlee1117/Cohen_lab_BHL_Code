@@ -1,9 +1,8 @@
-function [ROIpoly ROImask]=get_ROI(avgImg,appendmask,val)
+function [ROIpoly ROImask]=get_ROI(avgImg,appendmask)
 if nargin<2
     appendmask=[];
-    val=0;
 end
-cax=[prctile(avgImg(:),3) prctile(avgImg(:),99.9)];
+cax=[prctile(avgImg(:),0.01) prctile(avgImg(:),99.9)];
 figure(333); clf;
     
     if ~isempty(appendmask)
@@ -15,7 +14,7 @@ figure(333); clf;
     else
         imshow2(avgImg,cax); hold all
     end
-
+colorbar;
     g=1; ROIpoly=[];
     while g
         h = drawpolygon('Color','r');

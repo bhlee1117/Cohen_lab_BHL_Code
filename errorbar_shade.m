@@ -1,4 +1,6 @@
 function h= errorbar_shade(x,y,error,cmap)
+error=error;
+
 if nargin<4
     cmap=distinguishable_colors(1);
 end

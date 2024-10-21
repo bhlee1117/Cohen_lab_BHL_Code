@@ -88,7 +88,6 @@ for i=146
 end
 [blueDMDimg bluePatt]=get_blueDMDPatt(Device_Data);
 
-%%
 bound=5;
 mean_F=squeeze(mean(mov_mc(bound:end-bound,bound:end-bound,:),[1 2]));
 [~, blueOff]=get_blueoffTrace(mean_F,[Result.Blue],70);
@@ -100,7 +99,6 @@ mov_res = SeeResiduals(mov_res,Result.mc.^2);
 mov_res = SeeResiduals(mov_res,Result.mc(:,1).*Result.mc(:,end));
 mov_res= SeeResiduals(mov_res,bkg,1);
 
-%%
 mov_blueoff=mov_res(:,:,BlueTime{1} & spike_erode_trace{3}==0);
 mov_blueon=mov_res(:,:,BlueTime{2} & spike_erode_trace{3}==0);
 
@@ -115,6 +113,7 @@ for i=1:nROI
         [interDendDist(i,j), ~]=geodesic_distance(SkelDend,get_coord(Result.ftprnt(:,:,i)),get_coord(Result.ftprnt(:,:,j)));
     end
 end
+
 %% Low Stim plot
 coord_1d=dim_reduce(get_coord(Result.ftprnt));
 [~, dist_order]=sort(coord_1d,'descend');
@@ -146,39 +145,51 @@ colormap(ax1(n),turbo);
 title(title_str{n})
 end
 
-%% pca analysis
-bound=7;
-mov_res_mask=mov_res(:,:,:).*double(max(Result.bvMask,[],3)==0);
-subMov=tovec(imresize(imgaussfilt3(mov_res_mask(bound:end-bound,bound:end-bound,:),[1 1 0.1]),1/2));
-subMov=subMov-mean(subMov,2);
-covMat=subMov'*subMov;
-
-[V, D] = eig(covMat);
-D = diag(D);
-D = D(end:-1:1);
-V = V(:,end:-1:1);
-vSign = sign(max(V) - max(-V));  % make the largest value always positive
-V = V.*vSign;
-
-nPCs=28;
-eigImg=toimg(tovec(mov_res(:,:,:))*V(:,1:nPCs),size(mov_res,1),size(mov_res,2));
-figure(4); clf; 
-for n=1:nPCs
-    nexttile([1 1])
-    imshow2(eigImg(:,:,n),[])
-    title(['PC #', num2str(n), ' Fraction : ' num2str(D(n)/sum(D),2)])
-end
-
-[V_ics, mixmat, sepmat]=sorted_ica(V(:,1:nPCs),10);
-icsImg=toimg(tovec(mov_res(:,:,:))*V_ics,size(mov_res,1),size(mov_res,2));
-figure(5); clf; 
-for n=1:size(V_ics,2)
-    nexttile([1 1])
-    %show_footprnt_contour(Result.bvMask,icsImg(:,:,n))
-    imshow2(icsImg(:,:,n),[])
-    title(['ICS #', num2str(n)])
-end
-colormap('gray')
 %%
+thres_off=[0.015 0.002]; thres_on=[0.015 0.002];
+length_thres_off=10; length_thres_on=20;
+AfterSpikeSub=squeeze(mean(reshape(subth_trace(:,find(Result.spike(1,:))'+[4:7]),nROI,[],4),[2 3]));
+F0=imgaussfilt(Result.ref_im,4);
+
+Subth_off=subth_trace(:,BlueTime{1} & spike_erode_trace{3}==0); Subth_off=Subth_off-median(Subth_off,2);
+Subth_on=AfterSpikeSub-subth_trace(:,BlueTime{2} & spike_erode_trace{3}==0);
+Subth_on=Subth_on-median(Subth_on,2);
+
+troff=[]; tron=[]; EItrace=zeros(2,size(Result.traces,2));
+for n=1:nROI
+[trans_off]=detect_transient(Subth_off(n,:),thres_off,ones(1,size(Subth_off,2)));
+troff(n,:)=ismember(trans_off.interval,find(trans_off.length>length_thres_off));
+[trans_on]=detect_transient(Subth_on(n,:),thres_on,ones(1,size(Subth_on,2)));
+tron(n,:)=ismember(trans_on.interval,find(trans_on.length>length_thres_on));
+end
+
+EItrace(1,BlueTime{1} & spike_erode_trace{3}==0)=max(troff,[],1);
+EItrace(2,BlueTime{2} & spike_erode_trace{3}==0)=max(tron,[],1);
+for e=1:2
+    EIvec{e}=[];
+    bwEI=bwlabel(EItrace(e,:));
+    for b=1:max(bwEI)
+        EIvec{e}(:,b)=mean(subth_trace(:,find(bwEI==b)),2);
+    end
+end
 
 
+figure(55); clf; tiledlayout(3,2);
+ax1=nexttile([1 2]);
+imagesc(NormTrace(dist_order,:),[-0.02 0.05])
+
+ax1=[ax1 nexttile([1 2])];
+plot(EItrace')
+colormap('Turbo')
+
+linkaxes(ax1,'x')
+
+nexttile([1 1])
+ExcImg=std(-mov_res(bound:end-bound,bound:end-bound,EItrace(1,:)>0),0,3);
+%imshow2(ExcImg./F0(bound:end-bound,bound:end-bound),[])
+imshow2(imgaussfilt(ExcImg,2),[])
+
+nexttile([1 1])
+InhImg=std(mov_res(bound:end-bound,bound:end-bound,EItrace(2,:)>0),0,3);
+%imshow2(InhImg./F0(bound:end-bound,bound:end-bound),[])
+imshow2(imgaussfilt(InhImg,2),[])
