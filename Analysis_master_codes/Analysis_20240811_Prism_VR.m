@@ -2,7 +2,7 @@ clear
 clc;
 cd '/Volumes/cohen_lab/Lab/Labmembers/Byung Hun Lee/Data/FromBackup/PP72_PlaceCellResults';
 [~, ~, raw] = xlsread(['/Volumes/cohen_lab/Lab/Labmembers' ...
-    '/Byung Hun Lee/Data/PrismPCdata_Arrangement.xlsx'], 'Sheet1', 'C5:P27');
+    '/Byung Hun Lee/Data/PrismPCdata_Arrangement.xlsx'], 'Sheet1', 'C5:P31');
 
 % [~, ~, NeuronsToUse]=xlsread(['/Volumes/cohen_lab/Lab/Labmembers/Byung Hun Lee/Data/' ...
 %     'PlaceCellData_Arrangement.xlsx'], 'Sheet1', 'L8:M46');
@@ -10,7 +10,7 @@ cd '/Volumes/cohen_lab/Lab/Labmembers/Byung Hun Lee/Data/FromBackup/PP72_PlaceCe
 % NeuronsToUse=cellfun(@(x) (str2num(num2str(x))),NeuronsToUse,'UniformOutput',false);
 ref_ROI=cellfun(@(x) (str2num(num2str(x))),raw(:,10),'UniformOutput',false);
 fpath=raw(:,1)';
-StructureData=raw(:,10);
+StructureData=raw(:,9);
 EndFrame=cell2mat(raw(:,13));
 ifmotionReject=cell2mat(raw(:,14));
 save_figto='/Volumes/BHL_WD18TB/PP72_PlaceCellResults';
@@ -19,7 +19,7 @@ alignedMovFN = {'STA_Mat_SS','STA_Mat_CS','STA_Mat_dSP'};
 
 %% Motion correction
 
-for f=[23]% 15 4 5 7]%length(fpath)
+for f=[27]% 15 4 5 7]%length(fpath)
     f
     load(fullfile(fpath{f},"output_data.mat"))
     sz=double(Device_Data{1, 3}.ROI([2 4]));
@@ -76,7 +76,7 @@ end
 
 %% Get footprint
 
-for f=[21]%:length(fpath)
+for f=[18]%:length(fpath)
     disp(fpath{f}); Result=[];
     DAQ_rate=0.000005;
     load([fpath{f} '/output_data.mat'])
@@ -105,7 +105,7 @@ reshape_u=reshape(u,sz(2),sz(1),[]);
 bvMask=[];
 [~, Result.bvMask]=get_ROI(max(abs(reshape_u),[],3),bvMask);
 
-    load(fullfile(fpath{f},'mcTrace20.mat'));
+    load(fullfile(fpath{f},'mcTrace15.mat'));
     frm_end=max(Device_Data{1, 2}.Counter_Inputs(1, 1).data);
     Result.Blue=Device_Data{1, 2}.buffered_tasks(1, 1).channels(1, 2).data;
     Result.Reward=Device_Data{1, 2}.buffered_tasks(1, 3).channels.data;
@@ -114,7 +114,7 @@ bvMask=[];
 
     Result.Blue=Result.Blue(CamTrigger); Result.Reward=Result.Reward(CamTrigger);
     frm_rate=double((CamTrigger(2)-CamTrigger(1))*DAQ_rate);
-    mov_mc=double(readBinMov([fpath{f} '/mc_ShutterReg' num2str(20,'%02d') '.bin'],sz(2),sz(1)));
+    mov_mc=double(readBinMov([fpath{f} '/mc_ShutterReg' num2str(15,'%02d') '.bin'],sz(2),sz(1)));
     Result.ref_im=mean(mov_mc,3);
     [clickyROI, original_trace]=clicky(mov_mc);
 
@@ -131,7 +131,7 @@ bvMask=[];
 
     n_comp=6;
     mov_filt=imgaussfilt3(mov_res.*double(max(Result.bvMask,[],3)==0),[2 2 0.1]);
-    mov_filt=mov_filt(:,:,1:7000);
+    mov_filt=mov_filt(:,:,4000:8000);
     movVec=tovec(mov_filt);
     Npoly=size(Result.ROIpoly,1);
     ftprnt = zeros(size(mov_filt,1)*size(mov_filt,2),Npoly);
@@ -179,7 +179,7 @@ close(figure(4));
 end
 %% Load Virmen data
     
-for f=[21]%:length(fpath)
+for f=[18]%:length(fpath)
     load([fpath{f} '/output_data.mat'])
     load(fullfile(fpath{f},'PC_Result.mat'),'Result')
     fileList = dir(fullfile(fpath{f}, '*.data'));
@@ -197,6 +197,12 @@ for f=[21]%:length(fpath)
     DAQ_rate=Device_Data{1, 2}.Counter_Inputs.rate;
     CamCounter=Device_Data{1, 2}.Counter_Inputs(1, 1).data;
     CamTrigger=find(CamCounter(2:end)-CamCounter(1:end-1));
+
+    Result.Blue=Device_Data{1, 2}.buffered_tasks(1, 1).channels(1, 2).data;
+    Result.Reward=Device_Data{1, 2}.buffered_tasks(1, 3).channels.data;
+    Result.Blue=Result.Blue(CamTrigger); Result.Reward=Result.Reward(CamTrigger);
+
+
     t_DAQ=CamTrigger/DAQ_rate;
     t_VR = datetime(datetime(VRdata(1,:),'ConvertFrom','datenum'), 'InputFormat', 'yyyy-MM-dd HH:mm:ss.SSS');
     t_VR= t_VR-t_VR(1);
@@ -209,7 +215,7 @@ for f=[21]%:length(fpath)
     Result.VR=Virmen_data_int;
     %Result.Blue=Result.Blue(:,1:EndFrame(f)).*Result.VR(12,1:EndFrame(f));
     Result.Blue=Result.Blue(:,1:EndFrame(f)).* ...
-    ismember(Result.VR(8,1:EndFrame(f)),[13:23]); % From Lap 13 to 23
+    ismember(Result.VR(8,1:EndFrame(f)),[12:21]); % From Lap 12 to 21
  
     Result.VR=Result.VR(:,1:EndFrame(f));
 
@@ -218,7 +224,7 @@ end
 
 %% Signal extraction
 
-for f=[21]%length(fpath)
+for f=[18]%length(fpath)
     load(fullfile(fpath{f},'PC_Result.mat'),'Result');
     load([fpath{f} '/output_data.mat'])
     sz=double(Device_Data{1, 3}.ROI([2 4])); blueDMDcontour=[];
@@ -274,7 +280,7 @@ for f=[21]%length(fpath)
         if ismember(j,Blue_on_Seg)
            isfirst_seg=double(j==1);
         [~, blueomitTr]=get_blueoffTrace(squeeze(mean(mov_mc,[1 2])), ...
-            Result.Blue(f_seg(j)+take_window(j,1)-isfirst_seg:f_seg(j)+take_window(j,2)-isfirst_seg),30);
+            Result.Blue(f_seg(j)+take_window(j,1)-isfirst_seg:f_seg(j)+take_window(j,2)-isfirst_seg),30,30);
         bkg = zeros(1, size(mov_mc,3));    
         bkg(1,:)=movmedian(blueomitTr,4000,'omitnan');
         else
@@ -313,11 +319,12 @@ end
 %% Clean up and norm
 exclude_frq=[241.7 242]; %monitor
 %exclude_frq2=[483.5 484]; %monitor
-exclude_frq2=[25 65.7]; %motion
-time_bin=15000; Fs=1000; ref_trace=[2 4 4 2 3 2 1 1 1 3 1 1 1 1 1 1 1 1 1 3 21 3 23]; %2nd trunk is the reliable trace
+exclude_frq2=[55.5 56]; %motion
+time_bin=15000; Fs=1000; ref_trace=[2 4 4 2 3 2 1 1 1 3 1 1 1 1 1 1 1 1 1 3 23 3 23]; %2nd trunk is the reliable trace
 
-for f=[21]%:length(fpath)
+for f=[18]%:length(fpath)
     load(fullfile(fpath{f},'PC_Result.mat'),'Result')
+    ref_trace=ref_ROI{f}(1);
     nTime=size(Result.traces,2);
     nROI=size(Result.traces,1);
 tr=Result.traces-movmedian(Result.traces,50,2);
@@ -329,12 +336,19 @@ sp_time=find(max(sp,[],1))';
 sp_na=sum((find(max(sp,[],1))'+[-10:150])<0 | (find(max(sp,[],1))'+[-10:150])>size(Result.traces,2),2)==0;
 SilentPeriod(sp_time(sp_na)+[-10:150])=NaN;
 
-t_fit=find(~isnan(SilentPeriod));
-[y_fit2 t_consts coeffY]  = expfitDM_2(t_fit',-Result.traces(1,t_fit)',[1:nTime]',[10000 100000]);
-tr_res=squeeze(SeeResiduals(permute(Result.traces_bvMask,[1 3 2]),y_fit2));
+lwpass_fit=NaN(nROI,nTime); lwpass_fit_ch{1}=NaN(nROI,nTime); lwpass_fit_ch{2}=NaN(nROI,nTime);
+t_silent=find(~isnan(SilentPeriod) & Result.Blue==0);
+%[y_fit2 t_consts coeffY]  = expfitDM_2(t_fit',-Result.traces(1,t_fit)',[1:nTime]',[100000 1000]);
+lwpass_fit(:,t_silent)=Result.traces(:,t_silent); lwpass_fit=movmedian(lwpass_fit,20000,2,'omitnan');
+lwpass_fit_ch{1}(:,t_silent)=Result.traces_checker{1}(:,t_silent); lwpass_fit_ch{1}=movmedian(lwpass_fit_ch{1},20000,2,'omitnan');
+lwpass_fit_ch{2}(:,t_silent)=Result.traces_checker{2}(:,t_silent); lwpass_fit_ch{2}=movmedian(lwpass_fit_ch{2},20000,2,'omitnan');
 
-tr_res_checker{1}=squeeze(SeeResiduals(permute(Result.traces_checker{1},[1 3 2]),y_fit2));
-tr_res_checker{2}=squeeze(SeeResiduals(permute(Result.traces_checker{2},[1 3 2]),y_fit2));
+tr_res=squeeze(SeeResiduals(permute(Result.traces_bvMask,[1 3 2]),lwpass_fit));
+tr_res_checker{1}=squeeze(SeeResiduals(permute(Result.traces_checker{1},[1 3 2]),lwpass_fit));
+tr_res_checker{2}=squeeze(SeeResiduals(permute(Result.traces_checker{2},[1 3 2]),lwpass_fit));
+% tr_res=Result.traces_bvMask-lwpass_fit;
+% tr_res_checker{1}=Result.traces_checker{1}-lwpass_fit_ch{1};
+% tr_res_checker{2}=Result.traces_checker{2}-lwpass_fit_ch{2};
 
     freq_lowhigh=exclude_frq/(Fs/2);
     [b, a] = butter(4, freq_lowhigh, 'stop');
@@ -364,6 +378,7 @@ tr_res_checker{2}=squeeze(SeeResiduals(permute(Result.traces_checker{2},[1 3 2])
 
     clear traces_res_filtered noise noise_intp norm_trace sp_height SpHeight_intp sp_time tr_mc_imcorr tr_mc tr norm_trace_check traces_res_filtered_ch
     tN=[1:time_bin:nTime]; tN=[tN nTime];
+    lwpass_fit=NaN(nROI,nTime); lwpass_fit_ch{1}=NaN(nROI,nTime); lwpass_fit_ch{2}=NaN(nROI,nTime);
     sp_time=zeros(nROI,nTime);
     sp_height=zeros(nROI,nTime);
     mcTrace=squeeze(Result.mcTrace)';
@@ -377,6 +392,7 @@ tr_res_checker{2}=squeeze(SeeResiduals(permute(Result.traces_checker{2},[1 3 2])
             tr(tN(t):tN(t+1))=squeeze(SeeResiduals(reshape(tr(tN(t):tN(t+1)),1,1,[]),mcTrace(:,(tN(t):tN(t+1)))));
             tr(tN(t):tN(t+1))=squeeze(SeeResiduals(reshape(tr(tN(t):tN(t+1)),1,1,[]),mcTrace(:,(tN(t):tN(t+1))).^2));
             tr(tN(t):tN(t+1))=squeeze(SeeResiduals(reshape(tr(tN(t):tN(t+1)),1,1,[]),mcTrace(1,(tN(t):tN(t+1))).*mcTrace(end,(tN(t):tN(t+1)))));
+            %tr(tN(t):tN(t+1))=squeeze(SeeResiduals(reshape(tr(tN(t):tN(t+1)),1,1,[]),Result.im_corr(:,(tN(t):tN(t+1)))));
             for ch=1:2 % Checkerboard pattern traces
                 tr_check{ch}(tN(t):tN(t+1))=squeeze(SeeResiduals(reshape(tr_check{ch}(tN(t):tN(t+1)),1,1,[]),mcTrace(:,(tN(t):tN(t+1)))));
                 tr_check{ch}(tN(t):tN(t+1))=squeeze(SeeResiduals(reshape(tr_check{ch}(tN(t):tN(t+1)),1,1,[]),mcTrace(:,(tN(t):tN(t+1))).^2));
@@ -389,6 +405,10 @@ tr_res_checker{2}=squeeze(SeeResiduals(permute(Result.traces_checker{2},[1 3 2])
         traces_res_filtered(n,:) = filtfilt(b, a, tr);
         traces_res_filtered_ch{1}(n,:) = filtfilt(b, a, tr_check{1});
         traces_res_filtered_ch{2}(n,:) = filtfilt(b, a, tr_check{2});
+
+        traces_res_filtered(n,:) = filtfilt(b2, a2, traces_res_filtered(n,:));
+        traces_res_filtered_ch{1}(n,:) = filtfilt(b2, a2, traces_res_filtered_ch{1}(n,:));
+        traces_res_filtered_ch{2}(n,:) = filtfilt(b2, a2, traces_res_filtered_ch{2}(n,:));
         
         tr_mc_bpMonitorMotion=traces_res_filtered(n,:);
 
@@ -396,13 +416,21 @@ tr_res_checker{2}=squeeze(SeeResiduals(permute(Result.traces_checker{2},[1 3 2])
         norm_trace_check{1}(n,:)=traces_res_filtered_ch{1}(n,:);%-movmedian(traces_res_filtered(n,:),500,2);
         norm_trace_check{2}(n,:)=traces_res_filtered_ch{2}(n,:);%-movmedian(traces_res_filtered(n,:),500,2);
 
-        if n==ref_trace(f) %compensate spike hight due to bleaching
+        lwpass_fit(n,t_silent)=norm_trace(n,t_silent); lwpass_fit(n,:)=movmedian(lwpass_fit(n,:),20000,2,'omitnan');
+        lwpass_fit_ch{1}(n,t_silent)=norm_trace_check{1}(n,t_silent); lwpass_fit_ch{1}(n,:)=movmedian(lwpass_fit_ch{1}(n,:),20000,2,'omitnan');
+        lwpass_fit_ch{2}(n,t_silent)=norm_trace_check{2}(n,t_silent); lwpass_fit_ch{2}(n,:)=movmedian(lwpass_fit_ch{2}(n,:),20000,2,'omitnan');
+
+        norm_trace(n,:)=norm_trace(n,:)-lwpass_fit(n,:);
+        norm_trace_check{1}(n,:)=norm_trace_check{1}(n,:)-lwpass_fit_ch{1}(n,:);
+        norm_trace_check{2}(n,:)=norm_trace_check{2}(n,:)-lwpass_fit_ch{2}(n,:);
+
+        if n==ref_trace %compensate spike hight due to bleaching
             for t=1:length(tN)-1
                 tr_tmp=norm_trace(n,tN(t):tN(t+1));
                 tr_tmp=tr_tmp-movmedian(tr_tmp,300);
                 noise(t,n)=get_threshold(tr_tmp,1);
                 tr_tmp_norm=tr_tmp./noise(t,n);
-                [sp_temp, pks, prom]=find_spike_bh(tr_tmp_norm,12,4);
+                [sp_temp, pks, prom]=find_spike_bh(tr_tmp_norm,6,3);
                 sp_time(n,tN(t):tN(t+1))=sp_temp;
             end
 
@@ -411,14 +439,13 @@ tr_res_checker{2}=squeeze(SeeResiduals(permute(Result.traces_checker{2},[1 3 2])
             tx=tN(1:end-1)+time_bin/2;
             %noise_intp(n,:)=movmean(interp1(tx,noise(:,n),[1:size(PC_Result{f}{i}.traces,2)],'linear','extrap'),10000);
 
-            [Ny_fit t_consts coeffY]  = expfitDM_2(tx(~isnan(noise(1:end-1,n)))',noise(~isnan(noise(1:end-1,n)),n),[1:nTime]',10^7);
-            noise_intp=Ny_fit;
+            % [Ny_fit t_consts coeffY]  = expfitDM_2(tx(~isnan(noise(1:end-1,n)))',noise(~isnan(noise(1:end-1,n)),n),[1:nTime]',[10^6 10^4]);
+            % noise_intp=Ny_fit;
             %[y_fit t_consts coeffY]  = expfitDM_2(tx(~isnan(sp_height(1:end-1,n)))',sp_height(~isnan(sp_height(1:end-1,n)),n),[1:size(Result{i}.traces,2)]',10^7);
-            [y_fit t_consts coeffY]  = expfitDM_2(t_fit',sp_height(n,t_fit)',[1:nTime]',10^7);
+            [y_fit t_consts coeffY]  = expfitDM_2(t_fit',sp_height(n,t_fit)',[1:nTime]',[10^7]);
             SpHeight_intp=y_fit;
 
-
-            figure; clf;
+            figure(99); clf;
             ax1=nexttile([1 1]);
             plot(rescale2([Result.traces(n,1:nTime);tr_mc;tr_mc_bpMonitorMotion;mcTrace(1,1:nTime)],2)')%+[1:4])
             ax2=nexttile([1 1]);
@@ -426,7 +453,7 @@ tr_res_checker{2}=squeeze(SeeResiduals(permute(Result.traces_checker{2},[1 3 2])
             hold all
             plot(find(sp_time(n,:)),norm_trace(n,find(sp_time(n,:))),'r.')
             plot([1:nTime],y_fit([1:nTime]),'k')
-            plot([1:nTime],Ny_fit([1:nTime]),'g')
+            plot([1 nTime],[0 0],'g')
 
         end
     end
@@ -436,9 +463,9 @@ tr_res_checker{2}=squeeze(SeeResiduals(permute(Result.traces_checker{2},[1 3 2])
     norm_trace_check{2}=norm_trace_check{2}./SpHeight_intp';
 
     %norm_trace=norm_trace;%./(SpHeight_intp./SpHeight_intp(:,1));
-    Result.normTraces=norm_trace./get_threshold(norm_trace,1);
-    Result.norm_trace_check{1}=norm_trace_check{1}./get_threshold(norm_trace_check{1},1);
-    Result.norm_trace_check{2}=norm_trace_check{2}./get_threshold(norm_trace_check{2},1);
+    Result.normTraces=norm_trace;%./get_threshold(norm_trace,1);
+    Result.norm_trace_check{1}=norm_trace_check{1};%./get_threshold(norm_trace_check{1},1);
+    Result.norm_trace_check{2}=norm_trace_check{2};%./get_threshold(norm_trace_check{2},1);
     %Result.spike=find_spike_bh(PC_Result{f}.normTraces-movmedian(PC_Result{f}.normTraces,300,2),5,3);
 
     % for n=1:size(Result.traces,1)
@@ -448,46 +475,46 @@ tr_res_checker{2}=squeeze(SeeResiduals(permute(Result.traces_checker{2},[1 3 2])
     save(fullfile(fpath{f},'PC_Result.mat'),'Result','fpath','-v7.3')
 end
 
-
 %% Classify the spikes
 motion_frq=[30 120];
 ifmotion_reject=ifmotionReject;
-nSpikeThres=1;
-for f=[21]
+nSpikeThres=1; % set 
+for f=[20]
     load(fullfile(fpath{f},'PC_Result.mat'))
     %tr=PC_Result{i}.normTraces(ref_ROI{i},:); %somatic spike
     %sp_ref=max(find_spike_bh(tr-movmedian(tr,100,2),5,3),[],1);
-    tr=Result.normTraces;
-    tr_ref=Result.normTraces(ref_ROI{f},:);
+    tr=Result.normTraces./get_threshold(Result.normTraces,1);
+    tr_ref=Result.normTraces(ref_ROI{f},:)./get_threshold(Result.normTraces(ref_ROI{f},:),1);
+    tr_ref_mean=mean(tr_ref,1);
 
     nROI=size(tr,1);
     DOI{f}=setdiff([2:nROI],ref_ROI{f});
     sp=find_spike_bh(tr-movmedian(tr,50,2),6,4);
-    sp_ref=find_spike_bh(tr_ref-movprc(tr_ref,200,30,2),4,3);
+    sp_ref=find_spike_bh(tr_ref-movprc(tr_ref,200,30,2),4.5,2); % Set somatic spike threshold
     [wvletTr wvletF] = cwt(Result.im_corr,1000); % Compute the CWT
     motionArtTrace=sum(abs(wvletTr(find(wvletF>(motion_frq(1)) & wvletF<motion_frq(2)),:)),1);
     motionArtTrace=(motionArtTrace-prctile(motionArtTrace,20))./std(motionArtTrace);
     motionReject=zeros(1,size(tr,2));
     if ifmotionReject(f)
-        motionReject= motionArtTrace>4;
+        motionReject= motionArtTrace>6;
         motionReject = imdilate(motionReject, strel('square', 200));
         sp(:,motionReject)=0; sp_ref(:,motionReject)=0;
     end
     Result.motionReject=motionReject;
-    sp_ref=sum(sp_ref,1);
+    sp_ref=sum([sp_ref; sp(ref_ROI{f},:)],1);
 
-    [~, shift]=max(reshape(tr(ref_ROI{f}(1),find(sp_ref>nSpikeThres)+[-1:0]'),2,[]),[],1);
+    [~, shift]=max(reshape(tr_ref_mean(find(sp_ref>nSpikeThres)+[-1:0]'),2,[]),[],1);
     shift=shift-2;
     sp_time_Soma = find(sp_ref>nSpikeThres)+shift;
     sp_soma=zeros(1,size(tr,2));
     sp_soma(sp_time_Soma)=1;
     sp_soma=[0 (sp_soma(2:end)-sp_soma(1:end-1))==1]; %remove consecutive spikes
 
-    tr_sub=mean(tr_ref,1)-movprc(mean(tr_ref,1),200,20,2);
+    tr_sub=tr_ref_mean-movprc(tr_ref_mean,200,20,2);
     tr_sub=get_subthreshold(tr_sub,sp_soma,5,10);
 
-    [trans tr_trace]=detect_transient2(tr_sub,[4 1.5],sp_soma,15);
-    transcand=cell2mat(cellfun(@(x) length(x)>2,trans.ISI,'UniformOutput',false));
+    [trans tr_trace]=detect_transient2(tr_sub,[5 1.5],sp_soma,15); % Set Complex spike threshold
+    transcand=cell2mat(cellfun(@(x) length(x)>1,trans.ISI,'UniformOutput',false));
     meanISI_frnt=cellfun(@(x) mean(x(1:2)),trans.ISI(transcand));
     meanISI_first3=NaN(1,length(trans.length));
     meanISI_first3(transcand)=meanISI_frnt;
@@ -509,6 +536,7 @@ for f=[21]
     SpikeClassMat(3,:)=[0 (SpikeClassMat(3,2:end)-SpikeClassMat(3,1:end-1))==1]; %remove consecutive spikes
 
     Result.spike=[sp_soma; sp(2:end,:)];
+    Result.spike(ref_ROI{f},:)=repmat(sp_soma,length(ref_ROI{f}),1);
     Result.SpClass=SpikeClassMat;
     Result.CStrace=CS_trace;
 
@@ -525,13 +553,13 @@ coord_1d=dim_reduce(get_coord(Result.ftprnt));
 [~, Result.dist_order]=sort(coord_1d,'descend');
 Result.geodist=interDendDist(1,:)'.*sign(coord_1d-coord_1d(1));
 som_roi=find(Result.dist_order==1);
-show_traces_spikes(Result.normTraces(Result.dist_order,:),Result.spike(Result.dist_order,:),[Result.SpClass; double(Result.motionReject)]);
-
-    save(fullfile(fpath{f},'PC_Result.mat'),'Result','fpath','-v7.3')
+%show_traces_spikes(Result.normTraces(Result.dist_order,:),Result.spike(Result.dist_order,:),[Result.SpClass; double(Result.motionReject)]);
+show_traces_spikes(Result.normTraces./get_threshold(Result.normTraces,1),Result.spike,[Result.SpClass; double(Result.motionReject)]);
+    %save(fullfile(fpath{f},'PC_Result.mat'),'Result','fpath','-v7.3')
 end
 
 %% Save the STA movies
-nTau={[-30:20],[-50:100],[-30:20]}; %SS, CS, dSP
+nTau={[-30:20],[-70:100],[-30:20]}; %SS, CS, dSP
 bound=6;
 %f_tmp='/Volumes/BHL18TB_D1/20240218/134705BHLm117_FOV2_VR2';
 for f=[21]
@@ -640,20 +668,22 @@ Result.bvMask=[];
 %% Structure segmentation
 Struct_valid=find(1-cell2mat(cellfun(@(x) sum(isnan(x)), StructureData, 'UniformOutput', false)));
 
-for i=Struct_valid(5)'
+for i=Struct_valid(7)'
     load(fullfile(fpath{i},'PC_Result.mat'))
-    StructureStack=mat2gray(double(tiffreadVolume(StructureData{i})));
+   StructureStack=mat2gray(double(tiffreadVolume(StructureData{i})));
     StructureStack(StructureStack==0)=median(StructureStack(:));
-    StructureStack=StructureStack(:,:,35:100);
+    StructureStack=StructureStack(:,:,1:110 );
     %StructureStack_med=medfilt2_mov(StructureStack,[15 15]);
-    StructureStack_Gauss=imgaussfilt3(StructureStack,[7 7 0.1]);
+    illumination_field=imgaussfilt(max(StructureStack,[],3),50);
+    StructureStack=StructureStack./illumination_field;
+    StructureStack_Gauss=imgaussfilt3(StructureStack,[6 6 0.1]);
     %StructureStack_med(StructureStack_med==0)=median(StructureStack_med(:));
     %StructureStack=(StructureStack-StructureStack_med)./StructureStack_med;
     StructureStack_filt=(StructureStack-StructureStack_Gauss);
     StructureStack_filt=mat2gray(StructureStack_filt);
     StructureStack_bin=[]; level=[];
     level = graythresh(StructureStack_filt);
-    StructureStack_bin=StructureStack_filt>level*0.97;
+    StructureStack_bin=StructureStack_filt>level*1.21;
     moviefixsc(StructureStack_bin)
 
     se = strel('sphere', 1);
@@ -692,11 +722,14 @@ for i=Struct_valid(5)'
     figure(2); clf;
     imshow2(imfuse(mat2gray(max(StructureStack_final,[],3)),mat2gray(max(StructureStack,[],3))),[])
 
-
-    rot_ang=0;
+    rot_ang=90;
     Structure_ref=(imrotate(StructureStack_final,rot_ang));
     ref_img=Result.ref_im; ref_img(ref_img<prctile(ref_img(:),20))=median(ref_img(:)); ref_img=ref_img-prctile(ref_img(:),20);
-    [RegImg,tformReg]=imReg(ref_img,max(Structure_ref,[],3));
+    [RegImg,tformReg]=imReg(max(Structure_ref,[],3),ref_img);
+
+    Result.Structure=RegImg;
+    Result.Structure_bin=imwarp(max(imrotate(dendrite_bin,rot_ang),[],3), tformReg, 'OutputView', imref2d(size(ref_img)));
+    Result.tform=tformReg;
     saveastiff(uint16(mat2gray(Structure_ref)*255), [fpath{i} 'Structure.tiff']);
 
     Result.Structure=max(Structure_ref,[],3);

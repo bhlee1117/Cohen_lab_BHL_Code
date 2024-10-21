@@ -25,7 +25,7 @@ apical_ROI=cellfun(@(x) (str2num(num2str(x))),raw(:,12),'UniformOutput',false);
 rois={basal_ROI{f},apical_ROI{f}};
 
 nROI=size(Result.normTraces,1);
-nTau={[-30:20],[-100:200],[-30:20]}; %SS, CS, dSP
+nTau={[-130:20],[-130:100],[-30:20]}; %SS, CS, dSP
 nTau_bAP=[-20:20];
 
 som_spike=find(Result.spike(1,:));
@@ -176,15 +176,15 @@ figure(3); clf; ax1=[]; ax2=[];
 cmap=distinguishable_colors(6);
 tiledlayout(2,3)
 ax1=[ax1 nexttile([1 1])];
-imagesc(nTau{1},[1:1:nROI],squeeze(mean(STA_SSmat(dist_order,:,:),2)),[-1 5])
+imagesc(nTau{1},[1:1:nROI],squeeze(mean(STA_SSmat(dist_order,:,:),2)),[-1 3])
 xlabel('Peri-spike time (ms)')
 ylabel('ROI ordered along basal-distal axis')
 ax1=[ax1 nexttile([1 1])];
-imagesc(nTau{2},[1:1:nROI],squeeze(mean(STA_CSmat(dist_order,:,:),2)),[-1 5])
+imagesc(nTau{2},[1:1:nROI],squeeze(mean(STA_CSmat(dist_order,:,:),2)),[-1 3])
 xlabel('Peri-spike time (ms)')
 ylabel('ROI ordered along basal-distal axis')
 ax1=[ax1 nexttile([1 1])];
-imagesc(nTau{3},[1:1:nROI],squeeze(mean(STA_dSPmat(dist_order,:,:),2)),[-1 5])
+imagesc(nTau{3},[1:1:nROI],squeeze(mean(STA_dSPmat(dist_order,:,:),2)),[-1 3])
 %set(gca,'ytick',[1:2:nROI],'YTickLabel',geodist(dist_order([1:2:nROI])))
 xlabel('Peri-spike time (ms)')
 ylabel('ROI ordered along basal-distal axis')
@@ -351,7 +351,7 @@ StructureData=raw(:,10);
 %%
 nTau2=[-40:120];
 
-for i=[73]
+for i=[75]
     cd(fpath{i})
     load('Result.mat')
     Result.normTrace=Result.traces./get_threshold(Result.traces,1);
@@ -412,12 +412,12 @@ end
 moviefixsc(Result.STAmovie)
 save(['Result'],"Result",'-v7.3')
 %%
-rois={[22],[5:7]};
+rois={[16 20],[5:7]};
 somspfpath=73; ddspfpath=75;
 load(fullfile(fpath{somspfpath},'Result.mat'))
 STAmov_som=Result.STAmovie;
 STAtr_som=Result.STAtrace;
-F_ref=mean(STAtr_som(:,-nTau2(1)+[5:7]),2);
+F_ref=(mean(STAtr_som(:,-nTau2(1)+[5:7]),2));
 STAtr_som=STAtr_som./F_ref;
 STA_somSpMat=Result.spikeMat./F_ref;
 SomBlue=Result.BlueDMDimg;
@@ -432,7 +432,7 @@ coord_1d=dim_reduce(get_coord(Result.ftprnt));
 [~, dist_order]=sort(coord_1d,'descend');
 
 %%
-figure(36); clf; ax2=[]; ax3=[];
+figure(36); clf; ax2=[]; ax3=[]; noi=setdiff([1:nROI],24);
 cmap=distinguishable_colors(6);
 tiledlayout(4,2)
 ax3=[ax3 nexttile([1 1])];
@@ -454,11 +454,11 @@ imshow2(Result.ref_im,[]); hold all
 plot(roi_bd(:,2),roi_bd(:,1),'color',cmap(2,:))
 
 ax1=[nexttile([1 1])];
-imagesc(nTau2,[1:1:nROI],STAtr_som(dist_order,:,:),[-0.5 3])
+imagesc(nTau2,[1:1:nROI],STAtr_som(dist_order(noi),:,:),[-0.5 2])
 xlabel('Peri-spike time (ms)')
 ylabel('ROI ordered along basal-distal axis')
 ax4=[nexttile([1 1])];
-imagesc(nTau2,[1:1:nROI],STAtr_dd(dist_order,:,:),[-0.5 3])
+imagesc(nTau2,[1:1:nROI],STAtr_dd(dist_order(noi),:,:),[-0.5 2])
 xlabel('Peri-spike time (ms)')
 ylabel('ROI ordered along basal-distal axis')
 colormap(ax1,turbo)
@@ -504,7 +504,7 @@ revertedStruct_filt=revertedStruct-imgaussfilt(revertedStruct,15);
 for spclass_ind=1:2
     STAnorm_sub=STAmovie{spclass_ind};
     STAmovie_norm{spclass_ind}=imgaussfilt3(STAnorm_sub./F_refImg,[1.5 1.5 0.1]);%.*SkelDend(bound:end-bound,bound:end-bound);
-    colorSTA2=grs2rgb(tovec(STAmovie_norm{spclass_ind}),colormap('jet'),-0.5,2);
+    colorSTA2=grs2rgb(tovec(STAmovie_norm{spclass_ind}),colormap('jet'),-0.5,1.8);
     colorSTA2=reshape(colorSTA2,size(STAmovie_norm{spclass_ind},1),size(STAmovie_norm{spclass_ind},2),size(STAmovie_norm{spclass_ind},3),[]);
     colorSTA2=permute(colorSTA2,[1 2 4 3]);
     STAmovie_normStr{spclass_ind}=colorSTA2.*revertedStruct*3;%.*SkelDend(bound:end-bound,bound:end-bound);
@@ -515,8 +515,23 @@ cax=[-0.1 0.3]*30; crop_roi=[94.5100    6.5100  339.9800  158.9800];
 for sp_class=1:2;
     %mov_show=STAmovie_norm{sp_class};
     mov_show=imrotate(STAmovie_normStr{sp_class}(6:165,94:400,:,:),90);
-    writeMov4d(['STA_dFFStructgrsrgb' sptype{sp_class}],mov_show,[nTau2],10,1,cax)
+    %writeMov4d(['STA_dFFStructgrsrgb' sptype{sp_class}],mov_show,[nTau2],10,1,cax)
 end
+
+%% Subthreshold figure;
+figure(21); clf;
+
+nexttile([1 1]);
+imshow2(mean(STAmovie_normStr{1}(:,:,:,35:40),4),[]); hold all
+
+blue_bd=cell2mat(bwboundaries(SomBlue));
+plot(blue_bd(:,2),blue_bd(:,1),'color',[0 0.5 1])
+nexttile([1 1]);
+imshow2(mean(STAmovie_normStr{2}(:,:,:,35:40),4),[]); hold all
+blue_bd=cell2mat(bwboundaries(ddBlue));
+plot(blue_bd(:,2),blue_bd(:,1),'color',cmap(1,:))
+
+
 
 %% Generate SNAPT movie
 for i=[73]
@@ -561,7 +576,7 @@ for i=[73]
 end
 save(fullfile(fpath{i},'Result.mat'),'Result')
 %%
-i=75;
+i=73;
 load(fullfile(fpath{i},'Result.mat'))
 
 nROI=size(Result.normTrace,1);
@@ -714,7 +729,7 @@ xlabel('Peri-spike time (ms)')
 SomRP_path=[15 22 54 72 86 92 4];
 DenRP_path=[13 23 55 74 88 91 3];
 catpath=[SomRP_path DenRP_path];
-for f=5%:length(catpath)
+for f=1:length(catpath)
     i=catpath(f);
     load(fullfile(fpath{i},'Result'))
     coord_1d=dim_reduce(get_coord(Result.ftprnt));
@@ -762,11 +777,14 @@ end
 
 %%
 
+% SomRP_path=[15 22 54 72 86 92 4];
+% DenRP_path=[13 23 55 74 88 91 3];
+
 SomRP_path=[15 22 54 72 86 92 4];
 DenRP_path=[13 23 55 74 88 91 3];
 path_cat=[SomRP_path; DenRP_path];
 rheo_bin=[0:1.3:10];
-pulseFR=[]; RampFR=[];
+pulseFR=[]; RampFR=[]; pulseBlue_rb=[];
 for f=1:size(path_cat,2)
     for r=1:2
     i=path_cat(r,f);
@@ -794,15 +812,15 @@ for f=1:size(path_cat,2)
     end
 end
 
-figure(27); clf; cmap=distinguishable_colors(6); bin_width=1.2;
+figure(27); clf; cmap=distinguishable_colors(6); bin_width=1.3;
 tiledlayout(6,2);
 load(fullfile(fpath{SomRP_path(5)},'Result'));
 tr_somStim=rescale(Result.normTraces(1,:));
 tr_cssomStim=Result.CStrace;
-load(fullfile(fpath{DenRP_path(5)},'Result'));
+load(fullfile(fpath{DenRP_path(6)},'Result'));
 tr_ddStim=rescale(Result.normTraces(1,:));
 tr_csddStim=Result.CStrace;
-nexttile([3 2])
+ax1=nexttile([3 2]);
 plot(tr_somStim,'color',cmap(1,:)); hold all
 show_cs=tr_somStim.*tr_cssomStim; show_cs(tr_cssomStim==0)=NaN;
 plot(show_cs,'color',[0.7 0 0.2]); hold all
@@ -813,8 +831,9 @@ text(-500,0.7,'Soma Stimulation','FontSize',13)
 text(-500,1.7,'Distal dendrite Stimulation','FontSize',13)
 text(9500,2,'Complex spikes','FontSize',13,'color',[0.7 0 0.2])
 plot(show_cs+1,'color',[0.7 0 0.2]); hold all
-nexttile([1 2])
+ax2=nexttile([1 2]);
 plot(Result.Blue)
+linkaxes([ax1 ax2],'x')
 
 nexttile([2 1])
 CS_fracPulseMatSom=squeeze(pulseFR(:,2,:,1)./sum(pulseFR(:,:,:,1),2));

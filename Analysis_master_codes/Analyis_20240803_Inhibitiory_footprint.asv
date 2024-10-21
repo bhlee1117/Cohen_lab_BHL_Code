@@ -88,7 +88,6 @@ for i=146
 end
 [blueDMDimg bluePatt]=get_blueDMDPatt(Device_Data);
 
-%%
 bound=5;
 mean_F=squeeze(mean(mov_mc(bound:end-bound,bound:end-bound,:),[1 2]));
 [~, blueOff]=get_blueoffTrace(mean_F,[Result.Blue],70);
@@ -100,7 +99,6 @@ mov_res = SeeResiduals(mov_res,Result.mc.^2);
 mov_res = SeeResiduals(mov_res,Result.mc(:,1).*Result.mc(:,end));
 mov_res= SeeResiduals(mov_res,bkg,1);
 
-%%
 mov_blueoff=mov_res(:,:,BlueTime{1} & spike_erode_trace{3}==0);
 mov_blueon=mov_res(:,:,BlueTime{2} & spike_erode_trace{3}==0);
 
@@ -115,6 +113,7 @@ for i=1:nROI
         [interDendDist(i,j), ~]=geodesic_distance(SkelDend,get_coord(Result.ftprnt(:,:,i)),get_coord(Result.ftprnt(:,:,j)));
     end
 end
+
 %% Low Stim plot
 coord_1d=dim_reduce(get_coord(Result.ftprnt));
 [~, dist_order]=sort(coord_1d,'descend');
@@ -146,266 +145,48 @@ colormap(ax1(n),turbo);
 title(title_str{n})
 end
 
-%% pca analysis
-bound=7;
-mov_res_mask=mov_res(:,:,:).*double(max(Result.bvMask,[],3)==0);
-subMov=tovec(imresize(imgaussfilt3(mov_res_mask(bound:end-bound,bound:end-bound,:),[1 1 0.1]),1/2));
-subMov=subMov-mean(subMov,2);
-covMat=subMov'*subMov;
-
-[V, D] = eig(covMat);
-D = diag(D);
-D = D(end:-1:1);
-V = V(:,end:-1:1);
-vSign = sign(max(V) - max(-V));  % make the largest value always positive
-V = V.*vSign;
-
-nPCs=28;
-eigImg=toimg(tovec(mov_res(:,:,:))*V(:,1:nPCs),size(mov_res,1),size(mov_res,2));
-figure(4); clf; 
-for n=1:nPCs
-    nexttile([1 1])
-    imshow2(eigImg(:,:,n),[])
-    title(['PC #', num2str(n), ' Fraction : ' num2str(D(n)/sum(D),2)])
-end
-
-[V_ics, mixmat, sepmat]=sorted_ica(V(:,1:nPCs),10);
-icsImg=toimg(tovec(mov_res(:,:,:))*V_ics,size(mov_res,1),size(mov_res,2));
-figure(5); clf; 
-for n=1:size(V_ics,2)
-    nexttile([1 1])
-    %show_footprnt_contour(Result.bvMask,icsImg(:,:,n))
-    imshow2(icsImg(:,:,n),[])
-    title(['ICS #', num2str(n)])
-end
-colormap('gray')
 %%
-BA_Rois={19,[5 6]}; 
+thres_off=[0.015 0.002]; thres_on=[0.015 0.002];
+length_thres_off=10; length_thres_on=20;
+AfterSpikeSub=squeeze(mean(reshape(subth_trace(:,find(Result.spike(1,:))'+[4:7]),nROI,[],4),[2 3]));
+F0=imgaussfilt(Result.ref_im,4);
 
-spike_time=tovec(find(Result.spike(1,:))'+[-5:50]);
-spike_time(spike_time<1 | spike_time>size(Result.traces,2))=[];
-spike_time=unique(spike_time);
-spike_erode_trace=zeros(1,size(Result.traces,2));
-spike_erode_trace(spike_time)=1;
+Subth_off=subth_trace(:,BlueTime{1} & spike_erode_trace{3}==0); Subth_off=Subth_off-median(Subth_off,2);
+Subth_on=AfterSpikeSub-subth_trace(:,BlueTime{2} & spike_erode_trace{3}==0);
+Subth_on=Subth_on-median(Subth_on,2);
 
-figure(6); clf;
-tiledlayout(4,4)
-nexttile([1 1])
-
-basalTr=mean(NormTrace(BA_Rois{1},:),1); apicalTr=mean(NormTrace(BA_Rois{2},:),1);
-basalSubdVdt=get_slope(mean(subth_trace(BA_Rois{1},:),1),10);
-apicalSubdVdt=get_slope(mean(subth_trace(BA_Rois{2},:),1),10);
-
-[BAcorr_bAP]=corr(basalTr(spike_time)',apicalTr(spike_time)');
-[BAcorr_nonbAP]=corr(basalTr(~spike_erode_trace)',apicalTr(~spike_erode_trace)');
-plot(basalTr,apicalTr,'k.'); hold all
-ll=plot(basalTr(spike_time),apicalTr(spike_time),'ro');
-xlabel('Basal branch V')
-ylabel('Apical branch V')
-legend(ll,'bAPs')
-
-nexttile([1 1])
-BlueOffdat=[basalTr(find(Result.Blue==0 & spike_erode_trace==0)); apicalTr(find(Result.Blue==0 & spike_erode_trace==0))];
-BlueOffdat=BlueOffdat-median(BlueOffdat,2);
-BlueOndat=[basalTr(find(Result.Blue>0 & spike_erode_trace==0)); apicalTr(find(Result.Blue>0 & spike_erode_trace==0))];
-BlueOndat=BlueOndat-median(BlueOndat,2);
-
-% BlueOffSubdat=[basalSubdVdt(find(Result.Blue==0 & spike_erode_trace==0)); apicalSubdVdt(find(Result.Blue==0 & spike_erode_trace==0))];
-% BlueOnSubdat=[basalSubdVdt(find(Result.Blue>0 & spike_erode_trace==0)); apicalSubdVdt(find(Result.Blue>0 & spike_erode_trace==0))];
-
-h=histogram(BlueOffdat(1,:),150,'normalization','probability'); hold all
-histogram(BlueOndat(1,:),h.BinEdges,'normalization','probability')
-legend({'Blue off','Blue on'})
-xlabel('\DeltaF/F-\DeltaF/F_{median}')
-ylabel('Probability')
-title('Basal branch')
-
-nexttile([1 1])
-histogram(BlueOffdat(2,:),h.BinEdges,'normalization','probability'); hold all
-histogram(BlueOndat(2,:),h.BinEdges,'normalization','probability')
-legend({'Blue off','Blue on'})
-xlabel('\DeltaF/F-\DeltaF/F_{median}')
-ylabel('Probability')
-title('Apical branch')
-
-nexttile([1 1])
-h2=histogram(V(find(Result.Blue==0 & spike_erode_trace==0),2),50,'normalization','cdf'); hold all
-histogram(V(find(Result.Blue>0 & spike_erode_trace==0),2),h2.BinEdges,'normalization','cdf')
-legend({'Blue off','Blue on'})
-xlabel('PC #2')
-ylabel('Probability')
-title('PC#2, Positive when apical is high')
-
-ax1=nexttile([1 4]);
-imagesc(NormTrace(dist_order,:),[-2 4]*0.01); hold all
-scatter(find(Result.spike(1,:)),ones(sum(Result.spike(1,:)),1)*nROI,'r','^','filled')
-title('Voltage kymograph')
-
-ax2=nexttile([2 4]);
-% imagesc([moving_corr_size/2+1:9999-moving_corr_size/2],t_lag,BAcorr_mov',[-0.001 0.002])
-
-l=plot(subth_trace(dist_order,:)');
-arrayfun(@(l,c) set(l,'Color',c{:}),l,num2cell(turbo(nROI),2)); hold all
-ylabel('V')
-linkaxes([ax1 ax2],'x')
-lll=plot(V(:,2),'k');
-yyaxis right
-plot(Result.Blue,'color',[0 0.6 1])
-legend(lll,'PC #2, Positive when apical is high')
-xlabel('Time (ms)')
-ylabel('Blue')
-title('Subthreshold')
-
-%%
-putative_inh_time=[2350]; nTau=[1:150];
-Rfixed = imref2d([size(Result.ref_im,1) size(Result.ref_im,2)]);
-inverseTform = invert(Result.tform);
-revertedStruct = Result.Structure;
-revertedStruct_bin = Result.Structure_bin;
-revertedStruct_bin=revertedStruct_bin>0.05;
-revertedStruct_bin=revertedStruct_bin(bound:end-bound,bound:end-bound);
-revertedStruct=revertedStruct(bound:end-bound,bound:end-bound);
-for j=1:length(putative_inh_time)
-mov_func=imgaussfilt3(-mov_res(bound:end-bound,bound:end-bound,putative_inh_time(j)+nTau).*revertedStruct_bin,[5  0.1])./imgaussfilt(Result.ref_im(bound:end-bound,bound:end-bound),3);
-  colorMov=grs2rgb(tovec(mov_func),jet(300),-0.02,0.02);
-  colorMov=reshape(colorMov,size(mov_res,1)-2*bound+1,size(mov_res,2)-2*bound+1,length(nTau),[]);
-  colorMov=permute(colorMov,[1 2 4 3]);
- mov_show=colorMov.*revertedStruct*0.7;
- %mov_show=mov_show(bound:end-bound,bound:end-bound,:,:);
- writeMov4d([fpath{146} '/PutativeInhibitMov_' num2str(j)],mov_show,nTau,10,1,[])
-end
-%%
-[~, BlueOffTime]=get_blueoffTrace(zeros(1,length(Result.Blue)),Result.Blue,100);
-BlueTime= {BlueOffTime,Result.Blue>0}; % Blue off: b=1; Blue on: b=2; Excitation: inh=1; inhibition: inh=2;
-thres=[0.005 0.002];
-basalSub=movmean(mean(subth_trace(BA_Rois{1},:),1),5,'omitnan'); basalSub(isnan(basalSub))=0;
-apicalSub=movmean(mean(subth_trace(BA_Rois{2},:),1),5,'omitnan'); apicalSub(isnan(apicalSub))=0;
-
-basalTr=[]; apicalTr=[];
-transBasal=[]; transApical=[];
-for b=1:2
-% basalTr{b}=basalSub(BlueTime{b})-median(basalSub(BlueTime{b}));
-% apicalTr{b}=apicalSub(BlueTime{b})-median(apicalSub(BlueTime{b}));
-basalTr{b}=basalSub(BlueTime{b})-movmedian(basalSub(BlueTime{b}),500);
-apicalTr{b}=apicalSub(BlueTime{b})-movmedian(apicalSub(BlueTime{b}),500);
-    for inh=1:2
-        signfunc=(1-(inh-1)*2);
-transBasal{b,inh}=detect_transient(basalTr{b}*signfunc,thres,ones(1,length(basalTr{b})));
-transApical{b,inh}=detect_transient(apicalTr{b}*signfunc,thres,ones(1,length(apicalTr{b})));
-
-bAPtrans=unique(transBasal{b,inh}.interval.*spike_erode_trace(BlueTime{b})); bAPtrans=bAPtrans(2:end);
-transBasal{b,inh}.amp(bAPtrans)=[]; transBasal{b,inh}.length(bAPtrans)=[]; transBasal{b,inh}.int(bAPtrans)=[];
-transBasal{b,inh}.interval(ismember(transBasal{b,inh}.interval,bAPtrans))=0;
-bAPtrans=unique(transApical{b,inh}.interval.*spike_erode_trace(BlueTime{b}));  bAPtrans=bAPtrans(2:end);
-transApical{b,inh}.amp(bAPtrans)=[]; transApical{b,inh}.length(bAPtrans)=[]; transApical{b,inh}.int(bAPtrans)=[];
-transApical{b,inh}.interval(ismember(transApical{b,inh}.interval,bAPtrans))=0;
-    end
+troff=[]; tron=[]; EItrace=zeros(2,size(Result.traces,2));
+for n=1:nROI
+[trans_off]=detect_transient(Subth_off(n,:),thres_off,ones(1,size(Subth_off,2)));
+troff(n,:)=ismember(trans_off.interval,find(trans_off.length>length_thres_off));
+[trans_on]=detect_transient(Subth_on(n,:),thres_on,ones(1,size(Subth_on,2)));
+tron(n,:)=ismember(trans_on.interval,find(trans_on.length>length_thres_on));
 end
 
-figure(8); clf;
-nexttile([1 1])
-scatter(transBasal{1,1}.int,transBasal{1,1}.amp,'o','filled'); hold all
-scatter(transBasal{2,1}.int,transBasal{2,1}.amp,'o','filled')
-xlabel('Area under transient')
-ylabel('Amplitude of transient (\DeltaF/F)')
-title('Basal excitation')
-legend({'Blue off','Blue on'})
-
-nexttile([1 1])
-scatter(transApical{1,1}.int,transApical{1,1}.amp,'o','filled'); hold all
-scatter(transApical{2,1}.int,transApical{2,1}.amp,'o','filled')
-xlabel('Area under transient')
-ylabel('Amplitude of transient (\DeltaF/F)')
-title('Apical excitation')
-legend({'Blue off','Blue on'})
-
-nexttile([1 1])
-scatter(transBasal{1,2}.int,-transBasal{1,2}.amp,'o','filled'); hold all
-scatter(transBasal{2,2}.int,-transBasal{2,2}.amp,'o','filled')
-xlabel('Area under transient')
-ylabel('Amplitude of transient (\DeltaF/F)')
-title('Basal inhibition')
-legend({'Blue off','Blue on'})
-
-nexttile([1 1])
-scatter(transApical{1,2}.int,-transApical{1,2}.amp,'o','filled'); hold all
-scatter(transApical{2,2}.int,-transApical{2,2}.amp,'o','filled')
-xlabel('Area under transient')
-ylabel('Amplitude of transient (\DeltaF/F)')
-title('Apical inhibition')
-legend({'Blue off','Blue on'})
-
-%%
-bound=13;
-mov_blueOff=mov_res(:,:,BlueTime{1}); %off
-mov_blueOff=mov_blueOff.*(max(Result.bvMask,[],3)==0);
-mov_blueOn=mov_res(:,:,BlueTime{2}); %on
-mov_blueOn=mov_blueOn.*(max(Result.bvMask,[],3)==0);
-
-inhibit_time=unique([find(ismember(bwlabel(transApical{2,2}.interval),find(transApical{2,2}.amp>0.012))) find(ismember(bwlabel(transBasal{2,2}.interval),find(transBasal{2,2}.amp>0.012)))]);
-excite_time=unique([find(ismember(bwlabel(transApical{1,1}.interval),find(transApical{1,1}.amp>0.012))) find(ismember(bwlabel(transBasal{1,1}.interval),find(transBasal{1,1}.amp>0.012)))]);
-
-mov_blueOn_inh=mov_blueOn(:,:,inhibit_time);
-mov_blueOff_exc=mov_blueOff(:,:,excite_time);
-
-subMov=mov_blueOn_exc(bound:end-bound,bound:end-bound,:);
-subMov2=mov_blueOn_inh(bound:end-bound,bound:end-bound,:);
-subMov=tovec(imgaussfilt3(subMov,[1.5 1.5 0.1]));
-subMov2=tovec(imgaussfilt3(subMov2,[1.5 1.5 0.1]));
-
-subMov=subMov-mean(subMov,2);
-covMat=subMov'*subMov;
-[V, D] = eig(covMat);
-D = diag(D);
-D = D(end:-1:1);
-V = V(:,end:-1:1);
-vSign = sign(max(V) - max(-V));  % make the largest value always positive
-V = V.*vSign;
-
-nPCs=12;
-eigImg=toimg(tovec(mov_blueOn_exc)*V(:,1:nPCs),size(mov_res,1),size(mov_res,2));
-figure(9); clf; 
-for n=1:nPCs
-    nexttile([1 1])
-    imshow2(imgaussfilt(eigImg(:,:,n),2),[])
-    title(['Exc. PC #', num2str(n), ' Fraction : ' num2str(D(n)/sum(D),2)])
+EItrace(1,BlueTime{1} & spike_erode_trace{3}==0)=max(troff,[],1);
+EItrace(2,BlueTime{2} & spike_erode_trace{3}==0)=max(tron,[],1);
+for e=1:2
+    bwEI=bwlabel(EItrace(e,:));
+    for b=1:
 end
-colormap(turbo)
 
-subMov2=subMov2-mean(subMov2,2);
-covMat2=subMov2'*subMov2;
-[V2, D] = eig(covMat2);
-D = diag(D);
-D = D(end:-1:1);
-V2 = V2(:,end:-1:1);
-vSign = sign(max(V2) - max(-V2));  % make the largest value always positive
-V2 = V2.*vSign;
 
-nPCs=12;
-eigImg=toimg(tovec(mov_blueOn_inh)*V2(:,1:nPCs),size(mov_res,1),size(mov_res,2));
-figure(10); clf; 
-for n=1:nPCs
-    nexttile([1 1])
-    imshow2(imgaussfilt(eigImg(:,:,n),2),[])
-    title(['inh. PC #', num2str(n), ' Fraction : ' num2str(D(n)/sum(D),2)])
-end
-colormap(turbo)
+figure(55); clf; tiledlayout(3,2);
+ax1=nexttile([1 2]);
+imagesc(NormTrace(dist_order,:),[-0.02 0.05])
 
-%% Skewness
-mov_blueOff=mov_res(:,:,find(BlueTime{1}==1 & spike_erode_trace==0)); %off
-mov_blueOff=mov_blueOff.*(max(Result.bvMask,[],3)==0);
-mov_blueOff=imgaussfilt3(mov_blueOff,[2 2 0.1]);
-mov_blueOn=mov_res(:,:,find(BlueTime{2}==1 & spike_erode_trace==0)); %on
-mov_blueOn=mov_blueOn.*(max(Result.bvMask,[],3)==0);
-mov_blueOn=imgaussfilt3(mov_blueOn,[2 2 0.1]);
+ax1=[ax1 nexttile([1 2])];
+plot(EItrace')
+colormap('Turbo')
 
-skew_blueOff=skewness(mov_blueOff,1,3);
-skew_blueOff(isnan(skew_blueOff))=0;
-skew_blueOn=skewness(mov_blueOn,1,3);
-skew_blueOn(isnan(skew_blueOn))=0;
+linkaxes(ax1,'x')
 
-figure(11); clf;
 nexttile([1 1])
-imshow2(skew_blueOff,[])
+ExcImg=std(-mov_res(bound:end-bound,bound:end-bound,EItrace(1,:)>0),0,3);
+%imshow2(ExcImg./F0(bound:end-bound,bound:end-bound),[])
+imshow2(imgaussfilt(ExcImg,2),[])
+
 nexttile([1 1])
-imshow2(skew_blueOn,[])
+InhImg=std(mov_res(bound:end-bound,bound:end-bound,EItrace(2,:)>0),0,3);
+%imshow2(InhImg./F0(bound:end-bound,bound:end-bound),[])
+imshow2(imgaussfilt(InhImg,2),[])
