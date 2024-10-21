@@ -2,6 +2,7 @@
 function [tr_sub binary_dilation]=get_subthreshold(tr,sp,dilate,avgwnd)
 tr_sub=[];
 for n=1:size(tr,1)
+    n
 tr_sub(n,:)=tr(n,:);
 se = strel('square', dilate); % 0 degree means horizontal
 seg_wind=[-30:30];
