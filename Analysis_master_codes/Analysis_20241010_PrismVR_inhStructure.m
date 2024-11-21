@@ -19,7 +19,7 @@ title_str={'Basal','Apical','Peri-Soma'};
 set(0,'DefaultFigureWindowStyle','docked')
 
 %%
-f=26; load(fullfile(fpath{f},'PC_Result.mat'),'Result')
+f=13; load(fullfile(fpath{f},'PC_Result.mat'),'Result')
 cd(fpath{f})
 rois={basal_ROI{f},apical_ROI{f},ref_ROI{f}};
 nROI=size(Result.normTraces,1);
@@ -124,8 +124,10 @@ BS_s=BS_s(sp_na);
 
 STA_SS=squeeze(mean(reshape(Result.normTraces(:,bAP_s'+nTau_bAP),nROI,[],length(nTau_bAP)),2));
 STA_SS= STA_SS - mean(STA_SS(:,1:10),2);
+%STA_SS= STA_SS - prctile(STA_SS,30,2);
 F_ref=mean(STA_SS(:,-nTau_bAP(1)+[7:11]),2);
 %F_ref=(tovec(imgaussfilt(Result.ref_im,1))'*tovec(Result.ftprnt)/Result.SpikeHeight_fit(1))';
+%F_ref=median(-Result.traces_bvMask(:,1:2000),2);
 
 SilentPeriod=ones(1,size(Result.traces,2));
 sp_time=find(max(Result.spike,[],1))';
@@ -146,12 +148,15 @@ end
 % lwpass=movmedian(lwpass,30000,2,'omitnan');
 % NormalizedTrace=NormalizedTrace-lwpass;
 NormalizedTrace_dirt=NormalizedTrace;
-NormalizedTrace_dirt(Result.dirtTrace>0)=NaN;
 %NormalizedTrace_dirt(:,17000:18000)=NaN;
 NormalizedTrace_dirt(:,Result.motionReject)=NaN;
 NormalizedTrace_ch=cellfun(@(x) x./F_ref,Result.norm_trace_check,'UniformOutput',false);
 NormalizedTrace_ch{1}(:,Result.motionReject)=NaN; NormalizedTrace_ch{2}(:,Result.motionReject)=NaN;
+
+if isfield(Result,'dirtTrace')
+NormalizedTrace_dirt(Result.dirtTrace>0)=NaN;
 NormalizedTrace_ch{1}(Result.dirtTrace>0)=NaN; NormalizedTrace_ch{2}(Result.dirtTrace>0)=NaN;
+end
 
 STA_CSmat=reshape(NormalizedTrace_dirt(:,CS_s'+nTau{2}),nROI,[],length(nTau{2}));
 STA_SSmat=reshape(NormalizedTrace_dirt(:,bAP_s'+nTau{1}),nROI,[],length(nTau{1}));
@@ -167,7 +172,7 @@ figure(4); clf; cmap=distinguishable_colors(6); ax1=[];
 noi=setdiff([1:nROI],[BadROI{f}]);
 noi_dist=ismember(Result.dist_order,noi);
 %rois={basal_ROI{f},apical_ROI{f}};
-cax=[-0.2 2];%*0.01;
+cax=[-1 10];%*0.01;
 tiledlayout(2,4);
 ax3=nexttile([1 1]);
 imagesc(nTau{1},[1:sum(noi_dist)],squeeze(mean(STA_SSmat(dist_order(noi_dist),:,:)-median(STA_SSmat(dist_order(noi_dist),:,1:-nTau{1}(1)),3,'omitnan'),2,'omitnan')),cax)
@@ -271,7 +276,7 @@ linkaxes([ax1 ax2],'xy')
 t_bin=[40:40:200];
 figure(14); clf;
 tiledlayout(2,length(t_bin))
-loc=1; ax1=[]; cax=[-0.3 2];1
+loc=1; ax1=[]; cax=[-0.3 4];
 for silent_time=t_bin
 nTau_presilent={[-silent_time:40],[-silent_time:100],[-30:20]}; %SS, CS, dSP
 
@@ -439,7 +444,7 @@ BS_s_on=find(Result.Blue(BS_s)>0);
 BS_s_off=find(Result.Blue(BS_s)==0);
 
 figure(9); clf; cmap=distinguishable_colors(6); ax1=[]; tiledlayout(2,3)
-cax=[-0.5 1];
+cax=[-0.5 2];
 ax1=[ax1 nexttile([1 1])]; som_roi=find(dist_order(noi_dist)==1);
 STAbs_Blueon=squeeze(mean(STA_BSmat(dist_order(noi_dist),BS_s_on,:)-median(STA_BSmat(dist_order(noi_dist),BS_s_on,1:-nTau{4}(1)),3,'omitnan'),2,'omitnan'));
 STAbs_Blueoff=squeeze(mean(STA_BSmat(dist_order(noi_dist),BS_s_off,:)-median(STA_BSmat(dist_order(noi_dist),BS_s_off,1:-nTau{4}(1)),3,'omitnan'),2,'omitnan'));
@@ -487,8 +492,8 @@ all_spike(~sp_na)=[];
 
 BlueOnsetTime=find(Result.Blue>0,1);
 SilentTrace=NormalizedTrace_dirt;
-SilentTrace(:,all_spike'+nTau_silent)=0;
-%SilentTrace(:,setdiff([1:size(Result.traces,2)],all_spike'+[-30:100]))=0;
+%SilentTrace(:,all_spike'+nTau_silent)=0; % Peri-spike to zero
+SilentTrace(:,setdiff([1:size(Result.traces,2)],all_spike'+[-30:100]))=0; %Remain Peri-spikes
 SilentTrace(:,Result.motionReject)=0;
 SilentTrace(isnan(SilentTrace))=0;
 SilentTrace=movmean(SilentTrace,5,2,'omitnan');
@@ -650,8 +655,9 @@ Lap_sub= PlaceTrigger_average(Subthreshold,300,Result.VR,velocity_threshold,115)
 [~, Lap_occupancy]= PlaceTrigger_average(double(Result.VR(end,:)>velocity_threshold),300,Result.VR,velocity_threshold,115); %total trace    
 Lap_diff= PlaceTrigger_average(BAdiff,300,Result.VR,velocity_threshold,115); %total trace    
 
-pre_PC_Lap=[3]; post_PC_Lap=[5:11]; StimOnLap=[12:21]; StimOffLap=[setdiff([1:max(Result.VR(8,:))],StimOnLap)];
-dendriteROIs={[36 37],[33 34],[31 32],[29 30 35],[1],[15],[2 3],[18 19 20],[8 9],[14 13],[4 5 6 7],[27 26],[22 23 24]};
+pre_PC_Lap=[2:6]; post_PC_Lap=[7:11]; StimOnLap=[12:21]; StimOffLap=[setdiff([1:max(Result.VR(8,:))],StimOnLap)];
+%dendriteROIs={[36 37],[33 34],[31 32],[29 30 35],[1],[15],[2 3],[18 19 20],[8 9],[14 13],[4 5 6 7],[27 26],[22 23 24]};
+dendriteROIs={Result.dist_order(noi_dist)};
 cROIs=zeros(1,size(Result.ftprnt,3));
 for d=1:length(dendriteROIs); cROIs(dendriteROIs{d})=d; end
 cmap=distinguishable_colors(length(dendriteROIs));
@@ -696,7 +702,6 @@ xlabel('Position (m)')
 ylabel('Basal to apical dendrites'); xlim([150 450]);
 c=colorbar; c.Label.String = 'Mean subthrehold'; c.Label.Rotation = -90;
 
-
 figure(32); clf;
 ind=cell2mat(dendriteROIs);
 for n=1:length(ind)
@@ -704,7 +709,12 @@ nexttile([1 1])
 lap_corr=[];
 for l1=1:size(Lap_sub,1)
 for l2=1:size(Lap_sub,1)
-lap_corr(l1,l2)=corr(Lap_sub(l1,:,ind(n))',Lap_sub(l2,:,ind(n))');
+    nonnanbin=find(~isnan(Lap_sub(l1,:,ind(n))') & ~isnan(Lap_sub(l2,:,ind(n))'));
+    if isempty(nonnanbin)
+lap_corr(l1,l2)=NaN;
+    else
+        lap_corr(l1,l2)=corr(Lap_sub(l1,nonnanbin,ind(n))',Lap_sub(l2,nonnanbin,ind(n))');
+    end
 end
 end
 imagesc(lap_corr(StimOffLap,StimOffLap),[-0.3 0.6]); axis equal tight; hold all
@@ -714,7 +724,6 @@ ylabel('VR trials')
 end
 colormap(turbo)
 c=colorbar; title(c,'Correlation coefficient')
-
 
 %% Clustering pre-spike dynamics
 NclusterSSCS=[];
@@ -734,9 +743,9 @@ STA_BSmat_on=STA_BSmat(:,BS_s_on,:); STA_BSmat_off=STA_BSmat(:,BS_s_off,:);%-mea
  % PrespikeMat_SS=[tovec(permute(movmean(STA_SSmat_off(Result.dist_order(noi_dist),:,-nTau{1}(1)-10:-nTau{1}-2),6,3,'omitnan'),[1 3 2]))];
  % PrespikeMat_CS=[tovec(permute(movmean(STA_CSmat_off(Result.dist_order(noi_dist),:,-nTau{2}(1)-10:-nTau{2}-2),6,3,'omitnan'),[1 3 2]))];
  % PrespikeMat_BS=[tovec(permute(movmean(STA_BSmat_off(Result.dist_order(noi_dist),:,-nTau{4}(1)-10:-nTau{4}-2),6,3,'omitnan'),[1 3 2]))];
-PrespikeMat_SS=[tovec(permute(mean(STA_SSmat_off(Result.dist_order(noi_dist),:,-nTau{1}(1)-10:-nTau{1}-2),3,'omitnan'),[1 3 2]))];
-PrespikeMat_CS=[tovec(permute(mean(STA_CSmat_off(Result.dist_order(noi_dist),:,-nTau{2}(1)-10:-nTau{2}-2),3,'omitnan'),[1 3 2]))];
-PrespikeMat_BS=[tovec(permute(mean(STA_BSmat_off(Result.dist_order(noi_dist),:,-nTau{4}(1)-10:-nTau{4}-2),3,'omitnan'),[1 3 2]))];
+PrespikeMat_SS=[tovec(permute(mean(STA_SSmat_off(Result.dist_order(noi_dist),:,-nTau{1}(1)-6:-nTau{1}-2),3,'omitnan'),[1 3 2]))];
+PrespikeMat_CS=[tovec(permute(mean(STA_CSmat_off(Result.dist_order(noi_dist),:,-nTau{2}(1)-6:-nTau{2}-2),3,'omitnan'),[1 3 2]))];
+PrespikeMat_BS=[tovec(permute(mean(STA_BSmat_off(Result.dist_order(noi_dist),:,-nTau{4}(1)-6:-nTau{4}-2),3,'omitnan'),[1 3 2]))];
 
 Vpre=[PrespikeMat_SS PrespikeMat_CS PrespikeMat_BS]; Classpre=[ones(1,size(PrespikeMat_SS,2)) ones(1,size(PrespikeMat_CS,2))*2 ones(1,size(PrespikeMat_BS,2))*3];
 rmv_ind=sum(isnan(Vpre),1)>0;
@@ -753,7 +762,7 @@ totalN=[size(PrespikeMat_SS,2) size(PrespikeMat_CS,2) size(PrespikeMat_BS,2)];
 distances = pdist(VprePC', 'euclidean');  % Euclidean distance
 Z = linkage(distances, 'ward');
 %num_clusters = 15;
-cuttoff_val=15;
+cuttoff_val=22;
 cluster_indices = cluster(Z, 'cutoff', cuttoff_val, 'criterion', 'distance');
 num_clusters=max(cluster_indices);
 
@@ -801,7 +810,7 @@ for n=1:num_clusters %Silent during blue off
           'SS/CS/BS (%) : ' num2str(Ncluster_class_fraction(sort_cluster(n),1),2) '/' num2str(Ncluster_class_fraction(sort_cluster(n),2),2) '/' num2str(Ncluster_class_fraction(sort_cluster(n),3),2)])
 end
 
-figure(17); clf; tiledlayout(3,8); cax=[-0.5 2]; ax1=[];
+figure(17); clf; tiledlayout(3,8); cax=[-0.5 5]; ax1=[];
 for n=1:num_clusters
     nexttile([1 1])
     meanV=mean(reshape(Vpre_reduce(:,n),sum(noi_dist),[]),2,'omitnan');
@@ -868,7 +877,7 @@ interDendDist=interDendDist(Result.dist_order(noi_dist),Result.dist_order(noi_di
 
 % moving time
 window_sz=1000; moving_bin=200; corrMat_moving=[]; corrAmp_moving=[]; nTau_silent=[-2:100]; clustersIndicies=[];
-k = 3; % Define number of clusters (k)
+k = 4; % Define number of clusters (k)
 CorrMat_silentMoving=[]; ARI=[]; T_center=[]; CorrMat_silentMoving_avg=[];
 t_slide=[1:moving_bin:size(Result.traces,2)]; g=1;
 

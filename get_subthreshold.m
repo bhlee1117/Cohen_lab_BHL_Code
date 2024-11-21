@@ -1,14 +1,13 @@
 function [tr_sub binary_dilation]=get_subthreshold(tr,sp,dilate,avgwnd)
-<<<<<<< HEAD
+%input: tr = N (neuron) X T (time) voltage trace,
+%       sp = N (neuron) X T (time) binary spike trace
+%       dilate = number of peri-spike frames to omit, ex) 7: -3 frame to 3 frame
+%       avgwnd = window size to smooth after interpolation
 
-tr_sub=tr;
-=======
 tr_sub=[];
-for n=1:size(tr,1)
-    n
+for n=1:size(tr,1) % n th neuron/ROI
 tr_sub(n,:)=tr(n,:);
->>>>>>> 19582be0c2e64e1213569743106aa681a92c454e
-se = strel('square', dilate); % 0 degree means horizontal
+se = strel('square', dilate);
 seg_wind=[-30:30];
 binary_dilation=zeros(1,size(tr,2));
 binary_dilation(find(sp))=1;

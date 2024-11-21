@@ -109,5 +109,4 @@ for f=[27]%length(fpath)
         Result.dirtTrace=[Result.dirtTrace (tovec(dirtMov_dilate)'*tovec(Result.ftprnt))'];
     end
     save(fullfile(fpath{f},'PC_Result.mat'),'Result','fpath','-v7.3')
-    fprintf('Variable "Result" is saved at: %s \n', fpath{f});
 end

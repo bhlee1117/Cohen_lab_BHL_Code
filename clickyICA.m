@@ -92,24 +92,29 @@ icsTrace=icsTrace';
 
 ICA.intens=icsTrace;
 ICA.icaImgs=icaImgs;
-
+ax_IC=[]; ax_PC=[];
+ax_ICtr=[]; ax_PCtr=[];
 if ~hideOutput
 figure;
 tiledlayout(nPCs,nPCs);
 
     for j = 1:nPCs
-        nexttile(1+(j-1)*nPCs,[1 1])
+        ax_PC=[ax_PC nexttile(1+(j-1)*nPCs,[1 1])];
         imshow2(pcImgs(:,:,j), []);
-        nexttile(2+(j-1)*nPCs,[1 floor(nPCs/2)-1])
+        ax_PCtr=[ax_PCtr nexttile(2+(j-1)*nPCs,[1 floor(nPCs/2)-1])];
         plot(mat2gray(intens(j,:))-(j-1)); hold all
     end
 
     for j = 1:size(icaImgs,3)
-        nexttile(floor(nPCs/2)+1+(j-1)*nPCs,[1 1])
+        ax_IC=[ax_IC nexttile(floor(nPCs/2)+1+(j-1)*nPCs,[1 1])];
         imshow2(icaImgs(:,:,j), []);
-        nexttile(floor(nPCs/2)+2+(j-1)*nPCs,[1 floor(nPCs/2)-1])
+        ax_ICtr=[ax_ICtr nexttile(floor(nPCs/2)+2+(j-1)*nPCs,[1 floor(nPCs/2)-1])];
         plot(mat2gray(icsTrace(j,:))-(j-1)); hold all
     end
     hold off
+    linkaxes(ax_PC,'xy')
+    linkaxes(ax_IC,'xy')
+    linkaxes(ax_PCtr,'x')
+    linkaxes(ax_ICtr,'x')
 end
 end

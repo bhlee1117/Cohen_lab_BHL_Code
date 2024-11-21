@@ -1,4 +1,4 @@
-function [Lap_FiringRate Lap_SpikeNumber]=PlaceTrigger_average(spike,place_bin,Virmen_data,vel_thresh,lap_dist)
+function [Lap_FiringRate Lap_SpikeNumber Lap_NframeValid]=PlaceTrigger_average(spike,place_bin,Virmen_data,vel_thresh,lap_dist)
 
 %take VR time
 t_VR = Virmen_data(1,:);

@@ -1,6 +1,10 @@
-function [ROIpoly ROImask]=get_ROI(avgImg,appendmask)
+function [ROIpoly ROImask]=get_ROI(avgImg,appendmask,titlestring)
+if nargin<3
+    titlestring=[];
+end
 if nargin<2
     appendmask=[];
+    
 end
 cax=[prctile(avgImg(:),0.01) prctile(avgImg(:),99.9)];
 figure(333); clf;
@@ -14,6 +18,8 @@ figure(333); clf;
     else
         imshow2(avgImg,cax); hold all
     end
+
+    title(titlestring)
 colorbar;
     g=1; ROIpoly=[];
     while g

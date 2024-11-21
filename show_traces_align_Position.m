@@ -1,7 +1,10 @@
-function ax2=show_traces_align_Position(traces_F,traces_sp,pos,Window,VR_data,noi)
-
+function [ax2 PosTriggerTrace]=show_traces_align_Position(traces_F,traces_sp,pos,Window,VR_data,show_figure)
+ax2=[];
+noi=1;
+if show_figure
 figure;
 tiledlayout(length(noi),1)
+end
 %traces_F=rescale(traces_F);
 scale=15;
 ls=unique(VR_data(8,:));
@@ -14,29 +17,34 @@ else
 pos_time(l)=NaN;    
 end
 end
-
+PosTriggerTrace=[];
 for n=noi
-      ax2=nexttile([1 1]);
+      
     for l=1:length(ls)
         if ~isnan(pos_time(l))
     try
     plot_tr=traces_F(n,pos_time(l)+Window);
+    PosTriggerTrace(l,:,n)=plot_tr;
     plot_sp=traces_sp(n,pos_time(l)+Window);
+    if show_figure
+        ax2=nexttile(1,[1 1]);
     plot(Window,plot_tr-l*scale,'color',cmap(l,:))
     hold all
-    plot(Window(find(plot_sp)),plot_tr(find(plot_sp))-l*scale,'r.')
+    plot(Window(find(plot_sp==1)),plot_tr(find(plot_sp==1))-l*scale,'r.')
     plot(Window,zeros(length(Window),1)-l*scale,'color',[0.7 0.7 0.7])
+    end
     end
         end
     end
 end
+if show_figure
 line([0 0],[-length(ls) 0]*scale,'color',[0 0.2 1],'linewidth',2)
 axis tight
 xlabel('Time (ms)')
 ylabel('Laps')
 %[-length(ls):1:-1]
 set(gca,'ytick',[-length(ls):3:-1]*scale,'yticklabel',[length(ls):-3:1])
-
+end
 
 % scale=-15;
 % vel_thresh=0;

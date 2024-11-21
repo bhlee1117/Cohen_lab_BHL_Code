@@ -71,7 +71,7 @@ for i=[161:166]%length(fpath)
 end
 
 %% load movies
-i=[166]; clear mov_mc
+i=[164]; clear mov_mc
  load(fullfile(fpath{i},"output_data.mat"))
 
     CamDAQ_rate=Device_Data{1, 2}.Counter_Inputs.rate;
@@ -97,7 +97,6 @@ plot(bluedmd{1}(:,2),bluedmd{1}(:,1),'color',[0 0.6 1])
 clear STAmovie mov_res
 [~, trOrg]=clicky(mov_mc{1});
 tr=-(trOrg-movmedian(trOrg,50))';
-trOrg=-trOrg';
 tr=tr./get_threshold(tr,1);
 sp=find_spike_bh(tr(1,:),5,3);
 bwblue=bwlabel(Blue);
@@ -119,8 +118,7 @@ showmov=-[STAmovie{1} flipud(fliplr(STAmovie{2}))];
 figure;
 moviefixsc(showmov);
 figure;
-STAtr=squeeze(mean(reshape(trOrg(:,sp_time'+[-30:20]),2,[],51),2,'omitnan'))';
-plot(STAtr-mean(STAtr(1:10,:)))
+plot(squeeze(mean(reshape(trOrg(:,sp_time'+[-30:20]),2,[],51),2,'omitnan'))')
 
 %% Structure registration.
 [~, unqInd] = unique([Mouse NeuronInd] ,'row');
