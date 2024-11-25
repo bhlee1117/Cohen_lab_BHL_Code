@@ -1,11 +1,10 @@
 
 clear
 clc;
-cd '/Volumes/BHL18TB_D2/Arranged_Data/Prism_OptopatchResult';
+cd '/Users/bhlee1117/Documents/BHL/Matlab_project/20241020_OptogeneticAnalysis';
 [~, ~, raw] = xlsread(['/Volumes/cohen_lab/Lab/Labmembers/Byung Hun Lee/Data/' ...
     'Prism_OptopatchData_Arrangement.xlsx'], 'Sheet1', 'B5:K175');
 
-save_to='/Volumes/BHL18TB_D2/Arranged_Data/Prism_OptopatchResult';
 fpath=raw(:,1);
 Mouse=cell2mat(raw(:,2));
 NeuronInd=cell2mat(raw(:,5));
@@ -22,7 +21,7 @@ set(0,'DefaultFigureWindowStyle','docked')
 %% synchronize
 isResult=zeros(1,length(fpath));
 isTrace=zeros(1,length(fpath));
-for f=1:length(fpath)
+for f=1:30%length(fpath)
     f
 resultfilelist=dir(fullfile(fpath{f},['OP_Result*']));
 if ~isempty(resultfilelist)

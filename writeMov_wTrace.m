@@ -25,7 +25,7 @@ for i=1:length(stack)
     clf;
     tiledlayout(4,1)
     nexttile([3 1])
-    imshow2(movie(:,:,stack(i)),range)
+    imshow2(movie(:,:,i),range)
     colormap('turbo')
     colorbar
     axis tight off equal

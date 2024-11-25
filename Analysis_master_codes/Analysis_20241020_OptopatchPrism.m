@@ -1,9 +1,9 @@
 
 clear
 clc;
-cd '/Volumes/BHL18TB_D2/Arranged_Data/Prism_OptopatchResult';
+%cd '/Volumes/BHL18TB_D2/Arranged_Data/Prism_OptopatchResult';
 [~, ~, raw] = xlsread(['/Volumes/cohen_lab/Lab/Labmembers/Byung Hun Lee/Data/' ...
-    'Prism_OptopatchData_Arrangement.xlsx'], 'Sheet1', 'B5:N175');
+    'Prism_OptopatchData_Arrangement.xlsx'], 'Sheet1', 'B5:O175');
 
 save_to='/Volumes/BHL18TB_D2/Arranged_Data/Prism_OptopatchResult';
 
@@ -13,6 +13,7 @@ NeuronInd=cell2mat(raw(:,5));
 Goodindex=cell2mat(cellfun(@(x) (str2num(num2str(x))),raw(:,11),'UniformOutput',false));
 CamType=raw(:,3);
 StructureData=raw(:,10);
+refROI=cellfun(@(x) (str2num(num2str(x))),raw(:,14),'UniformOutput',false);
 set(0,'DefaultFigureWindowStyle','docked')
 %%
 figure;
@@ -115,7 +116,7 @@ end
 %% ROI setting
 file2analyze=[7,58,63,68,93,94,96,103,104,105,106,107,108,109,110,112,113,114,115,116,117,118,119,120,121,122,123,124,151,152,153,154,155,156,157,158];
 [a, unqInd] = unique([Mouse NeuronInd] ,'row');
-for i=unqInd(34)'
+for i=unqInd(14)'
     load(fullfile(fpath{i},"output_data.mat"))
     disp(fpath{i})
     cd(fpath{i})
@@ -416,21 +417,30 @@ for i=unqInd([39])'
         save([fpath{j} '/Result.mat'],'Result','-v7.3')
     end
 end
-%%
-for i=[160]%length(fpath)]
-    load([fpath{i} '/Result.mat'])
+%% Find Spikes
+CS_thres=[7 2];
+Sp_thres=[4 2];
+exclude_frq2=[55.5 56]; %motion
+freq_lowhigh2=exclude_frq2/(1000/2);
+[b2, a2] = butter(4, freq_lowhigh2, 'stop');
+
+for i=[47]%length(fpath)]
+    load([fpath{i} '/OP_Result.mat'])
     Result.normTraces=Result.traces-prctile(Result.traces,25,2);
     Result.normTraces=Result.normTraces./get_threshold(Result.normTraces,1);
-    tr_ref=Result.normTraces(1,:);
+    for n=1:size(Result.ftprnt,3)
+        Result.normTraces(n,:) = filtfilt(b2, a2, Result.normTraces(n,:));
+    end
+    tr_ref=mean(Result.normTraces(refROI{i},:),1,'omitnan');
     tr=Result.normTraces;
     nROI=size(Result.normTraces,1);
-    sp=find_spike_bh(tr-movmedian(tr,50,2),5,4);
-    sp_soma=find_spike_bh(tr_ref-movprc(tr_ref,200,30,2),6,3);
+    sp=find_spike_bh(tr-movmedian(tr,50,2),Sp_thres(1),Sp_thres(2));
+    sp_soma=find_spike_bh(tr_ref-movprc(tr_ref,200,30,2),Sp_thres(1),Sp_thres(2));
 
     tr_sub=mean(tr_ref,1)-movprc(mean(tr_ref,1),200,20,2);
-    tr_sub=get_subthreshold(tr_sub,sp_soma,5,10);
+    tr_sub=get_subthreshold(tr_sub,sp_soma,7,17);
 
-    [trans tr_trace]=detect_transient2(tr_sub,[6 1.2],sp_soma,20);
+    [trans tr_trace]=detect_transient2(tr_sub,CS_thres,sp_soma,20);
     transcand=cell2mat(cellfun(@(x) length(x)>2,trans.ISI,'UniformOutput',false));
     meanISI_frnt=cellfun(@(x) mean(x(1:2)),trans.ISI(transcand));
     meanISI_first3=zeros(1,length(trans.length));
@@ -454,8 +464,8 @@ for i=[160]%length(fpath)]
     Result.spike=[sp_soma; sp(2:end,:)];
     Result.SpClass=SpikeClassMat;
     Result.CStrace=CS_trace;
-    show_traces_spikes(Result.normTraces,Result.spike,[Result.SpClass; Result.Blue]);
-    save([fpath{i} '/Result.mat'],'Result','-v7.3')
+    show_traces_spikes(Result.normTraces,Result.spike,[Result.SpClass(1:2,:); Result.Blue;]);
+    save([fpath{i} '/OP_Result.mat'],'Result','-v7.3')
 end
 
 %%
