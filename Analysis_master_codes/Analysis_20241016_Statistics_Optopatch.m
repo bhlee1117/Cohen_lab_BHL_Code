@@ -29,9 +29,9 @@ if ~isempty(resultfilelist)
     clear Result
 load(fullfile(fpath{f},resultfilelist(1).name),'Result')
 % save(fullfile(fpath{f},'OP_Result.mat'),'Result','-v7.3')
-try
+if contains(fpath{f}, 'BHL18TB_D2')
 backupServer(fpath{f},'BHL18TB_D2','cohen_lab/Lab/Labmembers/Byung Hun Lee/Data','OP_Result.mat')
-catch
+else
 backupServer(fpath{f},'cohen_lab/Lab/Labmembers/Byung Hun Lee/Data','BHL18TB_D2','OP_Result.mat')    
 end
 isResult(f)=1;

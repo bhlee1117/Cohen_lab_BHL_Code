@@ -150,3 +150,66 @@ title('F_{ref}')
 %%
 clf;
 plot(F_ref,Fslope,'.')
+
+%%
+f=23; bound=7;
+nTau={[-70:50],[-70:50],[-70:50]}; %SS, CS, Brst
+
+load(fullfile(fpath{f},'PC_Result.mat'),'Result')
+% load(fullfile(fpath{f},"output_data.mat"))
+% sz=double(Device_Data{1, 3}.ROI([2 4]));
+% mov_mc=double(readBinMov([fpath{f} '/mc_ShutterReg' num2str(2,'%02d') '.bin'],sz(2),sz(1)));
+% mov_res= mov_mc-mean(mov_mc,3);
+% load([fpath{f} '/mcTrace' num2str(2,'%02d') '.mat']);
+% mov_res= mov_mc-mean(mov_mc,3);
+% mov_res = SeeResiduals(mov_res,mcTrace.xymean);
+% mov_res = SeeResiduals(mov_res,mcTrace.xymean.^2);
+% mov_res = SeeResiduals(mov_res,mcTrace.xymean(:,1).*mcTrace.xymean(:,end));
+% mov_res = mov_res.*double(max(Result.bvMask,[],3)==0);
+% mov_res_crop=mov_res(bound:end-bound,bound:end-bound,:);
+% 
+% [V D eigTrace]=get_eigvector(tovec(mov_res_crop(:,:,1:7780)),10);
+
+F_ref=Result.F_ref;
+NormalizedTrace=(Result.normTraces);
+
+NormalizedTrace_dirt=NormalizedTrace;
+NormalizedTrace_dirt(:,Result.motionReject>0)=NaN;
+NormalizedTrace_dirt(Result.dirtTrace>0)=NaN;
+
+Subthreshold=get_subthreshold(NormalizedTrace_dirt,max(Result.spike(1,:),[],1)>0,7,17);
+Subthreshold(isnan(NormalizedTrace_dirt))=NaN;
+
+noi=setdiff([1:size(NormalizedTrace_dirt,1)],BadROI{f});
+noi_dist=ismember(Result.dist_order,noi);
+
+validtime=find(sum(isnan(Subthreshold),1)==0);
+[V D eigTrace]=get_eigvector(Subthreshold(:,validtime)',10);
+imshow_patch(toimg(squeeze(max(tovec(Result.ftprnt>0).*reshape(rescale2(V,1)+0.1,1,size(Result.ftprnt,3),10),[],2)),size(Result.ref_im,1),size(Result.ref_im,2)))
+
+F0_PCA=sqrt(sum((V(:,[1:3]).*D([1:3])').^2,2));
+NormalizedTrace_dirt=NormalizedTrace_dirt./Result.F_ref;
+ % Isolated Somatic spike
+    SS_s=[];
+    som_spike=find(Result.spike(1,:));
+    for s=som_spike
+        if sum((s+nTau{1})<0 | (s+nTau{1})>size(Result.traces,2),2)==0
+            isnearby=sum(ismember(s+nTau{1},som_spike))>1;
+            isnearbyCS=sum(ismember(s+nTau{1},find(Result.CStrace)))>1;
+            ispartCS=sum(Result.CStrace(s+nTau{1}))>0;
+            if ~isnearby & ~isnan(s) & ~isnearbyCS & ~ispartCS
+                SS_s=[SS_s s];
+            end
+        end
+    end
+    sp_na=sum((SS_s'+nTau{1})<0 | (SS_s'+nTau{1})>size(Result.traces,2),2)==0;
+    SS_s=SS_s(sp_na);
+  STAmat=reshape(NormalizedTrace_dirt(:,SS_s'+nTau{1}),size(Result.traces,1),[],length(nTau{1}));
+  SS_STA=squeeze(mean(STAmat(Result.dist_order(noi_dist),:,:),2,'omitnan'));
+  SS_STA=SS_STA-mean(SS_STA(:,1:15),2);
+  figure(15); clf;
+  nexttile([1 1])
+  imagesc(SS_STA)
+  imshow_patch(toimg(squeeze(max(tovec(Result.ftprnt(:,:,Result.dist_order(noi_dist))>0).*reshape(rescale(F0_PCA(Result.dist_order(noi_dist)))+0.1,1,sum(noi_dist),1),[],2)),size(Result.ref_im,1),size(Result.ref_im,2)))
+  Result.F0_PCA=F0_PCA;
+  save(fullfile(fpath{f},'PC_Result.mat'),'Result','-v7.3')

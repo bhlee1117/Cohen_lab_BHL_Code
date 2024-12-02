@@ -246,7 +246,7 @@ end
 
 %% Signal extraction
 
-for f=[27]%length(fpath)
+for f=[23]%length(fpath)
     f
     load(fullfile(fpath{f},'PC_Result.mat'),'Result');
     load([fpath{f} '/output_data.mat'])
@@ -271,7 +271,7 @@ for f=[27]%length(fpath)
 
     Result.blueDMDimg=blueDMDimg;
     Result.blueDMDcontour=blueDMDcontour;
-    Result.traces=[]; Result.traces_bvMask=[];
+    Result.traces=[]; Result.traces_bvMask=[]; Result.excludetraces=[];
     Result.traces_checker{1}=[]; Result.traces_checker{2}=[];
     Result.tracesPCA=[];
     Result.mcTrace=[];
@@ -316,6 +316,7 @@ for f=[27]%length(fpath)
 
         mov_res=mov_mc.*BoundROI;
         if isfield(Result,'excludeROI')
+            Result.excludetraces=[Result.excludetraces -(tovec(mov_res)'*tovec(Result.excludeROI))'];
             mov_res=mov_res.*double(max(Result.excludeROI,[],3)==0);
         end
         % mov_res= mov_mc-median(mov_mc,3);
@@ -351,7 +352,7 @@ exclude_frq=[241.7 242]; %monitor
 exclude_frq2=[55.5 56]; %motion
 time_bin=15000; Fs=1000; %2nd trunk is the reliable trace
 
-for f=[14]%:length(fpath)
+for f=[23]%:length(fpath)
     load(fullfile(fpath{f},'PC_Result.mat'),'Result')
     ref_trace=ref_ROI{f}(1);
     nTime=size(Result.traces,2);
@@ -427,6 +428,7 @@ legend({'Raw','lowpass fit','Residual'})
     sp_time=zeros(nROI,nTime);
     sp_height=zeros(nROI,nTime);
     mcTrace=squeeze(Result.mcTrace)';
+    excludeTrace=Result.excludetraces;
 
     for n=1:size(Result.traces,1)
         tr=tr_res(n,1:nTime);
@@ -437,11 +439,14 @@ legend({'Raw','lowpass fit','Residual'})
             tr(tN(t):tN(t+1))=squeeze(SeeResiduals(reshape(tr(tN(t):tN(t+1)),1,1,[]),mcTrace(:,(tN(t):tN(t+1)))));
             tr(tN(t):tN(t+1))=squeeze(SeeResiduals(reshape(tr(tN(t):tN(t+1)),1,1,[]),mcTrace(:,(tN(t):tN(t+1))).^2));
             tr(tN(t):tN(t+1))=squeeze(SeeResiduals(reshape(tr(tN(t):tN(t+1)),1,1,[]),mcTrace(1,(tN(t):tN(t+1))).*mcTrace(end,(tN(t):tN(t+1)))));
+            tr(tN(t):tN(t+1))=squeeze(SeeResiduals(reshape(tr(tN(t):tN(t+1)),1,1,[]),excludeTrace(:,(tN(t):tN(t+1)))));
+
             %tr(tN(t):tN(t+1))=squeeze(SeeResiduals(reshape(tr(tN(t):tN(t+1)),1,1,[]),Result.im_corr(:,(tN(t):tN(t+1)))));
             for ch=1:2 % Checkerboard pattern traces
                 tr_check{ch}(tN(t):tN(t+1))=squeeze(SeeResiduals(reshape(tr_check{ch}(tN(t):tN(t+1)),1,1,[]),mcTrace(:,(tN(t):tN(t+1)))));
                 tr_check{ch}(tN(t):tN(t+1))=squeeze(SeeResiduals(reshape(tr_check{ch}(tN(t):tN(t+1)),1,1,[]),mcTrace(:,(tN(t):tN(t+1))).^2));
                 tr_check{ch}(tN(t):tN(t+1))=squeeze(SeeResiduals(reshape(tr_check{ch}(tN(t):tN(t+1)),1,1,[]),mcTrace(1,(tN(t):tN(t+1))).*mcTrace(end,(tN(t):tN(t+1)))));
+                tr_check{ch}(tN(t):tN(t+1))=squeeze(SeeResiduals(reshape(tr_check{ch}(tN(t):tN(t+1)),1,1,[]),excludeTrace(:,(tN(t):tN(t+1)))));
             end
             tr_mc(tN(t):tN(t+1))=tr(tN(t):tN(t+1));
         end
