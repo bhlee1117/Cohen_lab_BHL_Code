@@ -71,7 +71,7 @@ nTau={[-70:50],[-70:50],[-70:50]}; %SS, CS, Brst
 clear SpikeInd SpikeMat STAmat NormalizedTrace_ch NormalizedTrace_dirt SpikeIndBlueOff Dist_order allSpikeMat noi interDendDist noi_dist derivSub LapSubSilent
 clear Subthreshold
 
-for f=foi
+for f=23
     f
     load(fullfile(fpath{f},'PC_Result.mat'),'Result')
     rois={basal_ROI{f},apical_ROI{f},ref_ROI{f}};
@@ -256,7 +256,7 @@ figure(101); clf; tiledlayout(9,9)
 stype_str={'SS','CS','BS'};
 sub_time=[-69:-40]; %from spike
 ax1=[];
-for f=foi
+for f=23
     refkymo=mean(STAmat{f,1}(Dist_order{f}(noi_dist{f}),:,SpikeIndBlueOff{f,1})-median(STAmat{f,1}(Dist_order{f}(noi_dist{f}),-nTau{1}(1)+sub_time,SpikeIndBlueOff{f,1}),2,'omitnan'),3,'omitnan');
     cax=[prctile(refkymo(:),0.5) prctile(refkymo(:),99.5)];
 

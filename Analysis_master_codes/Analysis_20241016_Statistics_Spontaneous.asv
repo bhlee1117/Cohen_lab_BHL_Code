@@ -218,6 +218,8 @@ for f=foi
         allSpikeMat{f}(Result.dirtTrace>0)=NaN;
     end
 
+    allSpikeClassMat{f}=SpClass;
+
     interDendDist{f}=Result.interDendDist*Pixelsize(f);
     Subthreshold{f}=get_subthreshold(NormalizedTrace_dirt{f},max(allSpikeMat{f}(1,:),[],1)>0,7,17);
     Subthreshold{f}(isnan(NormalizedTrace_dirt{f}))=NaN;
@@ -254,7 +256,7 @@ figure(101); clf; tiledlayout(9,9)
 stype_str={'SS','CS','BS'};
 sub_time=[-69:-40]; %from spike
 ax1=[];
-for f=foi
+for f=23
     refkymo=mean(STAmat{f,1}(Dist_order{f}(noi_dist{f}),:,SpikeIndBlueOff{f,1})-median(STAmat{f,1}(Dist_order{f}(noi_dist{f}),-nTau{1}(1)+sub_time,SpikeIndBlueOff{f,1}),2,'omitnan'),3,'omitnan');
     cax=[prctile(refkymo(:),0.5) prctile(refkymo(:),99.5)];
 
@@ -1092,6 +1094,8 @@ for f=[27];
             ExcPatt=[ExcPatt mean(Subthreshold{f}(Dist_order{f}(noi_dist{f}),bseg(maxfrm)+[-3:3]),2,'omitnan')];
         end
     end
+    ExcCandFrame(ismember(ExcCandFrame,find(sum(isnan(ExcPatt),1)>0)))=0;
+    ExcCandFrame=bwlabel(ExcCandFrame>0);
     ExcPatt(:,sum(isnan(ExcPatt),1)>0)=[];
 
     InhPatt=[];
@@ -1100,6 +1104,8 @@ for f=[27];
         [~, minfrm]=min(mean(Subthreshold{f}(Dist_order{f}(noi_dist{f}),bseg),1,'omitnan'));
         InhPatt=[InhPatt mean(Subthreshold{f}(Dist_order{f}(noi_dist{f}),bseg(minfrm)+[-3:3]),2,'omitnan')];
     end
+    InhCandFrame(ismember(InhCandFrame,find(sum(isnan(InhPatt),1)>0)))=0;
+    InhCandFrame=bwlabel(InhCandFrame>0);
     InhPatt(:,sum(isnan(InhPatt),1)>0)=[];
 
     figure(3); clf;
@@ -1287,16 +1293,18 @@ for f=[4 5 6 10 11 14 15 16 17 18 19 20 26 27]
     end
 end
 
-figure(122); clf; tiledlayout()
+figure(122); clf; tiledlayout(3,6);
 for g=1:length(PlaceFieldcat)
 nexttile([1 1])
 imagesc(nBin*2/150,[1:size(PlaceFieldcat{g},1)-1],PlaceFieldcat{g}(1:end-1,2:end)); hold all
 set(gca,'YTick',dendytick{g}(:,1),'YTicklabel',num2str(dendytick{g}(:,2),3))
 yyaxis right
 plot(nBin*2/150,PlaceFieldcat{g}(end,2:end)*1000,'k')
+xlabel('Peri-place field (m)')
+ylabel('Mean firing rate (Hz)')
 end
 colormap(turbo)
-xlabel('Place field (m)')
+
 
 figure(123); clf; tiledlayout(9,6)
 for g=1:length(PlaceTimecat)

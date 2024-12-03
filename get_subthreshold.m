@@ -1,22 +1,20 @@
-function [tr_sub binary_dilation]=get_subthreshold(tr,sp,dilate,avgwnd)
+function [tr_sub tr_sub2]=get_subthreshold(tr,sp,dilate,avgwnd)
 %input: tr = N (neuron) X T (time) voltage trace,
 %       sp = N (neuron) X T (time) binary spike trace
 %       dilate = number of peri-spike frames to omit, ex) 7: -3 frame to 3 frame
 %       avgwnd = window size to smooth after interpolation
 
-tr_sub=[];
-for n=1:size(tr,1) % n th neuron/ROI
-tr_sub(n,:)=tr(n,:);
+tr_sub=NaN(size(tr));
 se = strel('square', dilate);
 seg_wind=[-30:30];
 binary_dilation=zeros(1,size(tr,2));
 binary_dilation(find(sp))=1;
 binary_dilation=imdilate(binary_dilation,se);
-
-tr_sub(:,binary_dilation==1)=NaN;
+ 
 valid_point=find(binary_dilation==0);
 for n=1:size(tr_sub,1)
-tr_sub(n,:)=interp1(valid_point,tr_sub(n,valid_point)',[1:size(tr,2)],'linear');
+tr_sub(n,:)=interp1(valid_point,tr(n,valid_point)',[1:size(tr,2)],'linear');
+%tr_sub(n,:)=interp1(valid_point,tr(n,valid_point)',[1:size(tr,2)],'spline');
 end
     % for s=find(sp)
     %     try
@@ -32,6 +30,7 @@ end
     % tr_sub(n,s+seg_wind)=tr_sub_seg;
     %     end
     % end
+    tr_sub2=tr_sub;
 
     tr_sub=movmean(tr_sub,avgwnd,2,'omitnan');
 
