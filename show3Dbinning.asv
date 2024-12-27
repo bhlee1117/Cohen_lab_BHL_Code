@@ -86,11 +86,8 @@ switch plotType
         ylabel('Y Axis');
         zlabel('Z Values');
         colorbar;
-    case 'image'
-
-        imagesc(centerX,centerY,binnedZ')
-        colorbar;
-        
+    case 'errorbar'
+        error('Invalid plot type. Choose either "surf" or "errorbar".');
     end
 end
 

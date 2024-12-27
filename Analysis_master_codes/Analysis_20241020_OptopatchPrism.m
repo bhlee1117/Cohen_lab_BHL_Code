@@ -422,13 +422,13 @@ for i=unqInd([39])'
     end
 end
 %% Find Spikes
-CS_thres=[4 1];
-Sp_thres=[4 2];
+CS_thres=[4 1.5];
+Sp_thres=[6 3];
 exclude_frq2=[55.5 56]; %motion
 freq_lowhigh2=exclude_frq2/(1000/2);
 [b2, a2] = butter(4, freq_lowhigh2, 'stop');
 
-for i=[5]%length(fpath)]
+for i=[168]%length(fpath)]
     load([fpath{i} '/OP_Result.mat'])
     Result.normTraces=Result.traces-prctile(Result.traces,25,2);
     Result.normTraces=Result.normTraces./get_threshold(Result.normTraces,1);
