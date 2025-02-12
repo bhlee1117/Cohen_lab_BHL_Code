@@ -1,17 +1,17 @@
-function [binnedZ centerX centerY]=show3Dbinning(cellArray, numBinsX, numBinsY, plotType)
+function [binnedZ, centerX, centerY] = show3Dbinning(cellArray, var2, var3, plotType)
     % Function to bin, concatenate, and display 3D data from a cell array
     % Input:
     %   cellArray - N x M cell array containing data
-    %   numBinsX  - Number of bins for X-axis
-    %   numBinsY  - Number of bins for Y-axis
-    %   plotType  - Type of plot: 'errorbar' or 'surf'
+    %   var2      - Number of bins or custom edges for X-axis
+    %   var3      - Number of bins or custom edges for Y-axis
+    %   plotType  - Type of plot: 'errorbar', 'surf', or 'image'
 
     % Check inputs
     if nargin < 4
-        error('You must specify the cell array, number of bins for X and Y, and plot type.');
+        error('You must specify the cell array, binning parameters, and plot type.');
     end
 
-    % Initialize arrays to store concatenated data
+     % Initialize arrays to store concatenated data
     allX = [];
     allY = [];
     allZ = [];
@@ -38,9 +38,23 @@ function [binnedZ centerX centerY]=show3Dbinning(cellArray, numBinsX, numBinsY, 
         allZ = [allZ; zData(:)];
     end
 
-    % Define bin edges based on number of bins
-    edgesX = linspace(min(allX)-abs(min(allX))*0.1, max(allX), numBinsX + 1);
-    edgesY = linspace(min(allY)-abs(min(allX))*0.1, max(allY), numBinsY + 1);
+    
+    % Determine if var2 and var3 are bin counts or edges
+    if isscalar(var2)
+        numBinsX = var2;
+        edgesX = linspace(min(allX) - abs(min(allX)) * 0.1, max(allX), numBinsX + 1);
+    else
+        edgesX = var2;
+    end
+
+    if isscalar(var3)
+        numBinsY = var3;
+        edgesY = linspace(min(allY) - abs(min(allY)) * 0.1, max(allY), numBinsY + 1);
+    else
+        edgesY = var3;
+    end
+
+   
 
     % Compute bin centers
     centerX = (edgesX(1:end-1) + edgesX(2:end)) / 2;
@@ -50,15 +64,15 @@ function [binnedZ centerX centerY]=show3Dbinning(cellArray, numBinsX, numBinsY, 
     [~, ~, ~, binX, binY] = histcounts2(allX, allY, edgesX, edgesY);
 
     % Compute mean and std for Z values in each bin
-    binnedZ = zeros(numel(edgesX)-1, numel(edgesY)-1);
+    binnedZ = zeros(numel(edgesX) - 1, numel(edgesY) - 1);
     binnedStd = zeros(size(binnedZ));
-    for i = 1:numel(edgesX)-1
-        for j = 1:numel(edgesY)-1
+    for i = 1:numel(edgesX) - 1
+        for j = 1:numel(edgesY) - 1
             % Find points in the current bin
             binMask = (binX == i & binY == j);
             if any(binMask)
-                binnedZ(i, j) = mean(allZ(binMask));
-                binnedStd(i, j) = std(allZ(binMask));
+                binnedZ(i, j) = mean(allZ(binMask), 'omitnan');
+                binnedStd(i, j) = std(allZ(binMask), 'omitnan');
             else
                 binnedZ(i, j) = NaN;
                 binnedStd(i, j) = NaN;
@@ -67,26 +81,31 @@ function [binnedZ centerX centerY]=show3Dbinning(cellArray, numBinsX, numBinsY, 
     end
 
     % Plot data
-
-    if strcmpi(plotType, 'surf')
-        % Surface plot
-        h=surf(centerX, centerY, binnedZ');
-        h.FaceAlpha=0.7;
-        %h.EdgeColor='none';
-        xlabel('X Axis');
-        ylabel('Y Axis');
-        zlabel('Z Values');
-        colorbar;
-    elseif strcmpi(plotType, 'errorbar')
-        % 3D Error bar plot with colored points
-        [meshX, meshY] = meshgrid(centerX, centerY);
-        errorbar3(meshX(:), meshY(:), binnedZ(:), binnedStd(:));
-        xlabel('X Axis');
-        ylabel('Y Axis');
-        zlabel('Z Values');
-        colorbar;
-    else
-        error('Invalid plot type. Choose either "surf" or "errorbar".');
+    switch plotType
+        case 'surf'
+            % Surface plot
+            h = surf(centerX, centerY, binnedZ');
+            h.FaceAlpha = 0.7; hold all
+            %scatter3(allX,allY,allZ,20,[0.7 0.7 0.7],'filled','o')
+            xlabel('X Axis');
+            ylabel('Y Axis');
+            zlabel('Z Values');
+            colorbar;
+        case 'errorbar'
+            % 3D Error bar plot with colored points
+            [meshX, meshY] = meshgrid(centerX, centerY);
+            errorbar3(meshX(:), meshY(:), binnedZ(:), binnedStd(:));
+            xlabel('X Axis');
+            ylabel('Y Axis');
+            zlabel('Z Values');
+            colorbar;
+        case 'image'
+            % 2D image plot
+            pcolor(centerX, centerY, binnedZ');
+            shading interp;
+            colorbar;
+            xlabel('X Axis');
+            ylabel('Y Axis');
     end
 end
 

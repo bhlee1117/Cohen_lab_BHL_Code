@@ -1,0 +1,28 @@
+clear; clc;
+fpath='/Volumes/cohen_lab/Lab/Labmembers/Yangdong Wang/Data/NorthwestScreening/20250204/131724YD039_2';
+cd(fpath)
+%%
+load(fullfile(fpath,'output_data.mat'))
+nrows = Device_Data{1, 2}.ROI(4);
+ncols = Device_Data{1, 2}.ROI(2);
+mov = readBinMov(fullfile(fpath,'frames1.bin'), nrows, ncols);
+
+CamCounter=Device_Data{1, 4}.Counter_Inputs(1, 1).data;
+CamTrigger=find(CamCounter(2:end)-CamCounter(1:end-1));
+
+frm_rate=1/((CamTrigger(2)-CamTrigger(1))/Device_Data{1, 2}.hsync_rate);
+
+
+%%
+
+movhi=movmean(mov-movmedian(mov,200,3),5,3);
+movhi=movhi(:,:,200:end);
+%%
+Lag1_cov=mean(movhi(:,:,2:end).*movhi(:,:,1:end-1),3);
+figure; imshow2(Lag1_cov,[0 2000])
+%[roi tr]=clicky(movhi,Lag1_cov);
+[roi tr]=clicky(movhi,max(movhi,[],3)-median(movhi,3));
+%%
+[roi tr]=clicky(movhi);
+tr_raw=apply_clicky(roi,mov);
+

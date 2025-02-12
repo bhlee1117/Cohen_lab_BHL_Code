@@ -1,0 +1,14 @@
+exclude .pre-commit-config.yaml
+include CITATION.cff
+
+global-include *.svg
+
+prune tests
+prune examples
+prune imgs
+prune videos
+prune resources
+
+graft brainrender
+
+global-exclude */__pycache__/*

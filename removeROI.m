@@ -22,7 +22,9 @@ function Result = removeROI(Result, roiIndex)
     Result.normTraces(roiIndex, :) = [];                % Remove from normTraces
     Result.spike(roiIndex, :) = [];                     % Remove from spike
     Result.interDendDist(roiIndex) = [];                % Remove from interDendDist
+    if isfield(Result,'F0_PCA')
     Result.F0_PCA(roiIndex) = [];                       % Remove from F0_PCA
+    end
 
     % Display a message
     fprintf('ROI %d has been successfully removed.\n', roiIndex);

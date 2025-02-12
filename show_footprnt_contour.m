@@ -11,6 +11,7 @@ b=[1:size(c_ftprnt,3)];
 %ax1=nexttile([1 1]);
 %ax1=subplot(2,1,1);
 imshow2(mov_mc,[]); hold all
+ax1=gca;
 for i=1:size(c_ftprnt,3)
 ROIcontour = bwboundaries(c_ftprnt(:,:,i));
 for j=1:length(ROIcontour)

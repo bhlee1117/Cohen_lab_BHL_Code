@@ -69,7 +69,7 @@ nTau={[-70:50],[-70:50],[-70:50]}; %SS, CS, Brst
 clear SpikeInd SpikeMat STAmat NormalizedTrace_ch NormalizedTrace_dirt SpikeIndBlueOff Dist_order allSpikeMat noi interDendDist noi_dist derivSub
 clear Subthreshold
 
-f=foi(17)
+f=foi(end)
    
     load(fullfile(fpath{f},'PC_Result.mat'),'Result')
     rois={basal_ROI{f},apical_ROI{f},ref_ROI{f}};
@@ -78,7 +78,7 @@ f=foi(17)
     end
     Dist_order{f}=Result.dist_order;
     nROI=size(Result.normTraces,1);
-    nTau_bAP=[-30:20];
+    nTau_bAP=[-60:50];
 
     StimOn_Lap=[];
     stimlap=Result.VR(8,:).*double(Result.Blue>0);
@@ -117,12 +117,12 @@ f=foi(17)
     STA_SS=squeeze(mean(reshape(Result.normTraces(:,bAP_ref'+nTau_bAP),nROI,[],length(nTau_bAP)),2,'omitnan'));
     STA_SS= STA_SS - prctile(STA_SS,10,2);
     %STA_SS= STA_SS - prctile(STA_SS(:,1:30),30,2);
-    %STA_SS= STA_SS - mean(STA_SS(:,1:20),2,'omitnan');
+    %STA_SS= STA_SS - mean(STA_SS(:,1:37),2,'omitnan');
 
     %F_ref=max(STA_SS,[],2)./Result.dFF_slope';
 
     %plot(mean(STA_SS(:,-nTau_bAP(1)+[7:11]),2),max(STA_SS,[],2)./Result.dFF_slope','.','MarkerSize',20); hold all
-    F_ref=mean(STA_SS(:,-nTau_bAP(1)+[7:10]),2);
+    F_ref=mean(STA_SS(:,-nTau_bAP(1)+[8:10]),2);
 
     clf; tiledlayout(3,1);
 nexttile([1 1])
@@ -134,6 +134,8 @@ plot(F_ref(Result.dist_order),max(STA_SS(Result.dist_order,:),[],2),'.');
 nexttile([1 1])
 imagesc(STA_SS(Result.dist_order,:)./F_ref(Result.dist_order))
 colormap(turbo)
+
+plot(Result.interDendDist,max(STA_SS,[],2))
 %%
 
 Result.F_ref=F_ref;

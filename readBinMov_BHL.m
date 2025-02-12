@@ -9,6 +9,8 @@ sz=double(Device_Data{n}.ROI([2 4]));
 if nargin<3
     time_read=[1:max(Device_Data{1, 2}.Counter_Inputs.data)];
 end
+
+
 isMCtrace=dir(fullfile(filepath,['mc_*.bin']));
 if ~isempty(isMCtrace)
     disp(['Loading ' fullfile(filepath,isMCtrace(1).name)])

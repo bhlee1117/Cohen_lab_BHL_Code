@@ -152,9 +152,10 @@ clf;
 plot(F_ref,Fslope,'.')
 
 %%
-f=23; bound=7;
+bound=7;
 nTau={[-70:50],[-70:50],[-70:50]}; %SS, CS, Brst
 
+for f=foi(end)
 load(fullfile(fpath{f},'PC_Result.mat'),'Result')
 % load(fullfile(fpath{f},"output_data.mat"))
 % sz=double(Device_Data{1, 3}.ROI([2 4]));
@@ -170,12 +171,14 @@ load(fullfile(fpath{f},'PC_Result.mat'),'Result')
 % 
 % [V D eigTrace]=get_eigvector(tovec(mov_res_crop(:,:,1:7780)),10);
 
-F_ref=Result.F_ref;
+%F_ref=Result.F_ref;
 NormalizedTrace=(Result.normTraces);
 
 NormalizedTrace_dirt=NormalizedTrace;
 NormalizedTrace_dirt(:,Result.motionReject>0)=NaN;
+if isfield(Result,'dirtTrace')
 NormalizedTrace_dirt(Result.dirtTrace>0)=NaN;
+end
 
 Subthreshold=get_subthreshold(NormalizedTrace_dirt,max(Result.spike(1,:),[],1)>0,7,17);
 Subthreshold(isnan(NormalizedTrace_dirt))=NaN;
@@ -184,10 +187,13 @@ noi=setdiff([1:size(NormalizedTrace_dirt,1)],BadROI{f});
 noi_dist=ismember(Result.dist_order,noi);
 
 validtime=find(sum(isnan(Subthreshold),1)==0);
-[V D eigTrace]=get_eigvector(Subthreshold(:,validtime)',10);
-imshow_patch(toimg(squeeze(max(tovec(Result.ftprnt>0).*reshape(rescale2(V,1)+0.1,1,size(Result.ftprnt,3),10),[],2)),size(Result.ref_im,1),size(Result.ref_im,2)))
+% [V D eigTrace]=get_eigvector(Subthreshold(:,validtime)',10);
+% imshow_patch(toimg(squeeze(max(tovec(Result.ftprnt>0).*reshape(rescale2(V,1)+0.1,1,size(Result.ftprnt,3),10),[],2)),size(Result.ref_im,1),size(Result.ref_im,2)))
+% 
+% F0_PCA=sqrt(sum(((V(:,[1:3]).^2).*D([1:3])'),2));
 
-F0_PCA=sqrt(sum((V(:,[1:3]).*D([1:3])').^2,2));
+F0_PCA=get_F0PCA(Subthreshold(:,validtime));
+
 NormalizedTrace_dirt=NormalizedTrace_dirt./Result.F_ref;
  % Isolated Somatic spike
     SS_s=[];
@@ -213,3 +219,6 @@ NormalizedTrace_dirt=NormalizedTrace_dirt./Result.F_ref;
   imshow_patch(toimg(squeeze(max(tovec(Result.ftprnt(:,:,Result.dist_order(noi_dist))>0).*reshape(rescale(F0_PCA(Result.dist_order(noi_dist)))+0.1,1,sum(noi_dist),1),[],2)),size(Result.ref_im,1),size(Result.ref_im,2)))
   Result.F0_PCA=F0_PCA;
   save(fullfile(fpath{f},'PC_Result.mat'),'Result','-v7.3')
+  load(fullfile(fpath{f},'PC_Result.mat'),'Result');
+backupServer(fpath{f},'BHL18TB_D2','cohen_lab/Lab/Labmembers/Byung Hun Lee/Data','PC_Result.mat')
+end

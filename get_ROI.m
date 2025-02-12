@@ -33,10 +33,13 @@ colorbar;
         end
     end
 sz=size(avgImg);
+ROImask=[];
 for i=1:length(ROIpoly)
 
     ROImask(:,:,i)=poly2mask(ROIpoly{i}(:,1),ROIpoly{i}(:,2),sz(1),sz(2));
 end
+if ~isempty(ROImask)
 ROImask=cat(3,appendmask,ROImask);
+end
 close(figure(333));
 end

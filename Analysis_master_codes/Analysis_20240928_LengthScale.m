@@ -14,10 +14,8 @@ StructureData=raw(:,10);
 BadROI=cellfun(@(x) (str2num(num2str(x))),raw(:,13),'UniformOutput',false);
 time_segment=25000;
 %% Stim
-nTau=[-40:170]; nTau_sp=[-5:15]; somaROI=[];
-clear STAmovie SpTAmovie
 
-for i=158
+for i=102
     %load([fpath{i} '/Result.mat'])
     cd(fpath{i});
     load(fullfile(fpath{i},"output_data.mat"))

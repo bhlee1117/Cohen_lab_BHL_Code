@@ -4,7 +4,7 @@ function [mean_amplitudes std_amplitudes x_bin_centers indicies binnedData]=binn
 % Binning data, input: Data(cell variable, N x 2, matrix, 1 st column: x
 % axis (axis to bin), 2nd column: measure))
 
-x_bin_centers = x_bin_edges(1:end-1)+(x_bin_edges(2)-x_bin_edges(1))/2;
+x_bin_centers = mean([x_bin_edges(1:end-1); x_bin_edges(2:end)],1);
 
 mean_amplitudes = zeros(1, length(x_bin_centers));
 std_amplitudes = zeros(1, length(x_bin_centers));

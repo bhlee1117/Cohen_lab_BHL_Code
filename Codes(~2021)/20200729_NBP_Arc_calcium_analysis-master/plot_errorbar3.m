@@ -17,17 +17,17 @@ if iscell(dddd)
         S=[S  std(dddd{g},'omitnan')/sqrt(size(dddd{g},1))];
     end
 
-    violin(dddd,'x',GG,'facecolor',cmap,'edgecolor',[],'mc',[],'medc',[],'bw',0.1,'plotlegend',0);
+    violin(dddd,'x',GG,'facecolor',cmap,'edgecolor',[],'mc',[],'medc',[],'bw',0.5,'plotlegend',0);
     hold all
-    % for g=1:size(dddd,2)
-    %     G=GG(g)+randn(size(dddd{g},1),1)*0.01;
-    %     scatter(G,dddd{g},5,repmat(cmap(g,:),size(dddd{g},1),1),'filled','MarkerFaceAlpha',0.2);
-    % end
+    for g=1:size(dddd,2)
+        G=GG(g)+randn(size(dddd{g},1),1)*0.01;
+        scatter(G,dddd{g},10,repmat(cmap(g,:),size(dddd{g},1),1),'filled','MarkerFaceAlpha',0.5);
+    end
     errorbar(GG,M,S,'LineWidth',2,'linestyle','none',...
         'color','k','Capsize',10,'marker','+','markersize',10)
     xlim([GG(1,1)-0.2 GG(end)+0.2])
 else
-    violin(dddd,'x',GG,'facecolor',cmap,'edgecolor',[],'bw',0.1,'plotlegend',0);
+    violin(dddd,'x',GG,'facecolor',cmap,'edgecolor',[],'bw',1,'plotlegend',0);
     hold all
     errorbar(GG,mean(dddd,1,'omitnan'),std(dddd,0,1,'omitnan')./sqrt(sum(~isnan(dddd),1)),'LineWidth',2,'linestyle','none',...
         'color','k','Capsize',10,'marker','+','markersize',10)

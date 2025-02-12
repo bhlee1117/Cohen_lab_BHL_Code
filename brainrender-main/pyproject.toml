@@ -1,0 +1,139 @@
+[project]
+name = "brainrender"
+authors = [
+    { name = "Federico Claudi, Adam Tyson, Luigi Petrucco", email = "hello@brainglobe.info" },
+]
+description = "Visualisation and exploration of brain atlases and other anatomical data"
+readme = "README.md"
+requires-python = ">=3.10"
+dynamic = ["version"]
+
+dependencies = [
+    "brainglobe-atlasapi>=2.0.1",
+    "brainglobe-space>=1.0.0",
+    "brainglobe-utils>=0.5.0",
+    "h5py",
+    "k3d",
+    "loguru",
+    "morphapi>=0.2.1",
+    "msgpack",
+    "myterial",
+    "numpy",
+    "pandas",
+    "pooch",
+    "pyinspect>=0.0.8",
+    "pyyaml>=5.3",
+    "requests",
+    "tables",
+    "vedo>=2025.5.3",
+    "vtk"
+]
+
+license = { text = "BSD-3-Clause" }
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Programming Language :: Python",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Operating System :: OS Independent",
+    "License :: OSI Approved :: BSD License",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+]
+
+[project.urls]
+Homepage = "https://brainglobe.info/"
+"Source Code" = "https://github.com/brainglobe/brainrender"
+"Bug Tracker" = "https://github.com/brainglobe/brainrender/issues"
+Documentation = "https://brainglobe.info/documentation/brainrender/index.html"
+"User Support" = "https://forum.image.sc/tag/brainglobe"
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    "pytest-cov",
+    "coverage",
+    "tox",
+    "black",
+    "mypy",
+    "pre-commit",
+    "ruff",
+    "setuptools_scm",
+]
+nb = ["jupyter", "k3d"]
+
+
+[build-system]
+requires = ["setuptools>=45", "wheel", "setuptools_scm[toml]>=6.2"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+include-package-data = true
+
+[tool.setuptools.packages.find]
+include = ["brainrender*"]
+exclude = ["tests*", "docs*", "examples*", "imgs*"]
+
+
+[tool.pytest.ini_options]
+addopts = "--cov=brainrender"
+markers = [
+    "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+    "local: marks test as local (not for CI)",
+]
+
+[tool.black]
+target-version = ['py310','py311', 'py312']
+skip-string-normalization = false
+line-length = 79
+
+[tool.setuptools_scm]
+
+[tool.check-manifest]
+ignore = [
+    ".yaml",
+    "tox.ini",
+    "tests/",
+    "tests/test_unit/",
+    "tests/test_integration/",
+    "docs/",
+    "docs/source/",
+]
+
+# should revisit some of these.
+[tool.ruff]
+line-length = 79
+exclude = ["__init__.py", "build", ".eggs", "examples"]
+fix = true
+ignore = ["E501", "E402"]
+
+[tool.ruff.lint]
+select = ["I", "E", "F"]
+
+[tool.tox]
+legacy_tox_ini = """
+[tox]
+envlist = py{310,311,312}
+isolated_build = True
+
+[gh-actions]
+python =
+    3.10: py310
+    3.11: py311
+    3.12: py312
+
+[testenv]
+extras =
+    dev
+commands =
+    pytest -v --color=yes --cov=brainrender --cov-report=xml
+passenv =
+    CI
+    GITHUB_ACTIONS
+    DISPLAY
+    XAUTHORITY
+    NUMPY_EXPERIMENTAL_ARRAY_FUNCTION
+    PYVISTA_OFF_SCREEN
+"""

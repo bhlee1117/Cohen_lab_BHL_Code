@@ -2,13 +2,14 @@ function [ax2 PosTriggerTrace]=show_traces_align_Position(traces_F,traces_sp,pos
 ax2=[];
 noi=1;
 if show_figure
-figure;
-tiledlayout(length(noi),1)
+% figure;
+% tiledlayout(length(noi),1)
 end
 %traces_F=rescale(traces_F);
-scale=15;
+scale=std(traces_F)*8;
 ls=unique(VR_data(8,:));
-cmap=turbo(length(ls));
+%cmap=turbo(length(ls));
+cmap=repmat([0.3],length(ls),3);
 for l=1:length(ls)
 [dist frm]=min(abs(VR_data(5,VR_data(8,:)==ls(l))-pos));
 if dist<1
@@ -27,11 +28,11 @@ for n=noi
     PosTriggerTrace(l,:,n)=plot_tr;
     plot_sp=traces_sp(n,pos_time(l)+Window);
     if show_figure
-        ax2=nexttile(1,[1 1]);
+        %ax2=nexttile(1,[1 1]);
     plot(Window,plot_tr-l*scale,'color',cmap(l,:))
     hold all
     plot(Window(find(plot_sp==1)),plot_tr(find(plot_sp==1))-l*scale,'r.')
-    plot(Window,zeros(length(Window),1)-l*scale,'color',[0.7 0.7 0.7])
+    %plot(Window,zeros(length(Window),1)-l*scale,'color',[0.7 0.7 0.7])
     end
     end
         end

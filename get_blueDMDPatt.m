@@ -32,7 +32,7 @@ if sum(sum(double(Device_Data{1, 6}.Target)))>0
         blueDMDimg=imcrop(revertedImage,double(Device_Data{1, 4}.ROI([1 3 2 4]))+[0 0 -1 -1]);
     end
     for z=1:size(revertedImage,3)
-        bluePatt(z,:) = bwboundaries(blueDMDimg(:,:,z));
+        bluePatt{z} = bwboundaries(blueDMDimg(:,:,z));
     end
 
 else

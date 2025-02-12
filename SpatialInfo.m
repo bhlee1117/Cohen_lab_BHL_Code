@@ -1,21 +1,18 @@
-function spatial_info = SpatialInfo(firing_rate_maps, occupancy)
+function spatial_info = SpatialInfo(SpikeTr, VRbinTr)
+pos_bin=max(VRbinTr);
+MeanF=mean(SpikeTr,'omitnan');
+FR=zeros(1,pos_bin);
+PR=zeros(1,pos_bin);
 
-   % Sum the firing rate maps and occupancy times across all laps
-    total_spike_counts = nansum(firing_rate_maps .* occupancy, 1);  % Total spike counts per bin
-    total_occupancy = nansum(occupancy, 1);  % Total occupancy per bin
+VRbinTr(isnan(SpikeTr))=NaN;
 
-    % Replace zero occupancy with NaN to avoid division by zero
-    total_occupancy(total_occupancy == 0) = NaN;
+for k=1:pos_bin
+    frameInK=find(VRbinTr==k);
+PR(k)=length(frameInK)./sum(~isnan(VRbinTr));
+FR(k)=mean(SpikeTr(frameInK),'omitnan');
+end
 
-    % Calculate the probability of visiting each bin (normalized occupancy)
-    p_i = total_occupancy / nansum(total_occupancy);
+spatial_info = sum(PR.*FR.*log2(FR/MeanF),'omitnan')/MeanF;
+% bits per spike
 
-    % Calculate the mean firing rate per bin
-    r_i = total_spike_counts ./ total_occupancy;
-
-    % Calculate the overall mean firing rate across all bins
-    r = nansum(r_i .* p_i);  % Weighted average firing rate
-
-    % Compute the spatial information for the pooled data
-    spatial_info = sum(p_i .* (r_i / r) .* log2(r_i / r),2, 'omitnan');
 end

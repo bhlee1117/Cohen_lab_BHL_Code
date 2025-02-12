@@ -1,6 +1,6 @@
 clear
 clc;
-cd '/Volumes/BHL_WD18TB/YQ601_PlaceCellResults';
+cd '/Volumes/BHL18TB_D2/YQ601_PlaceCellResults';
 [~, fpath, raw] = xlsread(['/Volumes/cohen_lab/Lab/Labmembers/Byung Hun Lee/Data/' ...
     'PlaceCellData_Arrangement.xlsx'], 'Sheet1', 'C8:C42');
 
@@ -102,112 +102,188 @@ for i=1:length(fpath)
     disp(['MC done:' fpath{i}])
 
 end
-%% Test
-i=12;
-load(fullfile(fpath{i},'Analysis_parameter.mat'))
-load([fpath{i} '/output_data.mat'])
-fileList = dir(fullfile(fpath{i}, '*.data'));
-if length(fileList)==1
-    fid = fopen(fullfile(fpath{i},fileList.name));
-    VRdata = fread(fid,[12 inf],'double');
-else
-    error('Data file cannot be found');
+%% Get footprint
+
+time_size=150000; %segment size
+overlap=500;
+
+for i=2%1:length(fpath)
+    %load files
+    load(fullfile(fpath{i},'Analysis_parameter.mat'))
+    load([fpath{i} '/output_data.mat'])
+    load(fullfile(fpath{i},'PC_Result.mat'),'Result');
+    cd(fpath{i})
+
+    fileList = dir(fullfile(fpath{i}, '*.data'));
+    if length(fileList)==1
+        fid = fopen(fullfile(fpath{i},fileList.name));
+        VRdata = fread(fid,[12 inf],'double');
+    else
+        error('Data file cannot be found');
+    end
+
+    WorldITrack=find(VRdata(2,:)==1); %world 1
+    VRdata(5,WorldITrack)=(VRdata(5,WorldITrack)+6)*115/121;
+
+    Result.centers=CellCoordinate;
+    Result.fpath=fpath{i};
+    disp(['loading  ' fpath{i}])
+
+    sz=double(Device_Data{1, 3}.ROI([2 4]));
+    mov_test=double(readBinMov_times([fpath{i} '/frames1.bin'],sz(2),sz(1),[10000:12000]));
+    Result.FOV=mean(mov_test,3);
+
+    CamCounter=Device_Data{1, 2}.Counter_Inputs(1, 1).data;
+    CamTrigger=find(CamCounter(2:end)-CamCounter(1:end-1));
+    t_seg=[[1:time_size:length(CamTrigger)] length(CamTrigger)+1];
+    t_seg=[t_seg(1:end-1)' t_seg(2:end)'+overlap-1];
+    t_seg(2:end,1)=t_seg(2:end,1)-overlap;
+    t_seg(end)=length(CamTrigger);
+
+    t_seg2=[[1:time_size:length(CamTrigger)] length(CamTrigger)+1];
+    t_seg2=[t_seg2(1:end-1)' t_seg2(2:end)'];
+    t_seg2(1:end-1,2)=t_seg2(1:end-1,2)-1;
+    t_seg2(end)=length(CamTrigger);
+
+    extract_seg = repmat([1 time_size],size(t_seg,1),1);
+    extract_seg(2:end,:)=extract_seg(2:end,:)+overlap;
+    extract_seg(end,2)=mod(length(CamTrigger),time_size)+overlap;
+
+    Result.traces=[];
+    Result.traces_res=[];
+    Result.im_corr=[];
+    Result.mcTrace=[];
+    Result.c_ftprnt=[];
+    Result.ref_im=[];
+    for n=1:size(Result.centers,1)
+
+        mov=double(readBinMov([fpath{i} '/mc' num2str(n,'%02d') '_' num2str(1,'%02d') '.bin'], ...
+            bs(n)*2+1,bs(n)*2+1));
+        mov=mov(:,:,extract_seg(1,1):extract_seg(1,2));
+        mcTrace_block{n,1}=mcTrace_block{n,1}(:,extract_seg(1,1):extract_seg(1,2));
+
+        mov_res= mov-mean(mov,3);
+        bkg = zeros(2, size(mov,3));
+        bkg(1,:) = linspace(-1, 1, size(mov,3));  % linear term
+        bkg(2,:) = linspace(-1, 1, size(mov,3)).^2;  % quadratic term
+        mcTrace_block{n,1}=movmean(mcTrace_block{n,1},10,2);
+        mov_res=SeeResiduals(mov_res,mcTrace_block{n,1});
+        mov_res=SeeResiduals(mov_res,mcTrace_block{n,1}.^2);
+        mov_res=SeeResiduals(mov_res,mcTrace_block{n,1}(1,:).*mcTrace_block{n,1}(2,:));
+        mov_res= SeeResiduals(mov_res,bkg,1);
+
+        [u,s,v] = svds(tovec(mov_res(:,:,10000:30000)),20);
+        reshape_u=reshape(u,size(mov_res,2),size(mov_res,1),[]);
+        bvMask=[];
+        [~, Result.bvMask]=get_ROI(max(abs(reshape_u),[],3),bvMask);
+
+        [~, ~, icsTrace]=clickyICA(imresize(mov_res,0.5),imresize(mean(mov,3),0.5),5);
+        icsImgs=toimg(tovec(mov_res)*icsTrace.intens',size(mov_res,1),size(mov_res,2));
+
+        %ROIimg=icsImgs(:,:,1);
+        ROIimg=sqrt(mean(mov_res(:,:,2:end).*mov_res(:,:,1:end-1),3));
+        excludeImg=mean(icsImgs(:,:,[3]),3);
+        %excludeImg=mean(mov_mc,3);
+
+        figure(3); clf;
+        imshow2(ROIimg,[])
+        title('set extraction ROI');
+        % set extraction ROI
+        g=1; ROIpoly=[];
+        while g
+            h = drawpolygon('Color','r');
+            if size(h.Position,1)==1 %no more ROI
+                g=0;
+            else
+                ROIpoly=[ROIpoly; {h.Position}];
+                hold all
+                plot(h.Position(:,1),h.Position(:,2))
+            end
+        end
+        close(figure(3));
+        Result.ROIpoly=ROIpoly;
+
+        % set exclude ROI
+        figure; excludeROI=[];
+        [~, Result.excludeROI]=get_ROI(excludeImg,excludeROI,'exclude ROI');
+        % if ifregressROI(f)
+        % regressTrace=tovec(mov_res)'*tovec(Result.excludeROI);
+        % mov_res = SeeResiduals(mov_res,regressTrace);
+        % end
+
+        n_comp=6;
+        mov_res_reg=mov_res;
+        mov_res_reg=SeeResiduals(mov_res_reg,icsTrace.intens(5,:));
+        mov_filt=imgaussfilt3(mov_res_reg.*double(max(Result.bvMask,[],3)==0).*double(max(Result.excludeROI,[],3)==0),[1.5 1.5 0.1]);
+        mov_filt=mov_filt(:,:,20000:80000);
+        movVec=tovec(mov_filt);
+        Npoly=size(Result.ROIpoly,1);
+        ftprnt = zeros(size(mov_filt,1)*size(mov_filt,2),Npoly);
+        clear mask
+        figure(4);
+        for p=1:Npoly %each ROIs
+            clf; ax2=[];
+            tiledlayout(n_comp/2+2,2)
+            mask(:,:,p) = poly2mask(Result.ROIpoly{p}(:,1), Result.ROIpoly{p}(:,2), size(mov_res,2), size(mov_res,1));
+            pixelList=find(tovec(squeeze(mask(:,:,p))));
+            subMov = movVec(pixelList,:);
+            covMat = subMov*subMov';  % PCA within each region
+            [V, D] = eig(covMat);
+            D = diag(D);
+            D = D(end:-1:1);
+            V = V(:,end:-1:1);
+            vSign = sign(max(V) - max(-V));  % make the largest value always positive
+            V = V.*vSign;
+            eigTrace=subMov'*V;
+            nexttile([2 2])
+            plot(rescale2(eigTrace(:,1:n_comp),1)+[1:n_comp])
+
+            %[icsTrace, ~, sepmat]=sorted_ica(eigTrace(:,1:n_comp),n_comp);
+            %plot(rescale2(icsTrace,1)+[1:size(icsTrace,2)])
+            %V_ics=V(:,1:n_comp)*sepmat';
+            for np=1:n_comp
+                eigImg=NaN(size(mov_filt,1)*size(mov_filt,2),1);
+                ax2=[ax2 nexttile([1 1])];
+                eigImg(pixelList,1)=V(:,np);
+                eigImg=toimg(eigImg,size(mov_filt,1),size(mov_filt,2));
+                %imshow2(im_merge(cat(3,mean(mov,3),eigImg),[1 1 1;1 0 0]),[])
+                imshow2(eigImg,[])
+                title([num2str(np) ', Fraction: ' num2str(D(np)/sum(D),2)])
+            end
+            linkaxes(ax2,'xy')
+            n_take = input('#components to take: ', 's');
+            n_take = str2num(n_take);
+            coeff=subMov*mean(eigTrace(:,n_take)*V(:,n_take)',2);
+            ftprnt(pixelList,p)=coeff;
+        end
+        close(figure(4));
+
+        Result.c_ftprnt(1:2*bs(n)+1,1:2*bs(n)+1,n)=toimg(ftprnt,size(mov_res,2),size(mov_res,1));
+        figure; clf; tiledlayout(2,2);
+        show_footprnt(Result.c_ftprnt,mean(mov,3))
+        tr_prnt=tovec(Result.c_ftprnt)'*tovec(mov_res);
+        tr_poly=tovec(double(Result.c_ftprnt>0))'*tovec(mov_res);
+
+        nexttile([1 2])
+        plot(rescale(tr_prnt)); hold all
+        plot(rescale(tr_poly));
+
+        plot(rescale2(mcTrace_block{n,1},2)'+2)
+
+        Cellpsf = fspecial('gaussian', 2*bs(n)+1, 10);
+        Result.c_ftprnt(1:2*bs(n)+1,1:2*bs(n)+1,n)=Result.c_ftprnt(1:2*bs(n)+1,1:2*bs(n)+1,n).*Cellpsf;
+    end
+
+    save(fullfile(fpath{i},'PC_Result.mat'),'Result','-v7.3')
+    load(fullfile(fpath{i},'PC_Result.mat'),'Result');
+backupServer(fpath{i},'BHL18TB_D2','cohen_lab/Lab/Labmembers/Byung Hun Lee/Data','PC_Result.mat')
 end
-
-WorldITrack=find(VRdata(2,:)==1); %world 1
-VRdata(5,WorldITrack)=(VRdata(5,WorldITrack)+6)*115/121;
-
-VRdata=VRdata(:,VRdata(10,:)>0);
-DAQ_rate=Device_Data{1, 2}.Counter_Inputs.rate;
-CamCounter=Device_Data{1, 2}.Counter_Inputs(1, 1).data;
-CamTrigger=find(CamCounter(2:end)-CamCounter(1:end-1));
-t_DAQ=CamTrigger/DAQ_rate;
-t_VR = datetime(datetime(VRdata(1,:),'ConvertFrom','datenum'), 'InputFormat', 'yyyy-MM-dd HH:mm:ss.SSS');
-t_VR= t_VR-t_VR(1);
-t_VR= milliseconds(t_VR)/1000;
-t_VR= t_VR*t_DAQ(end)/t_VR(end);
-VRdata(1,:)=t_VR;
-[Virmen_data_int vel_trace]=virmen_interpolate(VRdata,115,t_DAQ);
-Virmen_data_int(end+1,:)=vel_trace;
-
-Result.VR=Virmen_data_int;
-Result.centers=CellCoordinate;
-Result.frm_rate=double((CamTrigger(2)-CamTrigger(1))*DAQ_rate);
-Result.fpath=fpath{i};
-disp(['loading  ' fpath{i}])
-
-sz=double(Device_Data{1, 3}.ROI([2 4]));
-mov_test=double(readBinMov_times([fpath{i} '/frames1.bin'],sz(2),sz(1),[3000:4000]));
-Result.FOV=mean(mov_test,3);
-
-try
-    Result.Blue=Device_Data{1, 2}.buffered_tasks(1, 1).channels(1, 2).data(CamTrigger).*Virmen_data_int(12,:);
-end
-try
-    Result.Reward=Device_Data{1, 2}.buffered_tasks(1, 3).channels.data(CamTrigger);
-end
-
-% make time segment
-t_seg=[[1:time_size:length(CamTrigger)] length(CamTrigger)+1];
-t_seg=[t_seg(1:end-1)' t_seg(2:end)'+overlap-1];
-t_seg(2:end,1)=t_seg(2:end,1)-overlap;
-t_seg(end)=length(CamTrigger);
-
-Result.traces=[];
-Result.traces_res=[];
-Result.im_corr=[];
-Result.mcTrace=[];
-
-n=2;
-tpart=[500:100000];
-
-mov=double(readBinMov([fpath{i} '/mc' num2str(n,'%02d') '_' num2str(1,'%02d') '.bin'], ...
-    bs(n)*2+1,bs(n)*2+1));
-mov_res= mov-mean(mov,3);
-[ROI, Intens1]=clicky(-mov_res,mean(mov,3));
-
-bkg = zeros(2, size(mov,3));
-bkg(1,:) = linspace(-1, 1, size(mov,3));  % linear term
-bkg(2,:) = linspace(-1, 1, size(mov,3)).^2;  % quadratic term
-mov_res= SeeResiduals(mov_res,bkg,1);
-
-
-[Intens2]=apply_clicky(ROI,-mov_res,'no');
-
-
-mov_res=SeeResiduals(mov_res,mcTrace_block{n,1});
-mov_res=SeeResiduals(mov_res,mcTrace_block{n,1}.^2);
-mov_res=SeeResiduals(mov_res,mcTrace_block{n,1}(1,:).*mcTrace_block{n,1}(2,:));
-
-[Intens3]=apply_clicky(ROI,-mov_res,'no');
-
-%  im_corr_val=Result.im_corr{n}([1:t_seg(1,2)+1]);
-% mov_res=SeeResiduals(mov_res,im_corr_val);
-%  [Intens4]=apply_clicky(ROI,-mov_res,'no');
-
-figure;
-tiledlayout(2,1)
-ax1=nexttile([1 1]);
-plot(rescale(Intens1(tpart)))
-hold all
-plot(rescale(Intens2(tpart))+1)
-
-plot(rescale(Intens3(tpart))+2)
-
-% plot(rescale(Intens4(tpart))+3)
-
-ax2=nexttile([1 1]);
-plot(rescale2(mcTrace_block{n,1}(:,tpart),2)'+[1:2])
-hold all
-plot(rescale2(im_corr_val(:,tpart),2)'+[3])
-
-linkaxes([ax1 ax2],'x')
 %% Signal Extraction
 
 time_size=150000; %segment size
 overlap=500;
 
-for i=1:length(fpath)
+for i=5%1:length(fpath)
     %load files
     Result=[];
     load(fullfile(fpath{i},'Analysis_parameter.mat'))
@@ -246,9 +322,7 @@ for i=1:length(fpath)
     mov_test=double(readBinMov_times([fpath{i} '/frames1.bin'],sz(2),sz(1),[10000:11000]));
     Result.FOV=mean(mov_test,3);
 
-
     Result.Blue=Device_Data{1, 2}.buffered_tasks(1, 1).channels(1, 2).data(CamTrigger).*Virmen_data_int(12,:);
-
     Result.Reward=Device_Data{1, 2}.buffered_tasks(1, 3).channels.data(CamTrigger);
 
     t_seg=[[1:time_size:length(CamTrigger)] length(CamTrigger)+1];
@@ -311,16 +385,16 @@ for i=1:length(fpath)
             mov=mov(:,:,extract_seg(t,1):extract_seg(t,2));
             mcTrace_block{n,t}=mcTrace_block{n,t}(:,extract_seg(t,1):extract_seg(t,2));
 
-            mov_res= mov-mean(mov,3);
-            bkg = zeros(2, size(mov,3));
-            bkg(1,:) = linspace(-1, 1, size(mov,3));  % linear term
-            bkg(2,:) = linspace(-1, 1, size(mov,3)).^2;  % quadratic term
-            mov_res=SeeResiduals(mov_res,mcTrace_block{n,t});
-            mov_res=SeeResiduals(mov_res,mcTrace_block{n,t}.^2);
-            mov_res= SeeResiduals(mov_res,bkg,1);
+            % mov_res= mov-mean(mov,3);
+            % bkg = zeros(2, size(mov,3));
+            % bkg(1,:) = linspace(-1, 1, size(mov,3));  % linear term
+            % bkg(2,:) = linspace(-1, 1, size(mov,3)).^2;  % quadratic term
+            % mov_res=SeeResiduals(mov_res,mcTrace_block{n,t});
+            % mov_res=SeeResiduals(mov_res,mcTrace_block{n,t}.^2);
+            % mov_res= SeeResiduals(mov_res,bkg,1);
 
         end
-        Result.traces(n,t_seg2(end,1):t_seg2(end,2))=-(tovec(mov_res)'*tovec(Result.c_ftprnt(1:2*bs(n)+1,1:2*bs(n)+1,n)))';
+        Result.traces(n,t_seg2(end,1):t_seg2(end,2))=-(tovec(mov)'*tovec(Result.c_ftprnt(1:2*bs(n)+1,1:2*bs(n)+1,n)))';
         Result.mcTrace(:,t_seg2(end,1):t_seg2(end,2),n)=mcTrace_block{n,end};
         mov_mc_vec=tovec(mov);
         mov_mc_vec=(mov_mc_vec-mean(mov_mc_vec,1))./std(mov_mc_vec,0,1);
@@ -747,10 +821,10 @@ Fs=1000; pass_frq=15;
 freq_lowhigh=pass_frq/(Fs/2);
 [b, a] = butter(4, freq_lowhigh, 'low');
 
-for i=1:length(PC_Result)
+for i=8:length(PC_Result)
     tr_highpass=[];
     for j=1:size(PC_Result{i}.normTraces,1)
-tr_highpass(j,:)=PC_Result{i}.normTraces-movprc(PC_Result{i}.normTraces,300,30);
+tr_highpass(j,:)=PC_Result{i}.normTraces(j,:)-movprc(PC_Result{i}.normTraces(j,:),300,30);
     end
 nNeuron=size(PC_Result{i}.normTraces,1);
 
@@ -785,7 +859,7 @@ for g=1:length(PC_Result)
     end
 end
     
-save(fullfile(save_figto,['PF_Result_20231126.mat']),'PC_Result','-v7.3')
+save(fullfile(save_figto,['PF_Result_20240111.mat']),'PC_Result','-v7.3')
 
 %% Show Complex spike firing map
 cmap=[0.5 0.05 0.15;0.1 0.1 0.1]/5;
