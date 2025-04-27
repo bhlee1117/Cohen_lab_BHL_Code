@@ -1,12 +1,13 @@
 function [V D eigTrace]=get_eigvector(subMov,n)
-%% 2024.09.01, Byung Hun Lee
+% 2024.09.01, Byung Hun Lee
 
 sz=size(subMov);
 if sz(1)>sz(2)
     subMov=subMov';
 end
 
-subMov=subMov-mean(subMov,2);
+subMov=subMov(:,sum(isnan(subMov),1)==0);
+subMov=subMov-mean(subMov,2,'omitnan');
 covMat=subMov*subMov';
 
 [V, D] = eig(covMat);

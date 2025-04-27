@@ -28,13 +28,13 @@ PlaceFieldBin=cellfun(@(x) (str2num(num2str(x))),raw(:,22),'UniformOutput',false
 set(0,'DefaultFigureWindowStyle','docked')
 %foi=[1 4 5 6 8 10 11 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27];
 foi=[1 4 5 6 8 10 11 15 16 17 18 19 20 21 22 23 24 25 26 27];
-%foi=20;
+%foi=23;
 %%
 nTau={[-200:50],[-200:50],[-200:50]}; %SS, CS, Brst
 clear SpikeInd MatSpike MatSTA MatBlue MatCStrace MatSub SpikeList NormalizedTrace_ch NormalizedTrace_dirt SpikeIndBlueOff Dist_order allSpikeMat noi interDendDist noi_dist derivSub LapSubSilent
-clear Subthreshold dendaxis BrstOrder roisD roisD_order
+clear Subthreshold dendaxis BrstOrder roisD roisD_order LapSpclassVec
 
-for f=foi
+for f=23
     f
     load(fullfile(fpath{f},'PC_Result.mat'),'Result') %load traces
     if ~isempty(find(ismember(Result.spike(1,:),Result.SpClass(1,:))==0)) | ~isempty(find(ismember(Result.spike(1,:),Result.SpClass(2,:))==0))
@@ -72,7 +72,7 @@ for f=foi
     NormalizedTrace=NormalizedTrace/SpikeHeight;
     NormalizedTrace_dirt{f,1}=NormalizedTrace;
     NormalizedTrace_dirt{f,1}(:,Result.motionReject>0)=NaN;
-    NormalizedTrace_ch(f,:)=cellfun(@(x) x./Result.F_ref,Result.norm_trace_check,'UniformOutput',false);
+    NormalizedTrace_ch(f,:)=cellfun(@(x) x./Result.F0_PCA,Result.norm_trace_check,'UniformOutput',false);
     NormalizedTrace_ch{f,1}(:,Result.motionReject>0)=NaN; NormalizedTrace_ch{f,2}(:,Result.motionReject>0)=NaN;
     if ifdirtRemov(f)
         NormalizedTrace_dirt{f,1}(Result.dirtTrace>0)=NaN;
@@ -135,6 +135,7 @@ for f=foi
         allSpikeMat{f}(Result.dirtTrace>0)=NaN;
     end
     allSpikeClassMat{f}=SpClass;
+    allSpikeClassVecMat{f}=SpikeClassvec;
 
     BlueStim{f}=Result.Blue;
     VRtrack{f}=Result.VR;
@@ -144,7 +145,9 @@ for f=foi
 
     % LapFR{f}=PlaceTrigger_average(double(allSpikeMat{f}(1,:)==1),150,VRtrack{f},0.002,115); %total trace
     % LapV{f}=PlaceTrigger_average(NormalizedTrace_dirt{f},150,VRtrack{f},0.002,115); %total trace
-    % LapSub{f}=PlaceTrigger_average(Subthreshold{f},150,VRtrack{f},0.002,115); %total trace
+    % LapSub{f}=PlaceTrigger_average(Subthreshold{f},150,VRtrack{f},-0.002,115); %total trace
+    % LapSpclass{f}=PlaceTrigger_average(double(allSpikeClassMat{f}>0),150,VRtrack{f},-0.002,115); %total trace
+    % LapSpclassVec{f}=PlaceTrigger_average(double(allSpikeClassVecMat{f}>0),150,VRtrack{f},-0.002,115); %total trace
     % 
     % subthreshold_silent=Subthreshold{f};
     % subthreshold_silent(:,unique(get_perispikeIndex(allSpikeMat{f}(1,:),[-8:30])))=NaN;
@@ -164,7 +167,7 @@ figure(101); clf; tiledlayout(9,9)
 stype_str={'SS','CS','BS'};
 sub_time=[-19:-5]; %from spike
 ax1=[];
-for f=23
+for f=foi
     [~, BlueOffSpike]=find_wCondition(SpikeList{f,1,1},BlueStim{f}==0);
     refkymo=mean(MatSTA{f,1,1}(:,:,BlueOffSpike)-median(MatSTA{f,1,1}(:,-nTau{1}(1)+sub_time,BlueOffSpike),2,'omitnan'),3,'omitnan');
     cax=[prctile(refkymo(:),0.5) prctile(refkymo(:),99.5)];
@@ -708,7 +711,7 @@ legend({'All subthreshold','Excitatory subthreshold','pre-Spike'})
 figure(118); clf
 perispike_time=[-3:5];
 Corrcoeff=[];
-for f=foi
+for f=20
     nTime=size(Subthreshold{f},2);
     sub_ch=[]; sub_ch_dend=[]; 
     for ch=1:2
@@ -804,6 +807,7 @@ xlim([0.5 size(Corr_to_plot,1)+0.5]);
 grid on
 ylabel('Correlation coefficient')
 
+
 %% Basal/Apical subthreshold dynamics
 
 figure(124); clf;
@@ -828,7 +832,7 @@ PlaceField_thetapower=NaN(max(foi),2);
 FilterFreq=[5 12];
 ax4=[];
 
-for f=foi
+for f=23
     f
     nTime=size(Subthreshold{f},2);
 
@@ -841,7 +845,7 @@ for f=foi
     end
     apicalind=cell2mat(roisD_order_ind(5,:)'); %apical = distal dend
 
-    filteredSubthreshold = pcafilterTrace(Subthreshold{f}([basalind; apicalind],:), 3); %filter subthreshold
+    filteredSubthreshold = pcafilterTrace(Subthreshold{f}([basalind; apicalind],:), [1:5]); %filter subthreshold
     %filteredSubthreshold = NormalizedTrace_dirt{f};
 
     BasalSub = mean(filteredSubthreshold([1:length(basalind)],:),1,'omitnan');
@@ -881,6 +885,12 @@ for f=foi
     BASub_silent=[BasalSub; ApicalSub];
     BASub_silent(:,~silenttime_vec)=NaN;
 
+    [~, BAperiSS_show]=get_STA([Basaltr; Apicaltr], allSpikeClassMat{f}(1,:).*(BlueStim{f}==0),100,100); %pre simple spike
+    %BApostSS=mean(BApostSS,3,'omitnan');
+
+    [~, BAperiCS1st_show]=get_STA([Basaltr; Apicaltr], allSpikeClassMat{f}(2,:).*(BlueStim{f}==0),100,100);
+    %BApostCS1st=mean(BApostCS1st,3,'omitnan');
+
     %Show Scatter heatmap of subthreshold dynamics
     % [V D]=get_eigvector(BASub_silent(:,sum(isnan(BASub_silent))==0),2);
     % clf; tiledlayout(2,2);
@@ -892,12 +902,12 @@ for f=foi
     % quiver(mean(BASub_silent(1,:),'omitnan'), mean(BASub_silent(2,:),'omitnan'), V(1,2)*sqrt(D(2)), V(2,2)*sqrt(D(2)), 'g', 'LineWidth', 1.5, 'DisplayName', 'Eigenvector 2');
     % colormap(turbo); xlabel('Basal'); ylabel('Apical'); legend(l,{'SS'})
     % ax2=nexttile([1 1]);
-    % scatter_heatmap2(BASub_silent(1,:),BASub_silent(2,:),linspace(-2,3,100),linspace(-2,3,100)); hold all
-    % l=plot(Basaltr(Cstr>0),Apicaltr(Cstr>0),'w');
-    % plot([-2 3],[0 0],'color',[0.7 0.7 0.7]); plot([0 0],[-2 3],'color',[0.7 0.7 0.7]);
-    % quiver(mean(BASub_silent(1,:),'omitnan'), mean(BASub_silent(2,:),'omitnan'), V(1,1)*sqrt(D(1)), V(2,1)*sqrt(D(1)), 'r', 'LineWidth', 1.5, 'DisplayName', 'Eigenvector 1');
-    % quiver(mean(BASub_silent(1,:),'omitnan'), mean(BASub_silent(2,:),'omitnan'), V(1,2)*sqrt(D(2)), V(2,2)*sqrt(D(2)), 'g', 'LineWidth', 1.5, 'DisplayName', 'Eigenvector 2');
-    % colormap(turbo); xlabel('Basal'); ylabel('Apical'); legend(l,{'CS'})
+    scatter_heatmap2(BASub_silent(1,:),BASub_silent(2,:),linspace(-2,3,100),linspace(-2,3,100)); hold all
+    l=plot(Basaltr(Cstr>0),Apicaltr(Cstr>0),'w');
+    plot([-2 3],[0 0],'color',[0.7 0.7 0.7]); plot([0 0],[-2 3],'color',[0.7 0.7 0.7]);
+    quiver(mean(BASub_silent(1,:),'omitnan'), mean(BASub_silent(2,:),'omitnan'), V(1,1)*sqrt(D(1)), V(2,1)*sqrt(D(1)), 'r', 'LineWidth', 1.5, 'DisplayName', 'Eigenvector 1');
+    quiver(mean(BASub_silent(1,:),'omitnan'), mean(BASub_silent(2,:),'omitnan'), V(1,2)*sqrt(D(2)), V(2,2)*sqrt(D(2)), 'g', 'LineWidth', 1.5, 'DisplayName', 'Eigenvector 2');
+    colormap(turbo); xlabel('Basal'); ylabel('Apical'); legend(l,{'CS'})
     % linkaxes([ax1 ax2],'xy')
     % ax3=nexttile([1 1]); l=[];
     % scatter_heatmap2(BASub_silent(1,:),BASub_silent(2,:),linspace(-2,3,100),linspace(-2,3,100)); hold all
@@ -919,6 +929,8 @@ for f=foi
     % 
     %BAxcorr_silent(f,:)=nanXCorr(BASub_silent(1,:),BASub_silent(2,:),2000,1);
     %BAxcorr(f,:)=nanXCorr(BasalSub,ApicalSub,2000,1);
+    %Generate_scatter
+
 
     [freqPSD ~, PSD_bs]=nanPSD(BasalSub,1000,10000);
     [freqPSD ~, PSD_ap]=nanPSD(ApicalSub,1000,10000);
@@ -1130,10 +1142,6 @@ ylabel('Theta-band power')
 set(gca,'XTick',[1:4],'XTickLabel',{'Basal, in PF','Basal, out PF','Apical, in PF','Apical, out PF'})
 
 
-
-
-
-
 figure(127); clf;
 plot([-2000:2000],BAxcorr_silent(foi,:)','color',[0.8 0.8 0.8]); hold all
 errorbar_shade([-2000:2000],mean(BAxcorr_silent(foi,:),1,'omitnan'),std(BAxcorr_silent(foi,:),0,1,'omitnan'));
@@ -1167,26 +1175,223 @@ errorbar_shade(b_cent,mean_PSDap,std_PSDap,cmap(2,:));
 % ax = gca; % Get current axes
 % ax.GridColor = 'w'; % Set grid color (e.g., black)
 % ax.GridAlpha = 0.5; % Set transparency of the grid lines
+%% bAP amplitude in place fields
+nTau_short=[1 3];
+nTau_show=[15 5];
+
+placefield_bAPAMP=[];
+placefield_SubAmp=[];
+placeTfield_bAPAMP=[];
+placefield_spClassVec=[];
+PF_center=[];
+Placefield_LapFR=[];
+
+t_bin=[-200 200:400:4000];
+
+for f=foi
+   nTime=size(Subthreshold{f},2);
+    roisD_order_ind=cellfun(@find,roisD_order{f},'UniformOutput',false);
+
+   if isempty(cell2mat(roisD_order_ind(1,:)'))
+        basalind=cell2mat(roisD_order_ind(2,:)'); %if there is no basal, use soma
+    else
+        basalind=cell2mat(roisD_order_ind(1,:)');
+    end
+    apicalind=cell2mat(roisD_order_ind(5,:)'); %apical = distal dend
+    somaind=cell2mat(roisD_order_ind(2,:)');
+
+    %[~, bAP_MAT sp_time]=get_STA(NormalizedTrace_dirt{f},max(allSpikeClassMat{f}),1,3);
+    [bAP_STA, bAP_MAT sp_time]=get_STA(NormalizedTrace_dirt{f},allSpikeMat{f}(1,:).*double(BlueStim{f}==0),nTau_short(1),nTau_short(2));
+    [bAP_STA_Bon, bAP_MAT_Bon sp_time_Bon]=get_STA(NormalizedTrace_dirt{f},allSpikeMat{f}(1,:).*double(BlueStim{f}>0),nTau_short(1),nTau_short(2));
+    [bAP_Amp, shift]=max(bAP_MAT,[],3);
+    %bAP_Amp = bAP_Amp-mean(bAP_Amp(somaind,:),1,'omitnan');
+
+%     apicalIntSp=find(max(shift(apicalind,:),[],1)<3 & mean(bAP_STA));
+%     basalIntSp=find(max(shift(basalind,:),[],1)<3);
+% 
+% apicalIntSp_vec=ind2vec(nTime,sp_time(apicalIntSp),1);
+% basalIntSp_vec=ind2vec(nTime,sp_time(basalIntSp),1);
+
+% [~, AP_INT_MAT]=get_STA(NormalizedTrace_dirt{f},apicalIntSp_vec,nTau_show(1),nTau_show(2));
+% [~, BS_INT_MAT]=get_STA(NormalizedTrace_dirt{f},basalIntSp_vec,nTau_show(1),nTau_show(2));
+
+subMat=tovec(permute(bAP_Amp,[1 3 2]));
+
+if ~isempty(PlaceFieldList{f}) % in place field
+    binTrack=(ceil(VRtrack{f}(5,:)/((115)/150)));
+    PFvec=zeros(1,nTime);
+    for p=1:length(PlaceFieldBin{f})/2
+        if PlaceFieldBin{f}(2*(p-1)+1)>PlaceFieldBin{f}(2*(p-1)+2) %place field includes teleport
+            Pvec=~(binTrack<(PlaceFieldBin{f}(2*(p-1)+1)) & binTrack>(PlaceFieldBin{f}(2*(p-1)+2)));
+        else
+            Pvec=(binTrack>(PlaceFieldBin{f}(2*(p-1)+1)) & binTrack<(PlaceFieldBin{f}(2*(p-1)+2)));
+        end
+        Lapvec=(VRtrack{f}(8,:)>PlaceFieldList{f}(2*(p-1)+1) & VRtrack{f}(8,:)<PlaceFieldList{f}(2*(p-1)+2));
+        PFvec=PFvec| (Lapvec & Pvec);
+
+        bin_dist=ceil(VRtrack{f}(5,:)/(115/50));
+        PF_rescale=[floor(PlaceFieldBin{f}(2*(p-1)+[1])/150*50) ceil(PlaceFieldBin{f}(2*(p-1)+[2])/150*50)];
+
+        bin_STA=[];
+        for b=1:max(bin_dist)
+            bin_STA(:,:,b)=get_STA(NormalizedTrace_dirt{f},max(allSpikeMat{f}).*double(BlueStim{f}==0).*double(bin_dist==b).*double(PFvec),nTau_short(1),nTau_short(2));
+        end
+
+        tbin_STA=[];
+        first_PFspike_time=find(get_spikeOrder(PFvec,max(allSpikeMat{f}))==1);
+        for t=1:length(t_bin)-1
+            t_vec=ind2vec(nTime,tovec(first_PFspike_time'+[t_bin(t):t_bin(t+1)-1]),1);
+            tbin_STA(:,:,t)=get_STA(NormalizedTrace_dirt{f},max(allSpikeMat{f}).*double(BlueStim{f}==0).*double(t_vec),nTau_short(1),nTau_short(2));
+        end
+
+        bin_STA_Amp=squeeze(max(bin_STA,[],2));
+        tbin_STA_Amp=squeeze(max(tbin_STA,[],2));
+        tmp=repmat(bin_STA_Amp,1,2); tmp2=repmat(LapSub{f},1,2); tmp3=repmat(LapSpclassVec{f},1,2);
+
+        Placefield_LapFR{f,p}=sum(LapSpclassVec{f}([PlaceFieldList{f}(2*(p-1)+1):PlaceFieldList{f}(2*(p-1)+2)],:,:),3,'omitnan');
+        if PlaceFieldBin{f}(2*(p-1)+1)>PlaceFieldBin{f}(2*(p-1)+2) %place field includes teleport
+        bin_rescale=([PF_rescale(1):PF_rescale(2)+50]-PF_rescale(1))/50*2;
+        placefield_bAPAMP{f,p}=[[NaN bin_rescale]; [dendaxis{f}' tmp(:,PF_rescale(1):PF_rescale(2)+50)]];
+        placefield_SubAmp{f,p}=permute(mean(tmp2([PlaceFieldList{f}(2*(p-1)+1):PlaceFieldList{f}(2*(p-1)+2)],[PlaceFieldBin{f}(2*(p-1)+1):PlaceFieldBin{f}(2*(p-1)+2)+150],:),1,'omitnan'),[3 2 1]);
+        placefield_SubAmp{f,p}=[[NaN [PlaceFieldBin{f}(2*(p-1)+1):PlaceFieldBin{f}(2*(p-1)+2)+150]-PlaceFieldBin{f}(2*(p-1)+1)]; [dendaxis{f}' placefield_SubAmp{f,p}]];
+        placefield_spClassVec{f,p}=tmp3([PlaceFieldList{f}(2*(p-1)+1):PlaceFieldList{f}(2*(p-1)+2)],[PlaceFieldBin{f}(2*(p-1)+1):PlaceFieldBin{f}(2*(p-1)+2)+150],:);
+        PF_center(f,p)=mod(mean([PlaceFieldBin{f}(2*(p-1)+1) PlaceFieldBin{f}(2*(p-1)+2)+150]),150)/150*2;
+        else
+        bin_rescale=([PF_rescale(1):PF_rescale(2)]-PF_rescale(1))/50*2;    
+        placefield_bAPAMP{f,p}=[[NaN bin_rescale]; [dendaxis{f}' tmp(:,PF_rescale(1):PF_rescale(2))]];
+        placefield_SubAmp{f,p}=permute(mean(tmp2([PlaceFieldList{f}(2*(p-1)+1):PlaceFieldList{f}(2*(p-1)+2)],[PlaceFieldBin{f}(2*(p-1)+1):PlaceFieldBin{f}(2*(p-1)+2)],:),1,'omitnan'),[3 2 1]);
+        placefield_SubAmp{f,p}=[[NaN [PlaceFieldBin{f}(2*(p-1)+1):PlaceFieldBin{f}(2*(p-1)+2)]-PlaceFieldBin{f}(2*(p-1)+1)]; [dendaxis{f}' placefield_SubAmp{f,p}]];
+        %placefield_spClassVec{f,p}=permute(mean(tmp3([PlaceFieldList{f}(2*(p-1)+1):PlaceFieldList{f}(2*(p-1)+2)],[PlaceFieldBin{f}(2*(p-1)+1):PlaceFieldBin{f}(2*(p-1)+2)],:),1,'omitnan'),[3 2 1]);
+        placefield_spClassVec{f,p}=tmp3([PlaceFieldList{f}(2*(p-1)+1):PlaceFieldList{f}(2*(p-1)+2)],[PlaceFieldBin{f}(2*(p-1)+1):PlaceFieldBin{f}(2*(p-1)+2)],:);
+        PF_center(f,p)=mod(mean([PlaceFieldBin{f}(2*(p-1)+1) PlaceFieldBin{f}(2*(p-1)+2)]),150)/150*2;
+        end
+        %placeTfield_bAPAMP{f,p}=[[NaN mean([t_bin(2:end); t_bin(1:end-1)])]; [dendaxis{f}' tbin_STA_Amp]];
+        %NormTr=[mean(NormalizedTrace_dirt{f}(somaind,:),1,'omitnan'); mean(NormalizedTrace_dirt{f}(apicalind,:),1,'omitnan')];
+        meanAmp= max(bAP_STA,[],2);
+        Normcst= [mean(meanAmp(somaind,:),1,'omitnan'); mean(meanAmp(apicalind,:),1,'omitnan')];
+        placeTfield_bAPAMP{f,p}=[mean(tbin_STA_Amp(somaind,:),1,'omitnan'); mean(tbin_STA_Amp(apicalind,:),1,'omitnan')]./Normcst;
+    end
+end 
+end
+PF_center(PF_center==0)=NaN;
+
+v=cellfun(@(x) ~isempty(x),placefield_bAPAMP);
+PFbAPdat=placefield_bAPAMP(v);
+
+PFbAPdat_normPF=[]; dbin=80;
+for p=1:length(PFbAPdat)
+    PFbAPdat_normPF{p}=PFbAPdat{p};
+    PFbAPdat_normPF{p}(1,2:end)=rescale(PFbAPdat_normPF{p}(1,2:end));
+end
+
+figure(31); clf;
+imshow_patch(PFbAPdat_normPF,[0.5 2]);
+colormap(turbo)
+figure(36); clf; 
+PF_show=[1 2 3 4 7 8 9 10 11 12 13 14];
+show3Dbinning(PFbAPdat_normPF(PF_show),[0:0.07:1],[-dbin*3/2:dbin:400],'image')
+shading flat; set(gca,'YDir','reverse')
+colormap(turbo)
+caxis([0.6 1.3])
+xlabel('Normalized place field')
+ylabel('Distance from soma (\mum)')
+cb=colorbar;
+cb.Label.String='bAP amplitude';
+
+figure(32); clf;
+imshow_patch(placefield_SubAmp(v),[-0.2 0.7]);
+colormap(turbo)
+PFSubdat=placefield_SubAmp(v);
+
+figure(37); clf; PFSubdat_normPF=[];
+for p=1:length(PFSubdat)
+    PFSubdat_normPF{p}=PFSubdat{p};
+    PFSubdat_normPF{p}(1,2:end)=rescale(PFSubdat_normPF{p}(1,2:end));
+end
+show3Dbinning(PFSubdat_normPF(PF_show),[0 0.03:0.05:1],[-dbin*3/2:dbin:400],'image')
+shading flat; set(gca,'YDir','reverse')
+colormap(turbo)
+caxis([-0.05 0.25])
+xlabel('Normalized place field')
+ylabel('Distance from soma (\mum)')
+cb=colorbar;
+cb.Label.String='Subthreshold';
+
+figure(35); clf;
+%imshow_patch(cellfun(@(x) im_merge(ringmovMean(x(:,:,[1 2 3]),3),[1 1 1;1 0 0;1 1 1]), placefield_spClassVec(v),'UniformOutput',false));
+tmppf=placefield_spClassVec(v);
+for p=1:size(tmppf,1)
+    nexttile([1 1])
+l=plot(squeeze(mean(tmppf{p},1,'omitnan')));
+arrayfun(@(l,c) set(l,'Color',c{:}),l,num2cell([0 0 0;1 0 0;0 0.5 1],2));
+xlabel('VR position')
+ylabel('Firing rate');
+end
+legend({'SS','CS','BS'})
 
 
+figure(33); clf;
+% [binnedZ, centerX, centerY]=show3Dbinning(placeTfield_bAPAMP(v),t_bin,[-100:70:450],'image');
+% colormap(turbo); caxis([0.5 2]);
+% shading flat
+% set(gca,'YDir','reverse')
+somaTfield=cell2mat(cellfun(@(x) x(1,:),placeTfield_bAPAMP(v),'UniformOutput',false));
+apicalTfield=cell2mat(cellfun(@(x) x(2,:),placeTfield_bAPAMP(v),'UniformOutput',false));
 
+dat=apicalTfield;%./max(apicalTfield,[],2); 
+dat_som=somaTfield;%./somaTfield(:,1); 
+T=mean([t_bin(2:end); t_bin(1:end-1)])/1000;
+M=mean(dat,1,'omitnan'); S=std(dat,0,1,'omitnan'); N=sum(~isnan(dat),1);
+Ms=mean(dat_som,1,'omitnan'); Ss=std(dat_som,0,1,'omitnan'); Ns=sum(~isnan(dat_som),1);
+plot(T,dat','color',[1 0.7 0.7]); 
+hold all
+plot(T,dat_som','color',[0.7 0.7 1]); 
+errorbar_shade(T,M,S/sqrt(N),[1 0 0])
+errorbar_shade(T,Ms,Ss/sqrt(Ns),[0 0 1])
 
+%% Somatic spike vs dendritic spike, how many spikes are preceding? -> No spikes
+nTau_short=[2 3];
+FractionMat=[];
+figure(38); clf;
+for f=foi
+   nTime=size(Subthreshold{f},2);
+    roisD_order_ind=cellfun(@find,roisD_order{f},'UniformOutput',false);
 
+   if isempty(cell2mat(roisD_order_ind(1,:)'))
+        basalind=cell2mat(roisD_order_ind(2,:)'); %if there is no basal, use soma
+    else
+        basalind=cell2mat(roisD_order_ind(1,:)');
+    end
+    apicalind=cell2mat(roisD_order_ind(5,:)'); %apical = distal dend
+    somaind=cell2mat(roisD_order_ind(2,:)');
 
+    [bAP_STA, bAP_MAT sp_time]=get_STA(NormalizedTrace_dirt{f},max(allSpikeClassMat{f}),nTau_short(1),nTau_short(2));
+    [~, Sp_STA]=get_STA(allSpikeMat{f},max(allSpikeClassMat{f}),nTau_short(1),nTau_short(2));
+    Sp_STA=max(Sp_STA(Dist_order{f}(noi_dist{f}),:,1:nTau_short(1)),[],3);
+    %[bAP_STA, bAP_MAT sp_time]=get_STA(NormalizedTrace_dirt{f},allSpikeMat{f}(1,:).*double(BlueStim{f}==0),nTau_short(1),nTau_short(2));
+    [bAP_Amp, shift]=max(bAP_MAT,[],3);
+    bAP_STA_Amp=max(bAP_STA,[],2);
+    %bAP_Amp = bAP_Amp-mean(bAP_Amp(somaind,:),1,'omitnan');
 
+    %average_bAPamp=[max(bAP_STA(basalind,:)) max(mean(bAP_STA(apicalind,:),1,'omitnan'))];
+    % apicalIntSp=find(min(shift(apicalind,:),[],1)<(nTau_short(1)+1) & sum(bAP_Amp(apicalind,:) > bAP_STA_Amp(apicalind)*3)>1);
+    % basalIntSp=find(min(shift(basalind,:),[],1)<(nTau_short(1)+1) & sum(bAP_Amp(basalind,:) > bAP_STA_Amp(basalind)*3)>1);
+    apicalIntSp=find(max(Sp_STA(apicalind,:),[],1)>0);
+    basalIntSp=find(max(Sp_STA(basalind,:),[],1)>0);
 
+apicalIntSp_vec=ind2vec(nTime,sp_time(apicalIntSp),1);
+basalIntSp_vec=ind2vec(nTime,sp_time(basalIntSp),1);
 
+[bAP_STA_show ]=get_STA(NormalizedTrace_dirt{f},max(allSpikeClassMat{f}),nTau_show(1),nTau_show(2));
+[~, AP_INT_MAT]=get_STA(NormalizedTrace_dirt{f},apicalIntSp_vec,nTau_show(1),nTau_show(2));
+[~, BS_INT_MAT]=get_STA(NormalizedTrace_dirt{f},basalIntSp_vec,nTau_show(1),nTau_show(2));
 
+FractionMat(f,:)=[sum(basalIntSp_vec), sum(apicalIntSp_vec), sum(basalIntSp_vec & apicalIntSp_vec)]/sum(max(allSpikeClassMat{f}));
 
+nexttile([1 1]);
+imagesc([squeeze(mean(BS_INT_MAT,2,'omitnan')) squeeze(mean(AP_INT_MAT,2,'omitnan')) bAP_STA_show])
+title(num2str(f))
+end
+colormap(turbo)
 
-
-
-
-
-
-
-
-
-
-
-
+%%

@@ -5,9 +5,10 @@ if nargin<4
     line_color=turbo(length(noi));
 end
 %figure;
-f=figure('units','normalized','outerposition',[0 0 1 1]);
+%f=figure('units','normalized','outerposition',[0 0 1 1]);
 %tiledlayout(11,1)
 %ax1=nexttile([8 1]);
+clf;
 ax1=subplot(10,1,1:8);
 
 t=[1:size(traces,2)]/frmrate; scale=max(prctile(traces,99,2))*3;
@@ -35,7 +36,7 @@ for j=1:size(otherT,1)
 plot(t,otherT(j,:))
 hold all
 end
-ylim([min(otherT(:)) max(otherT(:))])
+%ylim([min(otherT(:)) max(otherT(:))])
 
 linkaxes([ax1 ax2],'x')
 end

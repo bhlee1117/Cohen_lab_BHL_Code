@@ -2,7 +2,7 @@ clear
 clc;
 cd '/Volumes/cohen_lab/Lab/Labmembers/Byung Hun Lee/Data/FromBackup/PP72_PlaceCellResults';
 [~, ~, raw] = xlsread(['/Volumes/cohen_lab/Lab/Labmembers' ...
-    '/Byung Hun Lee/Data/PrismPCdata_Arrangement.xlsx'], 'Sheet1', 'C5:P23');
+    '/Byung Hun Lee/Data/PrismPCdata_Arrangement.xlsx'], 'Sheet1', 'C5:AA30');
 
 % [~, ~, NeuronsToUse]=xlsread(['/Volumes/cohen_lab/Lab/Labmembers/Byung Hun Lee/Data/' ...
 %     'PlaceCellData_Arrangement.xlsx'], 'Sheet1', 'L8:M46');
@@ -11,8 +11,8 @@ cd '/Volumes/cohen_lab/Lab/Labmembers/Byung Hun Lee/Data/FromBackup/PP72_PlaceCe
 ref_ROI=cellfun(@(x) (str2num(num2str(x))),raw(:,10),'UniformOutput',false);
 fpath=raw(:,1)';
 StructureData=raw(:,9);
-EndFrame=cell2mat(raw(:,13));
-ifmotionReject=cell2mat(raw(:,14));
+EndFrame=cell2mat(raw(:,15));
+ifmotionReject=cell2mat(raw(:,16));
 save_figto='/Volumes/BHL_WD18TB/PP72_PlaceCellResults';
 place_bin=150; time_segment=15000; overlap=200;
 alignedMovFN = {'STA_Mat_SS','STA_Mat_CS','STA_Mat_dSP'};
@@ -339,7 +339,7 @@ ylabel('Number of spikes per second')
 clear
 clc;
 [~, ~, raw] = xlsread(['/Volumes/cohen_lab/Lab/Labmembers/Byung Hun Lee/Data/' ...
-    'Prism_OptopatchData_Arrangement.xlsx'], 'Sheet1', 'B5:K96');
+    'Prism_OptopatchData_Arrangement.xlsx'], 'Sheet1', 'C5:P96');
 
 save_to='/Volumes/BHL18TB_D1/Arranged_Data/Prism_OptopatchResult';
 fpath=raw(:,1);
@@ -775,7 +775,7 @@ for f=1:length(catpath)
     save(fullfile(fpath{i},'Result'),'Result')
 end
 
-%%
+%% Dendrite stimulation vs Soma stimulation, CS fraction
 
 % SomRP_path=[15 22 54 72 86 92 4];
 % DenRP_path=[13 23 55 74 88 91 3];
@@ -872,6 +872,179 @@ errorbar(rheo_bin,mean(CS_fracRampMatDD,2,'omitnan'),std(CS_fracRampMatDD,0,2,'o
 xlabel('Optical Rheobase')
 ylabel('Fraction of complex spike')
 title('Ramp Stimulation')
+
+
+
+SomRP_path=[15 22 54 72 86 92 4];
+DenRP_path=[13 23 55 74 88 91 3];
+path_cat=[SomRP_path; DenRP_path];
+rheo_bin=[0:1.3:10];
+pulseFR=[]; RampFR=[]; pulseBlue_rb=[];
+for f=1:size(path_cat,2)
+    for r=1:2
+    i=path_cat(r,f);
+    load(fullfile(fpath{i},'Result'))
+    bwblue=bwlabel(Result.Blue);
+    Ramp_period=find(bwblue==max(bwblue));
+    Rheobase_frame=find(max(Result.spike(:,Ramp_period),[],1))+Ramp_period(1)-1;
+    Rheobase_blue=Result.Blue(round(mean(Rheobase_frame(1:3))));
+    %Rheobase_blue=1;
+
+    firstpulst_bw=max(bwblue)-5;
+    for b=1:5
+    pulse_period=find(bwblue==firstpulst_bw+b-1);    
+    pulseBlue_rb(b,f,r)=median(Result.Blue(pulse_period))/Rheobase_blue;
+    pulseFR(b,:,f,r)=sum(Result.SpClass(1:2,pulse_period),2)';
+    end
+
+    RampFR(:,:,f,r)=NaN(length(rheo_bin),2);
+    Ramp_period=find(bwblue==max(bwblue));    
+    binnedRheo_ramp=ceil(Result.Blue(Ramp_period)/Rheobase_blue/(rheo_bin(2)-rheo_bin(1)));
+    for b=binnedRheo_ramp
+    bin_frm=find(binnedRheo_ramp==b);
+    RampFR(b,:,f,r)=sum(Result.SpClass(1:2,bin_frm+Ramp_period(1)-1),2)';
+    end
+    end
+end
+
+%% Update of dendStim/SomaStim (2025.03.20)
+
+
+SomRP_path=[15 22 54 72 86 92 4];
+DenRP_path=[13 23 55 74 88 91 3];
+path_cat=[SomRP_path; DenRP_path];
+rheo_bin=[0:1.3:10];
+pulseFR=[]; RampFR=[]; pulseBlue_rb=[];
+SpikeMatInfo=[];
+for f=1:size(path_cat,2)
+    for r=1:2 %soma and dendrite
+    SpikeMatInfo{f,r}=[];   
+    i=path_cat(r,f);
+    load(fullfile(fpath{i},'OP_Result'))
+    bwblue=bwlabel(Result.Blue);
+    Ramp_period=(bwblue==max(bwblue));
+    Rheobase_frame=find(max(Result.spike(:,Ramp_period),[],1))+find(Ramp_period,1)-1;
+    Rheobase_blue=Result.Blue(round(mean(Rheobase_frame(1:3))));
+    %Rheobase_blue=1;
+
+    SP_trace=[Result.spike(1,:).*(1-Result.CStrace);Result.spike(1,:).*Result.CStrace];
+    SP_trace=SP_trace.*(1-Ramp_period).*double(Result.Blue>0);
+    BlueOnset=find((double(Result.Blue(2:end)>0)-double(Result.Blue(1:end-1)>0))>0);
+    
+    for stype=1:2 %SS and CS
+    Sptime=find(SP_trace(stype,:));
+    SptimeMod=mod(Sptime-BlueOnset(1),BlueOnset(2)-BlueOnset(1));
+    SpikeMatInfo{f,r}=[SpikeMatInfo{f,r}; [Result.Blue(Sptime)'/Rheobase_blue SptimeMod' ones(length(Sptime),1)*stype]];
+    end
+    end
+end
+    
+ 
+figure(15); clf; cmap=[0.4 0.4 0.4; 1 0 0]; tiledlayout(1,2);
+RheoEdge=[0 1 15];
+TimeEdge=[0:100:500];
+% for r=1:2
+%     nexttile([1 1])
+% ShowDat=cell2mat(SpikeMatInfo(:,r));
+% for stype=1:2
+%     scatter(ShowDat(ShowDat(:,3)==stype,2),ShowDat(ShowDat(:,3)==stype,1),10,cmap(stype,:),'o','filled'); hold all
+% end
+% end
+
+BinRheoRatio=cellfun(@(x) histcounts(x(x(:,3)==2,1),RheoEdge)./histcounts(x(:,1),RheoEdge),SpikeMatInfo,'UniformOutput',false);
+BinRheoRatio_weak=cellfun(@(x) x(1),BinRheoRatio,'UniformOutput',false);
+BinRheoRatio_strong=cellfun(@(x) x(2),BinRheoRatio,'UniformOutput',false);
+nexttile([1 1]);
+Boxplot_wPoints(cell2mat(BinRheoRatio_weak(:,1)),cell2mat(BinRheoRatio_weak(:,2)),[1 0 0],'pairwise')
+set(gca,'XTick',[1 2],'XTickLabel',{'Soma Stim.','Dend. Stim.'})
+ylabel('Fraction of complex spike')
+nexttile([1 1]);
+p=Boxplot_wPoints(cell2mat(BinRheoRatio_strong(:,1)),cell2mat(BinRheoRatio_strong(:,2)),[1 0 0],'pairwise')
+set(gca,'XTick',[1 2],'XTickLabel',{'Soma Stim.','Dend. Stim.'})
+ylabel('Fraction of complex spike')
+
+    
+
+    firstpulst_bw=max(bwblue)-5;
+    for b=1:5
+    pulse_period=find(bwblue==firstpulst_bw+b-1);    
+    pulseBlue_rb(b,f,r)=median(Result.Blue(pulse_period))/Rheobase_blue;
+    pulseFR(b,:,f,r)=sum(Result.SpClass(1:2,pulse_period),2)';
+    end
+
+    RampFR(:,:,f,r)=NaN(length(rheo_bin),2);
+    Ramp_period=find(bwblue==max(bwblue));    
+    binnedRheo_ramp=ceil(Result.Blue(Ramp_period)/Rheobase_blue/(rheo_bin(2)-rheo_bin(1)));
+    for b=binnedRheo_ramp
+    bin_frm=find(binnedRheo_ramp==b);
+    RampFR(b,:,f,r)=sum(Result.SpClass(1:2,bin_frm+Ramp_period(1)-1),2)';
+    end
+    end
+end
+
+
+figure(27); clf; cmap=distinguishable_colors(6); bin_width=1.3;
+tiledlayout(6,2);
+load(fullfile(fpath{SomRP_path(5)},'OP_Result'));
+tr_somStim=rescale(Result.normTraces(1,:));
+tr_cssomStim=Result.CStrace;
+load(fullfile(fpath{DenRP_path(6)},'OP_Result'));
+tr_ddStim=rescale(Result.normTraces(1,:));
+tr_csddStim=Result.CStrace;
+ax1=nexttile([3 2]);
+plot(tr_somStim,'color','k'); hold all
+show_cs=tr_somStim.*tr_cssomStim; show_cs(tr_cssomStim==0)=NaN;
+plot(show_cs,'color',[0.7 0 0.2]); hold all
+plot(tr_ddStim+1,'color','k'); hold all
+show_cs=tr_ddStim.*tr_csddStim; show_cs(tr_csddStim==0)=NaN;
+axis off
+text(-500,0.7,'Soma Stimulation','FontSize',13)
+text(-500,1.7,'Distal dendrite Stimulation','FontSize',13)
+text(9500,2,'Complex spikes','FontSize',13,'color',[0.7 0 0.2])
+plot(show_cs+1,'color',[0.7 0 0.2]); hold all
+ax2=nexttile([1 2]);
+plot(Result.Blue)
+linkaxes([ax1 ax2],'x')
+
+nexttile([2 1])
+CS_fracPulseMatSom=squeeze(pulseFR(:,2,:,1)./sum(pulseFR(:,:,:,1),2));
+CS_fracPulseMatDD=squeeze(pulseFR(:,2,:,2)./sum(pulseFR(:,:,:,2),2));
+markers = {'o', 's', 'd', '^', 'v', '>', '<', 'p', 'h', '+', '*'};
+for f=1:size(pulseFR,3)
+plot(squeeze(pulseBlue_rb(:,f,1))',CS_fracPulseMatSom(:,f),'marker',markers{f},'color',cmap(1,:),'linestyle','none'); hold all
+plot(squeeze(pulseBlue_rb(:,f,2))',CS_fracPulseMatDD(:,f),'marker',markers{f},'color',cmap(2,:),'linestyle','none'); hold all
+end
+    clear Ms Ss
+for b=1:max(max(ceil(pulseBlue_rb(:,:,1)/bin_width)))
+    Ms(b)=mean(CS_fracPulseMatSom(b==ceil(pulseBlue_rb(:,:,1)/bin_width)),'omitnan');
+    Ss(b)=std(CS_fracPulseMatSom(b==ceil(pulseBlue_rb(:,:,1)/bin_width)),'omitnan');
+end
+clear Md Sd
+for b=1:max(max(ceil(pulseBlue_rb(:,:,2)/bin_width)))
+    Md(b)=mean(CS_fracPulseMatDD(b==ceil(pulseBlue_rb(:,:,2)/bin_width)),'omitnan');
+    Sd(b)=std(CS_fracPulseMatDD(b==ceil(pulseBlue_rb(:,:,2)/bin_width)),'omitnan');
+end
+errorbar([1:max(max(ceil(pulseBlue_rb(:,:,1)/bin_width)))],Ms,Ss,'color',cmap(1,:),'LineWidth',1.5); hold all
+errorbar([1:max(max(ceil(pulseBlue_rb(:,:,2)/bin_width)))],Md,Sd,'color',cmap(2,:),'LineWidth',1.5);
+
+xlabel('Optical Rheobase')
+ylabel('Fraction of complex spike')
+title('Pulse Stimulation')
+
+nexttile([2 1])
+CS_fracRampMatSom=squeeze(RampFR(:,2,:,1)./sum(RampFR(:,:,:,1),2));
+CS_fracRampMatDD=squeeze(RampFR(:,2,:,2)./sum(RampFR(:,:,:,2),2));
+% for f=1:size(RampFR,3)
+% plot(rheo_bin,CS_fracRampMatSom,'color',cmap(1,:)); hold all
+% plot(rheo_bin,CS_fracRampMatDD,'color',cmap(2,:))
+% end
+errorbar(rheo_bin,mean(CS_fracRampMatSom,2,'omitnan'),std(CS_fracRampMatSom,0,2,'omitnan'),'color',cmap(1,:),'LineWidth',1.5); hold all
+errorbar(rheo_bin,mean(CS_fracRampMatDD,2,'omitnan'),std(CS_fracRampMatDD,0,2,'omitnan'),'color',cmap(2,:),'LineWidth',1.5)
+xlabel('Optical Rheobase')
+ylabel('Fraction of complex spike')
+title('Ramp Stimulation')
+
+
 
 
 

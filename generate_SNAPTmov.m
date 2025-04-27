@@ -63,7 +63,7 @@ colormap('turbo')
 
 
 
-subframeT = 0.025; % ms
+subframeT = 0.02; % ms
 initialT = -2; % ms
 finalT = 2; % ms
 sigma = 0.05; % ms.  This is how long the flash lasts at each pixel.  Adjust to get a reasonable-looking movie.

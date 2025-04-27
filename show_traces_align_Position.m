@@ -6,7 +6,7 @@ if show_figure
 % tiledlayout(length(noi),1)
 end
 %traces_F=rescale(traces_F);
-scale=std(traces_F)*8;
+scale=std(traces_F,'omitnan')*8;
 ls=unique(VR_data(8,:));
 %cmap=turbo(length(ls));
 cmap=repmat([0.3],length(ls),3);

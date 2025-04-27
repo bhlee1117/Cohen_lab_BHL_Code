@@ -1,4 +1,4 @@
-function [spike pks prom]=find_spike_bh(volt_hi,threshold,prom_th)
+function [spike pks prom]=find_spike_bh(volt_hi,threshold,prom_th,min_interval)
 
 % Function written by Byung Hun Lee, 2022.06, Cohen Lab.
 % Given voltage trace, N cell X T frames, finding a peak that the amplitude is higher than
@@ -7,10 +7,18 @@ function [spike pks prom]=find_spike_bh(volt_hi,threshold,prom_th)
 
 if nargin<3
     prom_th=0;
+    min_interval=[];
+end
+if nargin<4
+    min_interval=[];
 end
 for i=1:size(volt_hi,1)
     spike(i,:)=zeros(1,size(volt_hi,2));
+    if ~isempty(min_interval)
+    [pks s_tmp width prom]=findpeaks(volt_hi(i,:),'MinPeakHeight',threshold,'MinPeakDistance',min_interval); 
+    else
     [pks s_tmp width prom]=findpeaks(volt_hi(i,:));
+    end
     volt_hi2(i,:)=volt_hi(i,:)-movmedian(volt_hi(i,:),7,2);
     prom=volt_hi2(i,s_tmp);
     S_available=find(pks>threshold & prom>prom_th);

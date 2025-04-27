@@ -4,7 +4,6 @@ if nargin < 7;
     Dwave=[];
 end
 
-
 %if isempty(stack)
     stack=[1:size(movie,4)];
 %end
@@ -33,17 +32,15 @@ for i=stack
         %plot(dmd_mask_sequence_rois(:,1),dmd_mask_sequence_rois(:,2),'color',[0 0.6 1],'linewidth',2)
         plot(dmd_mask_sequence_rois(:,1),dmd_mask_sequence_rois(:,2),'ro','markersize',12)
     end
-    if ~isempty(Dwave)
-text(5,-12,['blue int:' num2str(Dwave(i))],'color',[0 0.6 1],'FontSize',12,'HorizontalAlignment','left')
-if Dwave(i)
-    plot(15,15,'.','color',[0 0.6 1],'markersize',32)
-end
-    end
     title([num2str(stack2(i)/frmrate) ' ms'])
     %set(gca, 'Position', [100, 100, 1700, 800]);
     %title([num2str(i*frmrate) ' \mum'],'HorizontalAlignment','left')
     %pause(0.005) %Pause and grab frame
 colormap(turbo)
+cb=colorbar;
+cb.Label.String='\DeltaF';
+cb.FontSize=15;
+%cb.Tick()
 %colormap(jet)
 %colormap(gen_colormap([0 0.5 1; 1 1 1; 1 0 0]))
     frame = getframe(gcf); %get frame

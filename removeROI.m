@@ -14,13 +14,17 @@ function Result = removeROI(Result, roiIndex)
     % Remove the ROI from each field
     Result.ROIpoly(roiIndex) = [];                      % Remove from ROIpoly
     Result.ftprnt(:, :, roiIndex) = [];                 % Remove from ftprnt
+    if isfield(Result,'traces')
     Result.traces(roiIndex, :) = [];                    % Remove from traces
+    end
     remove_dist=Result.dist_order(roiIndex);
     Result.dist_order(roiIndex) = [];                   % Remove from dist_order
     Result.dist_order(Result.dist_order>remove_dist)=Result.dist_order(Result.dist_order>remove_dist)-1;
     Result.traces_bvMask(roiIndex, :) = [];             % Remove from traces_bvMask
     Result.normTraces(roiIndex, :) = [];                % Remove from normTraces
+    if size(Result.spike,1)>1
     Result.spike(roiIndex, :) = [];                     % Remove from spike
+    end
     Result.interDendDist(roiIndex) = [];                % Remove from interDendDist
     if isfield(Result,'F0_PCA')
     Result.F0_PCA(roiIndex) = [];                       % Remove from F0_PCA

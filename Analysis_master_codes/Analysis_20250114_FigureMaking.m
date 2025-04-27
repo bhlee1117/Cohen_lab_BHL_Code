@@ -3,7 +3,7 @@ clear
 clc;
 cd '/Volumes/cohen_lab/Lab/Labmembers/Byung Hun Lee/Data/Statistics_Optopatch_Prism';
 [~, ~, raw] = xlsread(['/Volumes/cohen_lab/Lab/Labmembers/Byung Hun Lee/Data/' ...
-    'Prism_OptopatchData_Arrangement.xlsx'], 'Sheet1', 'B5:P175');
+    'Prism_OptopatchData_Arrangement.xlsx'], 'Sheet1', 'C5:Q175');
 
 fpath=raw(:,1);
 Mouse=cell2mat(raw(:,2));
@@ -95,7 +95,7 @@ normTrace = Result.normTraces./F0_PCA;
 normTrace = normTrace - prctile(normTrace,20,2);
 normTrace = normTrace(Result.dist_order,:);
 STAtr=get_STA(normTrace,Result.spike(1,:),20,20);
-normTrace_filt = pcafilterTrace(normTrace, 3); %filter subthreshold
+normTrace_filt = pcafilterTrace(normTrace, [1:3]); %filter subthreshold
 %normTrace_filt = normTrace; %filter subthreshold
 %normTrace_filt_bd=get_bandstop(normTrace_filt,1000,[45 60]);
 
@@ -108,8 +108,8 @@ ROIaxis2 = [2 5 7 11 14 20 26 29];
 
 % ROIs = {[6 9 10],[11],[15 17 20],[14 16],[22 24 27]}; %Basal, Soma, trunk, Oblique, tuft
 % ROIaxis = [6 9 10 11 15 17 20 22 24 27]; %Basal, Soma, trunk, Oblique, tuft
-
-Show_tr=[]; cmap=[0 0.5 1; 0 0 0; 1 0.6 0.3; 1 0.4 0.4 ; 1 0 0];
+cl
+Show_tr=[]; cmap=gen_colormap(Plasma,6);
 %cmap=distinguishable_colors(5);
 Dsign=ones(1,size(Result.interDendDist,2));
 Dsign(Result.dist_order(1:find(Result.dist_order==1)-1))=-1;
@@ -117,7 +117,7 @@ contourdist=Result.interDendDist(1,Result.dist_order).*Dsign(Result.dist_order)*
 contourdist_show=contourdist(ROIaxis);
 contourdist_show2=contourdist(ROIaxis2);
 
-figure(1); clf; tiledlayout(6,1); scale=0.047;
+figure(1); clf; tiledlayout(6,1); scale=0.04;
 ax1=nexttile([6 1]);
 ftprnt_mask=[];
 for r=[1:5]
@@ -171,7 +171,7 @@ figure(3); clf; tiledlayout(1,2);
 h=nexttile([1 1]);
 STAtr_show=STAtr-mean(STAtr(:,1:10),2);
 l=plot([-20:20],STAtr_show');
-arrayfun(@(l,c) set(l,'Color',c{:}),l,num2cell(gen_colormap([0 0 0; 0.5 0 0; 1 0 0],31),2));
+arrayfun(@(l,c) set(l,'Color',c{:}),l,num2cell(gen_colormap(Plasma,31),2));
 xlim([-4 10])
 set(gca,'XTick',[-4 0 4 8])
 xlabel('Time (ms)')
@@ -179,7 +179,7 @@ ylabel(['\DeltaF/F'])
 cb = colorbar;
 cb.Ticks = []; % Disable all ticks
 cb.Label.String = 'Basal to distal';
-colormap(h, gen_colormap([0 0 0; 0.5 0 0; 1 0 0]));
+colormap(h, gen_colormap(Plasma));
 
 h2=nexttile([1 1]);
 [~, dind]=sort(contourdist_show2,'ascend');
@@ -193,6 +193,41 @@ xlabel('Time (ms)')
 ylabel(['Distance from' newline 'soma (\mum)'])
 cb = colorbar;
 cb.Label.String = '\DeltaF/F';
+%% SNAPT
+
+[superlocColormov dtimg dFF]=generate_SNAPTmov(-STAmov(:,:,26:36),Result.Structure,[],[]);
+%[yR xR zR]=size(Result.Structure);
+    %bluePatt = bwboundaries(imwarp(Result.BlueDMDimg,Result.tform,'OutputView', imref2d([yR xR])));
+    bluePatt= bwboundaries(Result.BlueDMDimg);
+    figure(20); clf;
+    v = VideoWriter([fpath{f} '/SNAPT_movie'],'MPEG-4');
+    %v = VideoWriter([fpath{f} '/SNAPT_movie'],'Uncompressed AVI');
+
+    open(v);
+    subframeT = 0.025; % ms
+    initialT = -2; % ms
+    finalT = 2; % ms
+    times = initialT:subframeT:finalT;
+    SNAPTmov=superlocColormov;%.*Result.Structure;
+    SNAPTmov=flipud(fliplr(SNAPTmov));
+    SNAPTmov=SNAPTmov(:,125:640,:,:);
+
+    for j = 1:length(times)
+        clf;
+        %set(gca,'units','pixels','position',[200 0 1000 800])
+        imshow(SNAPTmov(:,:,:,j),[])
+        pbaspect([size(double(SNAPTmov(:,:,:,j)),2) size(double(SNAPTmov(:,:,:,j)),1) 1]),colormap(gray)
+        hold all
+        %plot(bluePatt{1}(:,2),bluePatt{1}(:,1),'color',[0 0.6 1],'linewidth',2)
+        axis off
+        text(5,17,[num2str(times(j)+0.75,2) 'ms'], 'FontSize', 20, 'color', [0.99 0.99 0.99])% the value 1. is to adjust timing by eyes
+        pause(0.1)
+        set(gcf,'color','w')    % Sets background to white
+        frame = getframe(gcf);
+        writeVideo(v,frame);
+        pause(0.1);
+    end;
+    close(v);
 
 %%
 [~, ~, raw] = xlsread(['/Volumes/cohen_lab/Lab/Labmembers' ...
@@ -223,7 +258,7 @@ PlaceFieldBin=cellfun(@(x) (str2num(num2str(x))),raw(:,22),'UniformOutput',false
 set(0,'DefaultFigureWindowStyle','docked')
 foi=[1 4 5 6 8 10 11 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27];
 %% Figure 2
-f=20;
+f=20; cmap=gen_colormap(Plasma,3);
 load(fullfile(fpath{f},'PC_Result.mat'),'Result');
 % CS_STA=read_tiff(fullfile(fpath{f},'CS_1.tiff'));
 % STAmovieCS=-mean(reshape(CS_STA,size(CS_STA,1),size(CS_STA,2),101,[]),4);
@@ -260,7 +295,7 @@ basalind=[8 9 10];
 apicalind=[28 29 30];
 somaind=[13 14 15];
 
-NormalizedTrace=(Result.normTraces)./Result.F_ref;
+NormalizedTrace=(Result.normTraces)./Result.F0_PCA;
 NormalizedTrace_noNaN=NormalizedTrace;
 %NormalizedTrace(:,Result.motionReject>0)=NaN;
 % if ifdirtRemov(f)
@@ -271,12 +306,12 @@ bAP_STA=get_STA(NormalizedTrace, Result.spike(1,:).*double(Result.Blue==0), 30, 
 bAP_STA=bAP_STA-prctile(bAP_STA,20,2);
 SpikeHeight=max(mean(bAP_STA(perisomaROI,:),1),[],2);
 
-NormalizedTrace=NormalizedTrace/SpikeHeight;
-NormalizedTrace_noNaN=NormalizedTrace_noNaN/SpikeHeight;
+%NormalizedTrace=NormalizedTrace/SpikeHeight;
+%NormalizedTrace_noNaN=NormalizedTrace_noNaN/SpikeHeight;
 NormalizedTrace=NormalizedTrace(Dist_order(noi_dist),:);
 NormalizedTrace_noNaN=NormalizedTrace_noNaN(Dist_order(noi_dist),:);
-filteredNormTr = pcafilterTrace(NormalizedTrace,5);
-filteredNormTr2 = pcafilterTrace(NormalizedTrace_noNaN, 5);
+filteredNormTr = pcafilterTrace(NormalizedTrace,[1:5]);
+filteredNormTr2 = pcafilterTrace(NormalizedTrace_noNaN, [1:5]);
 Subthreshold=get_subthreshold(filteredNormTr2,max(Result.spike(1,:),[],1)>0,7,17);
 %filteredNormTr = NormalizedTrace;
 ftprnt=Result.ftprnt(:,:,Dist_order(noi_dist));
@@ -289,25 +324,25 @@ Show_ftprnt=cat(3,max(ftprnt(:,:,basalind)>0,[],3),max(ftprnt(:,:,somaind)>0,[],
 roi_show=setdiff([1:sum(noi_dist)],[17]);
 
 figure(4); clf;
-show_footprnt_contour(Show_ftprnt,Result.ref_im,[0 0.4 1; 1 0.7 0; 1 0 0])
+show_footprnt_contour(Show_ftprnt,Result.ref_im,cmap)
 
 figure(5); clf; tiledlayout(4,1);
-tax=[1:size(Result.normTraces,2)]/1000;
+tax=[1:size(Result.normTraces,2)]/1000; lscale=[0.02];
 % ax1=nexttile([2 1]);
 % imagesc(tax,dendaxis(roi_show),filteredNormTr(roi_show,:),[-0.2 1.5]);
 % colormap(ax1,turbo(256));
 
 ax3=nexttile([3 1]);
-l=plot(tax,Show_tr'-[1:3]*2);
-arrayfun(@(l,c) set(l,'Color',c{:}),l,num2cell([0 0.4 1; 1 0.7 0; 1 0 0],2));
+l=plot(tax(45000:160000),Show_tr(:,45000:160000)'-[1:3]*lscale);
+arrayfun(@(l,c) set(l,'Color',c{:}),l,num2cell(cmap,2));
 hold all;
-l2=plot(tax,Show_subtr'-[1:3]*2);
-arrayfun(@(l,c) set(l,'Color',c{:}),l2,num2cell([0 0.4 1; 1 0.7 0; 1 0 0]/2,2));
+l2=plot(tax(45000:160000),Show_subtr(:,45000:160000)'-[1:3]*lscale);
+arrayfun(@(l,c) set(l,'Color',c{:}),l2,num2cell(cmap/2,2));
 legend(l,{'Basal','Soma','Distal'})
 axis off
 
 ax2=nexttile([1 1]);
-plot(tax,Result.VR(5,:),'color',[0.1 0.9 0.2],'linewidth',2);
+plot(tax(45000:160000),Result.VR(5,45000:160000),'color',[0.1 0.9 0.2],'linewidth',2);
 axis off
 linkaxes([ax2 ax3],'x')
 xlim([45 160])
@@ -315,192 +350,20 @@ xlim([45 160])
 figure(6); clf; tiledlayout(5,1); %  zoom in version of figure(5);
 tax=[1:size(Result.normTraces,2)]/1000;
 ax1=nexttile([2 1]);
-imagesc(tax,dendaxis(roi_show),filteredNormTr(roi_show,:),[-0.2 1]);
+imagesc(tax,dendaxis(roi_show),filteredNormTr(roi_show,:),[-0.005 0.017]);
 %imagesc(NormalizedTrace(roi_show,:),[-0.2 1.5]);
 colormap("turbo")
 set(gca,'XTick',[77 78 79],'XTickLabel',[0 1 2])
 
 ax3=nexttile([3 1]);
-l=plot(tax,Show_tr'-[1:3]*1.5);
-arrayfun(@(l,c) set(l,'Color',c{:}),l,num2cell([0 0.4 1; 1 0.7 0; 1 0 0],2));
+l=plot(tax,Show_tr'-[1:3]*0.017);
+arrayfun(@(l,c) set(l,'Color',c{:}),l,num2cell(cmap,2));
 hold all;
-l=plot(tax,Show_subtr'-[1:3]*1.5);
-arrayfun(@(l,c) set(l,'Color',c{:}),l,num2cell([0 0.4 1; 1 0.7 0; 1 0 0]/2,2));
+l=plot(tax,Show_subtr'-[1:3]*0.017);
+arrayfun(@(l,c) set(l,'Color',c{:}),l,num2cell(cmap/2,2));
 axis off
 linkaxes([ax1 ax3],'x')
 xlim([76.9 79.1])
-
-%% Figure 3
-f=23; 
-load(fullfile(fpath{f},'PC_Result.mat'),'Result');
-% CS_STA=read_tiff(fullfile(fpath{f},'CS_1.tiff'));
-% STAmovieCS=-mean(reshape(CS_STA,size(CS_STA,1),size(CS_STA,2),101,[]),4);
-% figure(4); clf;
-% imshow2(imgaussfilt(max(STAmovieCS,[],3),0.5),[0 230]);
-
-Result.spike=Result.spike>0; Result.SpClass=Result.SpClass>0;
-Dist_order=Result.BrancDist_order;
-interDendDist=Result.interDendDist*Pixelsize(f);
-Dsign=ones(1,size(interDendDist,1));
-Dsign(Dist_order(1:find(Dist_order==1)-1))=-1;
-perisomaROI=setdiff(find(interDendDist(1,:)<60),BadROI{f}); % ROIs < 40 um from soma
-noi=setdiff([1:size(Result.ftprnt,3)],BadROI{f});
-%noi=setdiff([1:size(Result.ftprnt,3)],[]);
-noi_dist=ismember(Dist_order,noi);
-dendaxis=interDendDist(1,:).*Dsign;
-dendaxis=dendaxis(Dist_order(noi_dist));
-
-roisD(f,:)={basal_ROI{f},PeriSoma_ROI{f},apical_ROI{f},oblique_ROI{f},distal_ROI{f}}; %set the ROIs
-for dClass=1:size(roisD,2)
-    g=1;
-    if ~isnan(roisD{f,dClass})
-        for d=roisD{f,dClass}
-            dind=setdiff(find(Result.BranchLabel==d),BadROI{f});
-            roisD_order{f}{dClass,g}=ismember(Dist_order(noi_dist),dind);
-            g=g+1;
-        end
-    end
-end
-
-roisD_order_ind=cellfun(@find,roisD_order{f},'UniformOutput',false);
-
-NormalizedTrace=(Result.normTraces)./Result.F_ref;
-bAP_STA=get_STA(NormalizedTrace, Result.spike(1,:).*double(Result.Blue==0), 30, 20);
-bAP_STA=bAP_STA-prctile(bAP_STA,20,2);
-SpikeHeight=max(mean(bAP_STA(perisomaROI,:),1),[],2);
-NormalizedTrace=NormalizedTrace(Dist_order(noi_dist),:)/SpikeHeight;
-
-ss_time=find(Result.SpClass(1,:)); % BS is subclass of SS
-brst=bwlabel((ss_time(2:end)-ss_time(1:end-1))<=20); % SSs that have an ISI shorter than 20 ms are BS.
-SpClass=Result.SpClass; BS_trace=zeros(1,size(Result.traces,2));
-for b=1:max(brst)
-    bwn=find(brst==b);
-    SpClass(1,ss_time([bwn bwn(end)+1]))=0;
-    SpClass(4,ss_time([bwn(1)]))=1;
-    BS_trace(1,[ss_time(bwn): ss_time(bwn(end)+1)])=b;
-end
-SpClass=SpClass([1 2 4],:);
-Classvec = get_Class2index(SpClass);
-SpikeClassvec=Classvec.*Result.spike(1,:);
-
-figure(301); clf; tiledlayout(1,3); ax1=[]; cmap=distinguishable_colors(3);
-tshow=[87454 22019 19084]; nTau=[-50:80]; show_noi=setdiff([1:size(NormalizedTrace,1)],[2 39 40 38 15 17]);
-tr_show=mean(NormalizedTrace([25 10 9],:),1,'omitnan');
-%tr_show=pcafilterTrace(NormalizedTrace,5);
-sub_show=get_subthreshold(mean(NormalizedTrace([25 10 9],:),1,'omitnan'),Result.spike(1,:),7,15);
-for t=1:length(tshow)
-    ax1=[ax1 nexttile([1 1])];
-    tr_show_tmp=tr_show(tshow(t)+nTau);
-    %tr_show_tmp=tr_show_tmp-median(tr_show_tmp(:,1:50),2);
-    l=plot(nTau,tr_show_tmp','k','linewidth',1.5);
-    %arrayfun(@(l,c) set(l,'Color',c{:}),l,num2cell(gen_colormap([0 0 0; 0.5 0 0; 1 0 0],length(show_noi)),2));
-    hold all
-    plot(nTau,sub_show(tshow(t)+nTau),'color',[1 0.5 0.5],'linewidth',2)
-    hold all
-    plot(0,1.6,'.','color',cmap(t,:),'markersize',20); hold all 
-    axis off
-end
-linkaxes(ax1,'xy');
-
-
-%% Figure 3, show STA kymo
-figure(101); clf; tiledlayout(3,3)
-stype_str={'SS','CS','BS'}; ax1=[]; ax2=[]; FR_bin_Frame=12; ax3=[];
-nTau=[200 100]; cmap=distinguishable_colors(3);
-NormalizedTraceFiltered=pcafilterTrace(NormalizedTrace,5);
-%NormalizedTraceFiltered=NormalizedTrace;
-Subthreshold=get_subthreshold(NormalizedTrace,Result.spike(1,:),7,17); cax=[-0.05 1];
-basalind=[1 2 3 4 5 6]; apicalind=[36 37 38 39 40];
-Basal_Trace= mean(NormalizedTraceFiltered(basalind,:),1,'omitnan');
-Apical_Trace= mean(NormalizedTraceFiltered(apicalind,:),1,'omitnan');
-
-silenttime=setdiff([1:nTime],unique(find(max([allSpikeMat{f}(1,:); allSpikeClassMat{f}; CStrace{f}; BlueStim{f}])>0)'+[-5:30]));
-silenttime_vec=ind2vec(nTime,silenttime,1);
-
-BASub =[Basal_Trace; Apical_Trace];
-BASub_silent=[Basal_Trace; Apical_Trace];
-BASub_silent=get_subthreshold(BASub_silent,Result.spike(1,:),7,17);
-BASub_silent(:,silenttime_vec==0)=NaN;
-
-STApreSpikeBA=[];
-for sclass=1:3
-    TriggerSpike=SpClass(sclass,:).*double(Result.Blue==0);
-    [STATrace STATraceMat]=get_STA(NormalizedTrace,TriggerSpike,nTau(1),nTau(2));
-    STASpikeClass=get_STA(SpikeClassvec,TriggerSpike,nTau(1),nTau(2));
-    %STASpikeClass(:,nTau(1):end)=0;
-    STAsub=get_STA(Subthreshold,TriggerSpike,nTau(1),nTau(2));
-    [~, STApreSpikeBA{sclass}] = get_STA(BASub,TriggerSpike,nTau(1),nTau(2));
-
-    [STASpikeClass_bin binT]= Bin_Vector(STASpikeClass, [-nTau(1):nTau(2)], [-nTau(1):FR_bin_Frame:-1 0:1 2:FR_bin_Frame:nTau(2)]);
-    %STASpikeClass_bin=STASpikeClass;
-    [~, dind]=sort(dendaxis,'ascend');
-    [X, Y] = meshgrid([-nTau(1):nTau(2)], min(dendaxis):36:max(dendaxis));
-    STAtraceq = interp2([-nTau(1):nTau(2)], dendaxis(dind), STATrace(dind,:), X, Y, 'linear');
-    STAsubq = interp2([-nTau(1):nTau(2)], dendaxis(dind), STAsub(dind,:), X, Y, 'linear');
-
-    ax1=[ax1 nexttile(sclass,[1 1])];
-   imagesc([-nTau(1):nTau(2)],Y(:,1),STAtraceq,cax) 
-   ylabel('Distance from soma (\mum)')
-colormap(turbo(256))
-
-    ax3=[ax3 nexttile(sclass+3,[1 1])];
-    STAtraceMatB=mean(STATraceMat(basalind,:,:),1,'omitnan'); STAtraceMatA=mean(STATraceMat(apicalind,:,:),1,'omitnan');
-    BasalM=squeeze(mean(STAtraceMatB,[2],'omitnan')); BasalS=squeeze(std(STAtraceMatB,0,2,'omitnan'));
-    ApicalM=squeeze(mean(STAtraceMatA,2,'omitnan')); ApicalS=squeeze(std(STAtraceMatA,0,2,'omitnan'));
-    h(1)=errorbar_shade([-nTau(1):nTau(2)],BasalM,BasalS./sqrt(size(STATraceMat,2)),[0.1 0.5 1]); hold all
-    h(2)=errorbar_shade([-nTau(1):nTau(2)],ApicalM,ApicalS./sqrt(size(STATraceMat,2)),[1 0 0]); hold all
-
-ax2=[ax2 nexttile(sclass+6,[1 1])];
-l=plot(binT,STASpikeClass_bin');
-arrayfun(@(l,c) set(l,'Color',c{:}),l,num2cell(cmap,2));
-xlabel('Peri-spike time (ms)')
-ylabel(['Spike rate (per ' stype_str{sclass} ')'])
-ylim([0 0.02])
-end
-legend(l,stype_str)
-ax1=[ax1 nexttile(3,[1 1])];
-colorbar;
-nexttile(6,[1 1]);
-legend(h,{'Basal','Distal'})
-linkaxes(ax1,'xy');
-linkaxes(ax2,'xy');
-linkaxes(ax3,'xy');
-
-%[V D]=get_eigvector(BASub_silent(:,sum(isnan(BASub_silent))==0),2);
-figure(302); clf; %tiledlayout(2,2);
-ax1=nexttile([1 1]); l=[];
-marker_class={'>','o','diamond'};
-[~,~,~,h2]=scatter_heatmap2(BASub_silent(1,:),BASub_silent(2,:),linspace(-1,1,50),linspace(-1.5,1.5,50)); hold all
-colormap(h2.Parent,bone);
-caxis([0.0001 0.005])
-colormap_list={'spring','hot','winter'};
-for sclass=1:3
-    preSub=mean(STApreSpikeBA{sclass}(:,:,nTau(1)+[-6:0]),3,'omitnan');
-    %l(sclass)=scatter(preSub(1,:),preSub(2,:),40,'filled','Marker',marker_class{sclass},'MarkerFaceColor',cmap(sclass,:),'MarkerFaceAlpha',0.7); hold all
-    [count xc yc h_heatmap]=scatter_heatmap2(preSub(1,:),preSub(2,:),linspace(-1,1,10),linspace(-1.5,1.5,10));
-    delete(h_heatmap)
-    [~, h{sclass}]=contour(xc,yc,count,10); hold all
-    colormap(h{sclass}.Parent,colormap_list{sclass});
-end
-plot([-2 3],[0 0],'color',[0.7 0.7 0.7]); plot([0 0],[-2 3],'color',[0.7 0.7 0.7]);
-legend(l,{'SS','CS','BS'})
-
-ax3=nexttile([1 1]); l=[];
-scatter_heatmap2(BASub_silent(1,:),BASub_silent(2,:),linspace(-2,3,100),linspace(-2,3,100)); hold all
-plot([-2 3],[0 0],'color',[0.7 0.7 0.7]); plot([0 0],[-2 3],'color',[0.7 0.7 0.7]);
-
-quiver(mean(BASub_silent(1,:),'omitnan'), mean(BASub_silent(2,:),'omitnan'), V(1,1)*sqrt(D(1)), V(2,1)*sqrt(D(1)), 'r', 'LineWidth', 1.5, 'DisplayName', 'Eigenvector 1');
-quiver(mean(BASub_silent(1,:),'omitnan'), mean(BASub_silent(2,:),'omitnan'), V(1,2)*sqrt(D(2)), V(2,2)*sqrt(D(2)), 'g', 'LineWidth', 1.5, 'DisplayName', 'Eigenvector 2');
-colormap(turbo); xlabel('Basal'); ylabel('Apical'); legend(l,{'pre CS','pre SS'})
-ax4=nexttile([1 1]); l=[];
-scatter_heatmap2(BASub_silent(1,:),BASub_silent(2,:),linspace(-2,3,100),linspace(-2,3,100)); hold all
-plot([-2 3],[0 0],'color',[0.7 0.7 0.7]); plot([0 0],[-2 3],'color',[0.7 0.7 0.7]);
-l(1)=scatter(BApostCS1st(1,:),BApostCS1st(2,:),40,'filled','Marker','>','MarkerFaceColor',[1 0 0],'MarkerFaceAlpha',0.7); hold all
-l(2)=scatter(BApostSS(1,:),BApostSS(2,:),40,'filled','Marker','o','MarkerFaceColor',[0 0 0],'MarkerFaceAlpha',0.7);
-quiver(mean(BASub_silent(1,:),'omitnan'), mean(BASub_silent(2,:),'omitnan'), V(1,1)*sqrt(D(1)), V(2,1)*sqrt(D(1)), 'r', 'LineWidth', 1.5, 'DisplayName', 'Eigenvector 1');
-quiver(mean(BASub_silent(1,:),'omitnan'), mean(BASub_silent(2,:),'omitnan'), V(1,2)*sqrt(D(2)), V(2,2)*sqrt(D(2)), 'g', 'LineWidth', 1.5, 'DisplayName', 'Eigenvector 2');
-colormap(turbo); xlabel('Basal'); ylabel('Apical'); legend(l,{'3-8 ms after 1st CS','3-8 ms after 1st SS'})
-linkaxes([ax3 ax4],'xy')
 
 
 

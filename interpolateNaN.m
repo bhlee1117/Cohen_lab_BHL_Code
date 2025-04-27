@@ -21,8 +21,12 @@ function interpolatedMatrix = interpolateNaN(matrix)
         nanIdx = isnan(row); % Identify NaN indices
         if any(nanIdx)
             validIdx = ~nanIdx; % Identify valid indices
+            if ~any(validIdx)
+            interpolatedMatrix(i, nanIdx)= NaN;    
+            else
             % Interpolate NaN values using linear interpolation
             interpolatedMatrix(i, nanIdx) = interp1(find(validIdx), row(validIdx), find(nanIdx), 'linear', 'extrap');
+            end
         end
     end
 end

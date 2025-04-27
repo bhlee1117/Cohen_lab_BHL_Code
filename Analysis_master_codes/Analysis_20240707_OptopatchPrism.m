@@ -3,7 +3,7 @@ clear
 clc;
 cd '/Volumes/BHL18TB_D2/Arranged_Data/Prism_OptopatchResult';
 [~, ~, raw] = xlsread(['/Volumes/cohen_lab/Lab/Labmembers/Byung Hun Lee/Data/' ...
-    'Prism_OptopatchData_Arrangement.xlsx'], 'Sheet1', 'B5:K165');
+    'Prism_OptopatchData_Arrangement.xlsx'], 'Sheet1', 'C5:L165');
 
 save_to='/Volumes/BHL18TB_D2/Arranged_Data/Prism_OptopatchResult';
 fpath=raw(:,1);
@@ -179,7 +179,7 @@ for i=unqInd([9])'
     mov_mc=double(readBinMov_times([fpath{i} '/mc_ShutterReg' num2str(1,'%02d') '.bin'],sz(2),sz(1),ref_time));
     averageImg=mean(mov_mc,3);
     Result.ref_im=mean(mov_mc,3);
-    Result.mc=mcTrace.xymean;
+    Result.mcTrace=mcTrace.xymean;
     mov_res= mov_mc-mean(mov_mc,3);
     mcTrace.xymean=movmean(mcTrace.xymean,3,2);
     mov_res = SeeResiduals(mov_res,mcTrace.xymean(ref_time,:));
@@ -260,9 +260,9 @@ end
 %% Signal extraction
 bound=5;
 
-for i=[72:75]%length(fpath)]
+for i=[93]%length(fpath)]
 
-    load([fpath{i} '/Result.mat'])
+    load([fpath{i} '/OP_Result.mat'])
     load(fullfile(fpath{i},"output_data.mat"))
     load([fpath{i} '/mcTrace' num2str(1,'%02d') '.mat']);
     switch char(CamType(i))
@@ -274,7 +274,7 @@ for i=[72:75]%length(fpath)]
 
     Result.traces=[];
     Result.traces_bvMask=[];
-    Result.mc=movmean(mcTrace.xymean,5,1);
+    Result.mcTrace=movmean(mcTrace.xymean,5,1);
     Result.im_corr=[];
 
     ref_im_vec=tovec(Result.ref_im(bound:end-bound,bound:end-bound));
@@ -305,9 +305,9 @@ for i=[72:75]%length(fpath)]
     [~, blueOff]=get_blueoffTrace(mean_F,[Result.Blue],70);
     [y_fit]=expfitDM_2(find(blueOff)',mean_F(find(blueOff)),[1:size(mov_mc,3)]',1000);
     bkg(1,:)=y_fit;
-    mov_res = SeeResiduals(mov_res,Result.mc);
-    mov_res = SeeResiduals(mov_res,Result.mc.^2);
-    mov_res = SeeResiduals(mov_res,Result.mc(:,1).*Result.mc(:,end));
+    mov_res = SeeResiduals(mov_res,Result.mcTrace);
+    mov_res = SeeResiduals(mov_res,Result.mcTrace.^2);
+    mov_res = SeeResiduals(mov_res,Result.mcTrace(:,1).*Result.mcTrace(:,end));
     mov_res= SeeResiduals(mov_res,bkg,1);
 
     Result.traces=[-(tovec(mov_res)'*tovec(Result.ftprnt))'];
@@ -316,7 +316,7 @@ for i=[72:75]%length(fpath)]
     end
     Result.im_corr=[Result.im_corr corr(rescale2(mov_mc_vec,1),ref_im_vec,'type','Spearman')'];  %image correlation
     %Result.im_corr=[sum(mov_mc_vec.*ref_im_vec,1)/(size(mov_mc_vec,1)-1)];  %image correlation
-    save([fpath{i} '/Result.mat'],'Result','-v7.3')
+    save([fpath{i} '/OP_Result.mat'],'Result','-v7.3')
 end
 
 %% Clean up and norm
@@ -325,8 +325,8 @@ exclude_frq=[241.7 242]; %monitor
 exclude_frq2=[55.5 56]; %motion
 time_bin=15000; Fs=1000;
 
-for f=[160]%:length(fpath)
-    load(fullfile(fpath{f},'Result.mat'),'Result')
+for f=[93]%:length(fpath)
+    load(fullfile(fpath{f},'OP_Result.mat'),'Result')
     ref_trace=1;
     nTime=size(Result.traces,2);
     nROI=size(Result.traces,1);
@@ -675,9 +675,9 @@ mov_res= mov_mc-mean(mov_mc,3);
 bkg = zeros(1, size(mov_mc,3));
 
 bkg(1,:)=movmedian(get_blueoffTrace(squeeze(mean(mov_mc,[1 2])),Blue,30),3000,'omitnan');
-mov_res = SeeResiduals(mov_res,Result.mc);
-mov_res = SeeResiduals(mov_res,Result.mc.^2);
-mov_res = SeeResiduals(mov_res,Result.mc(:,1).*Result.mc(:,end));
+mov_res = SeeResiduals(mov_res,Result.mcTrace);
+mov_res = SeeResiduals(mov_res,Result.mcTrace.^2);
+mov_res = SeeResiduals(mov_res,Result.mcTrace(:,1).*Result.mcTrace(:,end));
 mov_res= SeeResiduals(mov_res,bkg,1);
 
 STA_tmp=reshape(mov_res(:,:,sTau),sz(2),sz(1),[],length(nTau));

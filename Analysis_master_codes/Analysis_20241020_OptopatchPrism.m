@@ -3,7 +3,7 @@ clear
 clc;
 cd '/Volumes/BHL18TB_D2/Arranged_Data/Prism_OptopatchResult';
 [~, ~, raw] = xlsread(['/Volumes/cohen_lab/Lab/Labmembers/Byung Hun Lee/Data/' ...
-    'Prism_OptopatchData_Arrangement.xlsx'], 'Sheet1', 'B5:O175');
+    'Prism_OptopatchData_Arrangement.xlsx'], 'Sheet1', 'C5:P200');
 
 save_to='/Volumes/BHL18TB_D2/Arranged_Data/Prism_OptopatchResult';
 
@@ -46,7 +46,7 @@ end
 
 %% MC
 
-for i=[1]%length(fpath)
+for i=[172:192]%length(fpath)
     i
     load(fullfile(fpath{i},"output_data.mat"))
 
@@ -116,7 +116,7 @@ end
 %% ROI setting
 file2analyze=[7,58,63,68,93,94,96,103,104,105,106,107,108,109,110,112,113,114,115,116,117,118,119,120,121,122,123,124,151,152,153,154,155,156,157,158];
 [a, unqInd] = unique([Mouse NeuronInd] ,'row');
-for i=unqInd(1)'
+for i=unqInd(54)'
     load(fullfile(fpath{i},"output_data.mat"))
     disp(fpath{i})
     cd(fpath{i})
@@ -129,16 +129,15 @@ for i=unqInd(1)'
             sz=double(Device_Data{1, 3}.ROI([2 4]));
             camind=3;
     end
-    ref_time=[4000:9000];
+    ref_time=[1:5000];
     load(fullfile(fpath{i},'mcTrace01.mat'));
     mov_mc=readBinMov_BHL(fpath{i},camind,ref_time);
     avgImg=mean(mov_mc,3);
 
     [u,s,v] = svds(tovec(mov_mc-mean(mov_mc,3)),20);
     reshape_u=reshape(u,sz(2),sz(1),[]);
-    bvMask=[];
-    [~, Result.bvMask]=get_ROI(max(abs(reshape_u),[],3),bvMask);
-    bvMask=Result.bvMask;
+    Result.bvMask=[];
+    [~, Result.bvMask]=get_ROI(max(abs(reshape_u),[],3),Result.bvMask);
 
     Result.ref_im=mean(mov_mc,3);
     mov_res= mov_mc-mean(mov_mc,3);
@@ -153,7 +152,7 @@ for i=unqInd(1)'
 
     %ROIimg=mean(mov_mc,3);
     ROIimg=mean(icsImgs(:,:,[1]),3);
-    excludeImg=mean(icsImgs(:,:,[2 4]),3);
+    excludeImg=mean(icsImgs(:,:,[3 4 5]),3);
     %excludeImg=mean(mov_mc,3);
 
     figure(3); clf;
@@ -180,9 +179,9 @@ for i=unqInd(1)'
 
     n_comp=6;
     mov_res_reg=mov_res;
-    %mov_res_reg=SeeResiduals(mov_res_reg,icsTrace.intens([1 2 3 4 5 6 10],:));
+    %mov_res_reg=SeeResiduals(mov_res_reg,icsTrace.intens([1 2 3 4],:));
     mov_filt=imgaussfilt3(mov_res_reg.*double(max(Result.bvMask,[],3)==0).*double(max(Result.excludeROI,[],3)==0),[1.5 1.5 0.1]);
-    %mov_filt=mov_filt(:,:,3000:9000);
+    mov_filt=mov_filt(:,:,2000:5000);
     movVec=tovec(mov_filt);
     Npoly=size(Result.ROIpoly,1);
     ftprnt = zeros(size(mov_filt,1)*size(mov_filt,2),Npoly);
@@ -236,10 +235,10 @@ for i=unqInd(1)'
         CamCounter=Device_Data{1, 2}.Counter_Inputs(1, 1).data;
         CamTrigger=find(CamCounter(2:end)-CamCounter(1:end-1));
         Result.Blue=Result.Blue(CamTrigger);
-        [Result.blueDMDimg Result.bluePatt]=get_blueDMDPatt(Device_Data,'normal');
+        [Result.blueDMDimg Result.bluePatt]=get_blueDMDPatt(Device_Data,'stack');
 
         Result.ROIpoly=ROIpoly;
-        sz=double(Device_Data{1, 4}.ROI([2 4]));
+        sz=double(Device_Data{1, 3}.ROI([2 4]));
         mov_mc=double(readBinMov_times([fpath{j} '/mc_ShutterReg' num2str(1,'%02d') '.bin'],sz(2),sz(1),[3000:4000]));
         Result.ref_im=mean(mov_mc,3);
         [offsetY offsetX]=calculate_shift(avgImg,mean(mov_mc,3))
@@ -274,7 +273,7 @@ end
 %% Signal extraction
 bound=6;
 %foi=find(Goodindex==1)';
-for i=3:5
+for i=94
     i
     load([fpath{i} '/OP_Result.mat'])
     load(fullfile(fpath{i},"output_data.mat"))
@@ -298,13 +297,13 @@ for i=3:5
 
     Result.Blue=Device_Data{1, 2}.buffered_tasks(1, 1).channels(1, 2).data;
     Result.Blue=Result.Blue(CamTrigger);
-    %Rfixed = imref2d(repmat(Device_Data{1, 3}.virtualSensorSize,1,2));
-    Rfixed = imref2d(repmat(Device_Data{1, 4}.virtual_sensor_size,1,2));
+    Rfixed = imref2d(repmat(Device_Data{1, 3}.virtualSensorSize,1,2));
+    %Rfixed = imref2d(repmat(Device_Data{1, 4}.virtual_sensor_size,1,2));
     inverseTform = invert(Device_Data{1, 6}.tform);
     revertedImage = imwarp(double(Device_Data{1, 6}.Target), inverseTform,'OutputView',Rfixed);
     
-    %[blueDMDimg blueDMDcontour]=imcrop(revertedImage,double(Device_Data{1, 3}.ROI([1 3 2 4]))+[0 0 -1 -1]);
-    [blueDMDimg blueDMDcontour]=imcrop(revertedImage,double(Device_Data{1, 4}.ROI([1 3 2 4]))+[0 0 -1 -1]);
+    [blueDMDimg blueDMDcontour]=imcrop(revertedImage,double(Device_Data{1, 3}.ROI([1 3 2 4]))+[0 0 -1 -1]);
+    %[blueDMDimg blueDMDcontour]=imcrop(revertedImage,double(Device_Data{1, 4}.ROI([1 3 2 4]))+[0 0 -1 -1]);
 
     Result.BlueDMD=blueDMDcontour;
     Result.BlueDMDimg=blueDMDimg;
@@ -344,22 +343,22 @@ end
 
 Struct_valid=find(1-cell2mat(cellfun(@(x) sum(isnan(x)), StructureData, 'UniformOutput', false)));
 
-for i=unqInd([39])'
-    load(fullfile(fpath{i},'Result.mat'))
+for i=unqInd([48])'
+    load(fullfile(fpath{i},'OP_Result.mat'))
     StructureStack=mat2gray(double(tiffreadVolume(StructureData{i})));
     StructureStack(StructureStack==0)=median(StructureStack(:));
-    StructureStack=StructureStack(:,:,1:118);
-    %StructureStack_med=medfilt2_mov(StructureStack,[15 15]);
-    illumination_field=imgaussfilt(max(StructureStack,[],3),50);
-    StructureStack=StructureStack./illumination_field;
-    StructureStack_Gauss=imgaussfilt3(StructureStack,[6 6 0.1]);
-    %StructureStack_med(StructureStack_med==0)=median(StructureStack_med(:));
-    %StructureStack=(StructureStack-StructureStack_med)./StructureStack_med;
-    StructureStack_filt=(StructureStack-StructureStack_Gauss);
-    StructureStack_filt=mat2gray(StructureStack_filt);
+    % StructureStack=StructureStack(:,:,1:196);
+    % %StructureStack_med=medfilt2_mov(StructureStack,[15 15]);
+     illumination_field=imgaussfilt(max(StructureStack,[],3),50);
+     StructureStack=StructureStack./illumination_field;
+    % StructureStack_Gauss=imgaussfilt3(StructureStack,[6 6 0.1]);
+    % %StructureStack_med(StructureStack_med==0)=median(StructureStack_med(:));
+    % %StructureStack=(StructureStack-StructureStack_med)./StructureStack_med;
+    % StructureStack_filt=(StructureStack-StructureStack_Gauss);
+    StructureStack_filt=mat2gray(StructureStack);
     StructureStack_bin=[]; level=[];
     level = graythresh(StructureStack_filt);
-    StructureStack_bin=StructureStack_filt>level*1.17;
+    StructureStack_bin=StructureStack_filt>level*2.7;
     moviefixsc(StructureStack_bin)
 
     se = strel('sphere', 1);
@@ -406,29 +405,29 @@ for i=unqInd([39])'
     Result.Structure=RegImg;
     Result.Structure_bin=imwarp(max(imrotate(dendrite_bin,rot_ang),[],3), tformReg, 'OutputView', imref2d(size(ref_img)));
     Result.tform=tformReg;
-    save(fullfile(fpath{i},'Result.mat'),'Result','fpath','-v7.3')
+    save(fullfile(fpath{i},'OP_Result.mat'),'Result','-v7.3')
 
     SameCellInd=find(Mouse==Mouse(i) & NeuronInd==NeuronInd(i));
 
     for j=SameCellInd'
-        load(fullfile(fpath{j},'Result.mat'))
+        load(fullfile(fpath{j},'OP_Result.mat'))
         Result.tform=tformReg;
         [offsetY offsetX]=calculate_shift(ref_img,Result.ref_im)
         Result.tform.T(3,1:2)=Result.tform.T(3,1:2)-[offsetX offsetY];
         Result.Structure=imwarp(max(Structure_ref,[],3), Result.tform, 'OutputView', imref2d(size(ref_img)));
         Result.Structure_bin=imwarp(max(imrotate(dendrite_bin,rot_ang),[],3), Result.tform, 'OutputView', imref2d(size(ref_img)));
         figure; imshow2(imfuse(Result.ref_im,Result.Structure),[]);
-        save([fpath{j} '/Result.mat'],'Result','-v7.3')
+        save([fpath{j} '/OP_Result.mat'],'Result','-v7.3')
     end
 end
 %% Find Spikes
 CS_thres=[4 1];
-Sp_thres=[4 2];
+Sp_thres=[4 2.5];
 exclude_frq2=[55.5 56]; %motion
 freq_lowhigh2=exclude_frq2/(1000/2);
 [b2, a2] = butter(4, freq_lowhigh2, 'stop');
 
-for i=[5]%length(fpath)]
+for i=[94]%length(fpath)]
     load([fpath{i} '/OP_Result.mat'])
     Result.normTraces=Result.traces-prctile(Result.traces,25,2);
     Result.normTraces=Result.normTraces./get_threshold(Result.normTraces,1);

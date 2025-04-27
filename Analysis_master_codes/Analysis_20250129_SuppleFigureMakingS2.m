@@ -10,7 +10,7 @@ clear; clc;
 
 [~, ~, rawPrism] = xlsread(['/Volumes/cohen_lab/Lab/Labmembers' ...
     '/Byung Hun Lee/Data/PrismPCdata_Arrangement.xlsx'], 'Sheet1', 'C5:AA31');
-fpath_prism=rawPrism(:,2);
+fpath_prism=rawPrism(:,1);
 
 for i=1:length(fpath)
     Result_tmp=load(fullfile(fpath{i},'PC_Result.mat'));

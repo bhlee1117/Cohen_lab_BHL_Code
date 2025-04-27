@@ -11,6 +11,9 @@ function l=imshow_label(dataMatrix, labels ,cmap,legend_label)
     if nargin<3
         cmap=hsv(length(unique(labels)));
     end
+    if nargin<4
+        legend_label=[];
+    end
     cmap_nan=[0.3 0.3 0.3];
     [rows, cols] = size(dataMatrix);
     if rows ~= cols
@@ -24,7 +27,7 @@ function l=imshow_label(dataMatrix, labels ,cmap,legend_label)
     % Create figure and display the matrix using pcolor
     imagesc(dataMatrix);
     colorbar;
-    colormap turbo;
+    colormap hot;
     axis square off;
 
     % Adjust axis labels
@@ -50,10 +53,12 @@ g=g+1;
         g=g+1;
     end
     hold off;
+    if ~isempty(legend_label)
     if sum(isnan(labels))>0
     legend(l,[{'Unlabeled'},legend_label(labels_cat)],'location','northwestoutside')
     else
     legend(l,legend_label(labels_cat),'location','northwestoutside')
+    end
     end
 
     % Set axis limits to make room for labels

@@ -24,9 +24,11 @@ function filteredData = pcafilterTrace(data, numComponents)
     [U, S, V] = svd(centeredData, 'econ');
 
     % Retain the specified number of components
-    U_reduced = U(:, 1:numComponents); % Leading components
-    S_reduced = S(1:numComponents, 1:numComponents); % Reduced singular values
-    V_reduced = V(:, 1:numComponents); % Right singular vectors
+nTake=numComponents;
+
+    U_reduced = U(:, nTake); % Leading components
+    S_reduced = S(nTake, nTake); % Reduced singular values
+    V_reduced = V(:, nTake); % Right singular vectors
 
     % Reconstruct the data using retained components
     filteredDataValid = U_reduced * S_reduced * V_reduced';

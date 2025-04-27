@@ -12,7 +12,11 @@ if nargin<3
     readall=1;
     time_segment=15000;
 end
+if nargin<4
+    time_segment=15000;
+end
 
+time_read(time_read<=0)=[];
 isMCtrace=dir(fullfile(filepath,['mc_*.bin']));
 mov=[];
 file_read=ceil(time_read/time_segment);
@@ -23,7 +27,7 @@ if ~isempty(isMCtrace)
 
     for j=unique(file_read)
     disp(['Loading ' fullfile(filepath,isMCtrace(j).name)])
-mov=cat(3,mov,double(readBinMov_times(fullfile(filepath,isMCtrace(1).name),sz(2),sz(1),frame_read(file_read==j))));    
+mov=cat(3,mov,double(readBinMov_times(fullfile(filepath,isMCtrace(j).name),sz(2),sz(1),frame_read(file_read==j))));    
     end
 else
 mov=double(readBinMov_times(fullfile(filepath,'frames1.bin'),sz(2),sz(1),time_read));

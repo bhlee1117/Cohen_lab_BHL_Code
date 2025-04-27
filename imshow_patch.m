@@ -27,7 +27,7 @@ else
         nexttile([1 1])
         %imshow2(image(:,:,z),cax)
         imagesc(image(:,:,z),cax)
-        title(num2str(z))
+        %title(num2str(z))
     end
 end
 end

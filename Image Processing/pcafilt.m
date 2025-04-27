@@ -19,11 +19,9 @@ dmov2d = mov2d - repmat(avgimg2d, [1 nframes]);
 covmat = dmov2d'*dmov2d;
 [V, D] = eig(covmat);
 eigvals = flipud(diag(D));
-V = fliplr(V);
-% correct the sign of all the components
-for j = 1:nframes
-    V(:,j) = V(:,j)*sign(V(find(abs(V(:,j)) == max(abs(V(:,j)))),j));
-end;
+V = V(:,end:-1:1);
+vSign = sign(max(V) - max(-V));  % make the largest value always positive
+V = V.*vSign;
 eigvecs = V;
 
 coeffs = mov2d*V(:,1:npcs);

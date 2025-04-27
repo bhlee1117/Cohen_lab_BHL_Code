@@ -3,7 +3,7 @@ clear
 clc;
 cd '/Volumes/cohen_lab/Lab/Labmembers/Byung Hun Lee/Data/Statistics_Optopatch_Prism';
 [~, ~, raw] = xlsread(['/Volumes/cohen_lab/Lab/Labmembers/Byung Hun Lee/Data/' ...
-    'Prism_OptopatchData_Arrangement.xlsx'], 'Sheet1', 'B5:P175');
+    'Prism_OptopatchData_Arrangement.xlsx'], 'Sheet1', 'C5:Q175');
 
 fpath=raw(:,1);
 Mouse=cell2mat(raw(:,2));
@@ -27,6 +27,7 @@ set(0,'DefaultFigureWindowStyle','docked')
 %%
 f=35;
 cd(fpath{f});
+save_dir=fpath{f};
 load(fullfile(fpath{f},'OP_Result.mat'),'Result')
 
 figure(7); clf;
@@ -121,3 +122,68 @@ ylabel(['Distance from' newline 'soma (\mum)'])
 colormap(turbo)
 
 %%
+bound=6;
+
+mov_mc=readBinMov_BHL(fpath{f},3);
+mean_F=squeeze(mean(mov_mc(bound:end-bound,bound:end-bound,:),[1 2]));
+[~, blueOff]=get_blueoffTrace(mean_F,[Result.Blue],70);
+[y_fit]=expfitDM_2(find(blueOff)',mean_F(find(blueOff)),[1:size(mov_mc,3)]',1000);
+
+mov_res= mov_mc-mean(mov_mc,3);
+mov_res = SeeResiduals(mov_res,y_fit);
+mov_res = SeeResiduals(mov_res,Result.mc(:,:));
+mov_res = SeeResiduals(mov_res,Result.mc(:,:).^2);
+mov_res = SeeResiduals(mov_res,Result.mc(:,1).*Result.mc(:,end));
+%%
+STA_dendStart=get_STA(tovec(mov_res),ind2vec(size(mov_res,3),sp_time(maxarg<5),1),30,30);
+STA_dendStart=toimg(STA_dendStart,size(mov_res,1),size(mov_res,2));
+
+STA_dendStart=STA_dendStart-mean(STA_dendStart(:,:,1:5),3);
+%STA_dendStart=STA_dendStart./imgaussfilt(Result.F0PCAimg,5).*double(Result.Structure_bin>0);
+STA_dendStart=STA_dendStart.*double(Result.Structure_bin>0);
+%STA_dendStart=pcafilt(STA_dendStart,25);
+
+STA_somaStart=get_STA(tovec(mov_res),ind2vec(size(mov_res,3),sp_time(maxarg>=5),1),30,30);
+STA_somaStart=toimg(STA_somaStart,size(mov_res,1),size(mov_res,2));
+STA_somaStart=STA_somaStart-mean(STA_somaStart(:,:,1:5),3);
+%STA_somaStart=STA_somaStart./imgaussfilt(Result.F0PCAimg,5).*double(Result.Structure_bin>0);
+%STA_somaStart=pcafilt(STA_somaStart,25);
+STA_somaStart=STA_somaStart.*double(Result.Structure_bin>0);
+
+STAmov_norm_crop=[];
+STAmov_norm_crop(:,:,:,1)=-STA_somaStart; STAmov_norm_crop(:,:,:,2)=-STA_dendStart;
+STAmov_norm_crop_filt=[];
+cax_sub=[-30 80];
+cax_sub2=[-40 20];
+
+Rfixed = imref2d([size(Result.ref_im,1) size(Result.ref_im,2)]);
+inverseTform = invert(Result.tform);
+%revertedStruct = imwarp(Result.Structure, inverseTform,'OutputView',Rfixed);
+revertedStruct= Result.Structure;
+revertedStruct(revertedStruct==0)=prctile(revertedStruct(:),30);
+revertedStruct=mat2gray(revertedStruct);
+STAmovie_normStr=[];
+
+for spclass_ind=1:2
+    %STAmovie_norm{spclass_ind}=imgaussfilt3(STAnorm_sub./F_refImg,[1.5 1.5 0.1]);%.*SkelDend(bound:end-bound,bound:end-bound);
+    STAmov_norm_crop_filt{spclass_ind}=imgaussfilt(STAmov_norm_crop(:,:,:,spclass_ind),5);
+    colorSTA=grs2rgb(tovec(STAmov_norm_crop_filt{spclass_ind}),colormap('turbo'),cax_sub(1),cax_sub(2));
+    colorSTA=reshape(colorSTA,size(STAmov_norm_crop,1),size(STAmov_norm_crop,2),size(STAmov_norm_crop,3),[]);
+    colorSTA=permute(colorSTA,[1 2 4 3]);
+    STAmovie_normStr{spclass_ind}=colorSTA.*revertedStruct*3;%.*SkelDend(bound:end-bound,bound:end-bound);
+end
+
+dit_STAmov=imgaussfilt(STAmov_norm_crop(:,:,:,2),5)-imgaussfilt(STAmov_norm_crop(:,:,:,1),5);
+colorSTA=grs2rgb(tovec(dit_STAmov),colormap('turbo'),cax_sub2(1),cax_sub2(2));
+colorSTA=reshape(colorSTA,size(STAmov_norm_crop,1),size(STAmov_norm_crop,2),size(STAmov_norm_crop,3),[]);
+colorSTA=permute(colorSTA,[1 2 4 3]);
+dit_Str=colorSTA.*revertedStruct*3;
+%catMov=[STAmovie_normStr{1}; STAmovie_normStr{2}; (colorSTA.*revertedStruct*3)];
+
+cax=[-0.005,0.02];
+writeMov4d(fullfile(save_dir,['STAmovieSom']),[STAmovie_normStr{1}],[-30:30],10,1,cax_sub)
+writeMov4d(fullfile(save_dir,['STAmovieDend']),[STAmovie_normStr{2}],[-30:30],10,1,cax_sub)
+writeMov4d(fullfile(save_dir,['STAmovieDiff']),[dit_Str],[-30:30],10,1,cax_sub2)
+
+
+

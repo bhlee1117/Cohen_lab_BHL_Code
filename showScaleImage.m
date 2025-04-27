@@ -64,5 +64,5 @@ end
 coloredImage = coloredImage / max(coloredImage(:));
 
 % Display the final colored image to verify output
-imagesc(coloredImage);
+imshow2(coloredImage,[]);
 end

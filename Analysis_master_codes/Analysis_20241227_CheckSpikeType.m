@@ -1,27 +1,34 @@
 clear
 clc;
 [~, ~, raw] = xlsread(['/Volumes/cohen_lab/Lab/Labmembers' ...
-    '/Byung Hun Lee/Data/PrismPCdata_Arrangement.xlsx'], 'Sheet1', 'C5:W31');
+    '/Byung Hun Lee/Data/PrismPCdata_Arrangement.xlsx'], 'Sheet1', 'C5:Z31');
 
-ref_ROI=cellfun(@(x) (str2num(num2str(x))),raw(:,10),'UniformOutput',false);
-basal_ROI=cellfun(@(x) (str2num(num2str(x))),raw(:,11),'UniformOutput',false);
-apical_ROI=cellfun(@(x) (str2num(num2str(x))),raw(:,12),'UniformOutput',false);
+ref_ROI=cellfun(@(x) (str2num(num2str(x))),raw(:,9),'UniformOutput',false);
+
+oblique_ROI=cellfun(@(x) (str2num(num2str(x))),raw(:,10),'UniformOutput',false);
+PeriSoma_ROI=cellfun(@(x) (str2num(num2str(x))),raw(:,11),'UniformOutput',false);
+basal_ROI=cellfun(@(x) (str2num(num2str(x))),raw(:,12),'UniformOutput',false);
+apical_ROI=cellfun(@(x) (str2num(num2str(x))),raw(:,13),'UniformOutput',false);
+distal_ROI=cellfun(@(x) (str2num(num2str(x))),raw(:,14),'UniformOutput',false);
+
 fpath=raw(:,1)';
-StructureData=raw(:,10);
-BadROI=cellfun(@(x) (str2num(num2str(x))),raw(:,15),'UniformOutput',false);
-EndFrame=cell2mat(raw(:,13));
-ifmotionReject=cell2mat(raw(:,14));
-ifdirtRemov=cell2mat(raw(:,16));
+StructureData=raw(:,8);
+BadROI=cellfun(@(x) (str2num(num2str(x))),raw(:,17),'UniformOutput',false);
+EndFrame=cell2mat(raw(:,15));
+ifmotionReject=cell2mat(raw(:,16));
+ifdirtRemov=cell2mat(raw(:,18));
 Pixelsize=cell2mat(raw(:,6));
 save_figto='/Volumes/BHL_WD18TB/PP72_PlaceCellResults';
 place_bin=150; time_segment=15000; overlap=200;
 alignedMovFN = {'STA_Mat_SS','STA_Mat_CS','STA_Mat_dSP'};
 bound=6;
 title_str={'Basal','Apical','Peri-Soma'};
-PlaceFieldList=cellfun(@(x) (str2num(num2str(x))),raw(:,19),'UniformOutput',false);
-PlaceFieldBin=cellfun(@(x) (str2num(num2str(x))),raw(:,20),'UniformOutput',false);
+PlaceFieldList=cellfun(@(x) (str2num(num2str(x))),raw(:,21),'UniformOutput',false);
+PlaceFieldBin=cellfun(@(x) (str2num(num2str(x))),raw(:,22),'UniformOutput',false);
 set(0,'DefaultFigureWindowStyle','docked')
-foi=[1 4 5 6 8 10 11 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27];
+%foi=[1 4 5 6 8 10 11 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27];
+foi=[1 4 5 6 8 10 11 15 16 17 18 19 20 21 22 23 24 25 26 27];
+%foi=23;
 
 %%
 
@@ -137,14 +144,14 @@ save(fullfile(fpath{f},'PC_Result.mat'),'Result','-v7.3');
 end
 
 
-%%
+%% All spike checking
 
-for f=27
+for f=23
     load(fullfile(fpath{f},'PC_Result.mat'),'Result');
     noi=setdiff([1:size(Result.ftprnt,3)],BadROI{f});
     %noi=[1:size(Result.ftprnt,3)];
     noi_dist=ismember(Result.dist_order,noi);
-    normTr=Result.normTraces./Result.F0_PCA';
+    normTr=Result.normTraces./Result.F0_PCA;
     normTr=normTr(Result.dist_order(noi_dist),:);
     SpMat=Result.spike(1,:);
     SpMat_modified=interactiveFrameCheck(normTr,SpMat,[100]);
@@ -193,6 +200,35 @@ load(fullfile(fpath{f},'PC_Result.mat'),'Result');
 backupServer(fpath{f},'BHL18TB_D2','cohen_lab/Lab/Labmembers/Byung Hun Lee/Data','PC_Result.mat')
 end
 
-    %%
+    %% check dSpike
 
+
+for f=11
+    f
+    load(fullfile(fpath{f},'PC_Result.mat'),'Result');
+    noi=setdiff([1:size(Result.ftprnt,3)],BadROI{f});
+    %noi=[1:size(Result.ftprnt,3)];
+    noi_dist=ismember(Result.dist_order,noi);
+
+    normTr_tmp=Result.normTraces-movmedian(Result.normTraces,50,2);
+    zscoreTr=normTr_tmp./get_threshold(normTr_tmp,1);
+    sp_temp=find_spike_bh(zscoreTr,5,3);
     
+    normTr=Result.normTraces./Result.F0_PCA;    
+    normTr=normTr(Result.dist_order(noi_dist),:);
+
+    ApicalROIs=ismember(Result.BranchLabel,[apical_ROI{f}, distal_ROI{f}, oblique_ROI{f}]);
+    dSpikeTmp=sum(sp_temp(ApicalROIs,:),1)>=1;
+    dSpikeTmp(find(Result.spike(1,:))'+[-1:3])=0;
+
+    SpMat_modified=interactiveFrameCheck(normTr,[Result.spike(1,:); dSpikeTmp],[40]);
+
+    % [~, STAmat]=get_STA(normTr,SpMat_modified(1,:),2,3);
+    % [~, arg]=max(STAmat,[],3);
+    Result.spike(ref_ROI{f},:)=repmat(SpMat_modified(1,:),length(ref_ROI{f}),1);
+    Result.SpClass(3,:)=SpMat_modified(2,:);
+    save(fullfile(fpath{f},'PC_Result.mat'),'Result','-v7.3');
+    load(fullfile(fpath{f},'PC_Result.mat'),'Result');
+    backupServer(fpath{f},'BHL18TB_D2','cohen_lab/Lab/Labmembers/Byung Hun Lee/Data','PC_Result.mat')
+end
+

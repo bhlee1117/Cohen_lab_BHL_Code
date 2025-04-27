@@ -1,0 +1,995 @@
+
+clear
+clc;
+cd '/Volumes/cohen_lab/Lab/Labmembers/Byung Hun Lee/Data/Statistics_Optopatch_Prism';
+[~, ~, raw] = xlsread(['/Volumes/cohen_lab/Lab/Labmembers/Byung Hun Lee/Data/' ...
+    'Prism_OptopatchData_Arrangement.xlsx'], 'Sheet1', 'C5:Q175');
+
+save_dir='/Volumes/cohen_lab/Lab/Labmembers/Byung Hun Lee/Figures/invivoPrism/FigureOptopatch';
+fpath=raw(:,1);
+Mouse=cell2mat(raw(:,2));
+NeuronInd=cell2mat(raw(:,5));
+CamType=raw(:,3);
+StructureData=raw(:,10);
+StimROI=raw(:,6);
+StimWfn=raw(:,7);
+isGoodCell=cell2mat(raw(:,11));
+PixelSize=cell2mat(cellfun(@(x) (str2num(num2str(x))),raw(:,12),'UniformOutput',false));
+refROI=cellfun(@(x) (str2num(num2str(x))),raw(:,14),'UniformOutput',false);
+maintrunkROI=cellfun(@(x) (str2num(num2str(x))),raw(:,15),'UniformOutput',false);
+place_bin=150; time_segment=15000; overlap=200;
+alignedMovFN = {'STA_Mat_SS','STA_Mat_CS','STA_Mat_dSP'};
+bound=6;
+title_str={'Basal','Apical','Peri-Soma'};
+[~, unqInd] = unique([Mouse NeuronInd] ,'row');
+set(0,'DefaultFigureWindowStyle','docked')
+
+%% Concatenate data
+StimROI_Ind={'Soma','Distal Dend','WF'};
+StimWfn_Ind={'Ramp Stim','Short Pulse'};
+CatResult=[];
+%foi_somDend=[1 22 14 18 10 26 25 32 46];
+foi_somDend=[1 22 14 18 10 26 25 32 46 47 48 43 34 37 35];
+g2=1;
+for i=unqInd(foi_somDend)' %Rois
+
+    SameCellInd=find(Mouse==Mouse(i) & NeuronInd==NeuronInd(i));
+    isSoma = ~cellfun(@isempty,strfind(StimROI(SameCellInd), StimROI_Ind{1}));
+    isDend = ~cellfun(@isempty,strfind(StimROI(SameCellInd), StimROI_Ind{2}));
+    isWF = ~cellfun(@isempty,strfind(StimROI(SameCellInd), StimROI_Ind{3}));
+    isRamp = ~cellfun(@isempty,strfind(StimWfn(SameCellInd), StimWfn_Ind{1}));
+    isSP   = ~cellfun(@isempty,strfind(StimWfn(SameCellInd), StimWfn_Ind{2}));
+
+    ROIwvf_ind=[isSoma isDend isWF isRamp isSP];
+    validind=find(sum(ROIwvf_ind,2)>=2 & isGoodCell(SameCellInd));
+    patterns = [1 0 0 1 0; 1 0 0 0 1; 0 1 0 1 0; 0 1 0 0 1; 0 0 1 1 0; 0 0 1 0 1];
+    values = [1; 2; 3; 4; 5; 6]; % 1=soma, ramp; 2=soma, sp; 3=dend, ramp; 4=dend, sp; 5=WF, ramp; 6=WF, sp;
+
+    g=ones(1,6);
+    for j=1:length(validind)
+        f2read=SameCellInd(validind(j))
+        load(fullfile(fpath{f2read},'OP_Result.mat'),'Result');
+        wfn = values(find(ismember(patterns, ROIwvf_ind(validind(j),:), 'rows')));
+        CatResult{wfn,g(wfn),g2}=Result;
+        CatResult{wfn,g(wfn),g2}.fpath=fpath{f2read};
+        CatResult{wfn,g(wfn),g2}.pixelsize=PixelSize(f2read);
+        CatResult{wfn,g(wfn),g2}.maintrunkROI=maintrunkROI{f2read};
+        %CatResult{wfn,g(wfn),g2}.F0_PCA=get_F0PCA(get_subthreshold(CatResult{wfn,g(wfn),g2}.normTraces,CatResult{wfn,g(wfn),g2}.spike(1,:),7,15));
+        %CatResult{wfn,g(wfn),g2}.F0_PCA=get_F0PCA(CatResult{wfn,g(wfn),g2}.normTraces,3);
+        g(wfn)=g(wfn)+1;
+    end
+    g2=g2+1;
+end
+
+%% Show representative neuron
+figure(20); clf; tiledlayout(2,1);
+nexttile([1 1])
+i=72;
+load(fullfile(fpath{i},'OP_Result.mat'))
+imshow2(Result.Structure',[0 4]); hold all
+plot(Result.bluePatt{1, 1}(:,1),Result.bluePatt{1, 1}(:,2),'color',[0 0.6 1])
+
+nexttile([1 1])
+i=74;
+load(fullfile(fpath{i},'OP_Result.mat'))
+imshow2(Result.Structure',[0 4]); hold all
+plot(Result.bluePatt{1, 1}(:,1),Result.bluePatt{1, 1}(:,2),'color',[0 0.6 1])
+%%
+figure(21); clf; tiledlayout(11,1); ax1=[]; ax3=[];
+dendriteaxis_bin=[-100:25:300]; cax=[-0.005 0.015]; t_show=[2.25 12.25]; cmap=[194 102 56; 118 85 157;]/256;
+for i=[73 75];
+ax1=[ax1 nexttile([2 1])];
+load(fullfile(fpath{i},'OP_Result.mat'))
+taxis=[1:size(Result.normTraces,2)]/1000;
+
+noi=maintrunkROI{i};
+noi_dist=ismember(Result.dist_order,noi);
+
+Dsign=ones(1,size(Result.interDendDist,2));
+Dsign(Result.dist_order(1:find(Result.dist_order==1)-1))=-1;
+dendaxis=Result.interDendDist(1,Result.dist_order(noi_dist)).*Dsign(Result.dist_order(noi_dist));
+
+normResidue=SeeResiduals(permute(Result.normTraces,[3 1 2]),Result.mc);
+normResidue=SeeResiduals(permute(Result.normTraces,[3 1 2]),Result.mc.^2);
+normResidue=SeeResiduals(permute(Result.normTraces,[3 1 2]),Result.mc(:,1).*Result.mc(:,end));
+normResidue=squeeze(normResidue);
+%F0PCA=get_F0PCA(normResidue);
+
+normTr=normResidue./Result.F0_PCA;
+normTr=pcafilterTrace(normTr,[1:15]);
+normTr=normTr(Result.dist_order(noi_dist),:);
+
+[~, sortind]=sort(dendaxis,'ascend');
+[Xq, Yq] = meshgrid([taxis], dendriteaxis_bin);
+normTr_interp = interp2([taxis], dendaxis(sortind), normTr(sortind,:), Xq, Yq, 'linear');
+pcolor(taxis,dendriteaxis_bin,normTr_interp);
+caxis(cax);
+colormap(turbo);
+shading flat
+cb=colorbar;
+cb.Label.String='\DeltaF/F';
+set(gca,'XTick',t_show,'XTickLabel',t_show-t_show(1))
+ylim([0 220])
+
+ax3=[ax3 nexttile([3 1])];
+plot(taxis,mean(normTr(1,:),1,'omitnan'),'color',cmap(1,:)); hold all
+plot(taxis,mean(normTr(end,:),1,'omitnan'),'color',cmap(2,:));
+ylim([-0.015 0.02])
+axis off
+end
+
+ax2=nexttile([1 1]);
+plot(taxis, Result.Blue)
+linkaxes([ax1 ax2 ax3],'x')
+xlim(t_show)
+axis off
+
+%%
+i=[73]; nTau=[-15:15];
+load(fullfile(fpath{i},'OP_Result.mat'))
+taxis=[1:size(Result.normTraces,2)]/1000;
+
+noi=[1:size(Result.ftprnt,3)];
+noi_dist=ismember(Result.dist_order,noi);
+
+Dsign=ones(1,size(Result.interDendDist,2));
+Dsign(Result.dist_order(1:find(Result.dist_order==1)-1))=-1;
+dendaxis=Result.interDendDist(1,Result.dist_order(noi_dist)).*Dsign(Result.dist_order(noi_dist));
+
+normResidue=SeeResiduals(permute(Result.normTraces,[3 1 2]),Result.mc);
+normResidue=SeeResiduals(permute(Result.normTraces,[3 1 2]),Result.mc.^2);
+normResidue=SeeResiduals(permute(Result.normTraces,[3 1 2]),Result.mc(:,1).*Result.mc(:,end));
+normResidue=squeeze(normResidue);
+%F0PCA=get_F0PCA(normResidue);
+
+normTr=normResidue./Result.F0_PCA;
+normTr=pcafilterTrace(normTr,[1:15]);
+normTr=normTr(Result.dist_order(noi_dist),:);
+
+STAtr=get_STA(normTr,Result.spike(1,:),-nTau(1),nTau(end));
+STAtr=STAtr-median(STAtr(:,1:5),2);
+figure(31); clf;
+l=plot(nTau,STAtr');
+arrayfun(@(l,c) set(l,'Color',c{:}),l,num2cell(turbo(33),2));
+
+
+%% Subthreshold figure;
+bound=6;
+STAmovie=[]; g=1; BlueonSpike=[]; BlueBoundary=[];
+for i=[73 75]
+    load(fullfile(fpath{i},'OP_Result.mat'))
+    mov=readBinMov_BHL(fpath{i});
+    mov_res= mov-mean(mov,3);
+    bkg = zeros(2, size(mov,3));
+    bkg(1,:) = linspace(-1, 1, size(mov,3));  % linear term
+    bkg(2,:) = linspace(-1, 1, size(mov,3)).^2;  % quadratic term
+    mov_res = SeeResiduals(mov_res,Result.mc);
+    mov_res = SeeResiduals(mov_res,Result.mc.^2);
+    mov_res = SeeResiduals(mov_res,Result.mc(:,1).*Result.mc(:,end));
+    mov_res= SeeResiduals(mov_res,bkg,1);
+
+    bwBlue=bwlabel(Result.Blue);
+    spvec=Result.spike;
+    [~, normTrMat spind]=get_STA(Result.normTraces(1,:),Result.spike(1,:),1,1);
+    [~, shift]=max(normTrMat,[],3);
+    spTime=spind+shift-2;
+    spvec_shifted=ind2vec(size(Result.normTraces,2),spTime,1);
+
+    BlueonSpike=[];
+    for b=1:max(bwBlue)
+        sptime_tmp=find(spvec_shifted(1,find(bwBlue==b,1)+[0:50])>0,1);
+        BlueonSpike=[BlueonSpike sptime_tmp+find(bwBlue==b,1)-1];
+    end
+
+    statmp = get_STA(tovec(mov_res),ind2vec(size(mov_res,3),BlueonSpike,1),50,50);
+    STAmovie(:,:,:,g)=toimg(statmp,size(mov_res,1),size(mov_res,2));
+
+    BlueBoundary{g}=(Result.blueDMDimg);
+    g=g+1;
+end
+
+%mov_filt=imresize(pcafilt(imresize(mov_res,1/5),3),5);
+%lag1mean=abs(sqrt(mean(mov_filt(:,:,2:end).*mov_filt(:,:,1:end-1),3)));
+mov_res_shrink=imresize(movmedian(mov_res,10,3),1/5);
+[V D]=get_eigvector(tovec(mov_res_shrink),10);
+F0img=sqrt(sum((V.^2).*D(1:10)',2));
+F0img=toimg(F0img,size(mov_res_shrink,1),size(mov_res_shrink,2));
+F0img=imresize(F0img,5);
+
+STAmov_norm=-STAmovie./F0img;
+STAmov_norm=STAmov_norm-mean(STAmov_norm(:,:,[1:15],:),3);
+
+Rfixed = imref2d([size(Result.ref_im,1) size(Result.ref_im,2)]);
+inverseTform = invert(Result.tform);
+%revertedStruct = imwarp(Result.Structure, inverseTform,'OutputView',Rfixed);
+revertedStruct= Result.Structure;
+revertedStruct(revertedStruct==0)=prctile(revertedStruct(:),30);
+revertedStruct=mat2gray(revertedStruct);
+%%
+STAmovie_normStr=[];
+crop_roi=[94 6  300  159];
+STAmov_norm_crop=STAmov_norm(crop_roi(2):crop_roi(2)+crop_roi(4),crop_roi(1):crop_roi(1)+crop_roi(3),:,:);
+revertedStruct_crop=revertedStruct(crop_roi(2):crop_roi(2)+crop_roi(4),crop_roi(1):crop_roi(1)+crop_roi(3));
+cax_sub=[0.004 0.01];
+cax_sp=[0.004 0.025];
+STAmov_norm_crop_filt=[];
+for spclass_ind=1:2
+    %STAmovie_norm{spclass_ind}=imgaussfilt3(STAnorm_sub./F_refImg,[1.5 1.5 0.1]);%.*SkelDend(bound:end-bound,bound:end-bound);
+    STAmov_norm_crop_filt{spclass_ind}=imgaussfilt(pcafilt(STAmov_norm_crop(:,:,:,spclass_ind),15),4);
+    colorSTA=grs2rgb(tovec(STAmov_norm_crop_filt{spclass_ind}),colormap('turbo'),cax_sub(1),cax_sub(2));
+    colorSTA=reshape(colorSTA,size(STAmov_norm_crop,1),size(STAmov_norm_crop,2),size(STAmov_norm_crop,3),[]);
+    colorSTA=permute(colorSTA,[1 2 4 3]);
+
+    colorSTA2=grs2rgb(tovec(STAmov_norm_crop_filt{spclass_ind}),colormap('turbo'),cax_sp(1),cax_sp(2));
+    colorSTA2=reshape(colorSTA2,size(STAmov_norm_crop,1),size(STAmov_norm_crop,2),size(STAmov_norm_crop,3),[]);
+    colorSTA2=permute(colorSTA2,[1 2 4 3]);
+
+    STAmovie_normStr{spclass_ind}=colorSTA.*revertedStruct_crop*3;%.*SkelDend(bound:end-bound,bound:end-bound);
+    STAmovie_normStr2{spclass_ind}=colorSTA2.*revertedStruct_crop*3;%.*SkelDend(bound:end-bound,bound:end-bound);
+end
+
+% sptype={'SomStim','ddStim'};
+% cax=[-0.005,0.02];
+% writeMov4d(fullfile(save_dir,['STA_dFFStructgrsrgb_ShortPulse']),[imrotate(STAmovie_normStr{1},90) imrotate(STAmovie_normStr{2},90)],[-50:50],10,1,cax)
+
+figure(21); clf; tiledlayout(1,6)
+t_show=[37:41]; t_show_spike=[51:53]; ax1=[];
+for stimROI=1:2
+subimage=grs2rgb(mean(STAmov_norm_crop_filt{stimROI}(:,:,t_show),3),colormap(turbo),cax_sub(1),cax_sub(2));
+subimage=subimage.*revertedStruct_crop*3;
+spimage=grs2rgb(max(STAmov_norm_crop_filt{stimROI}(:,:,t_show_spike),[],3),colormap(turbo),cax_sp(1),cax_sp(2));
+spimage=spimage.*revertedStruct_crop*3;
+
+ax1=[ax1 nexttile([1 1])];
+imshow2(imrotate([Result.Structure(crop_roi(2):crop_roi(2)+crop_roi(4),crop_roi(1):crop_roi(1)+crop_roi(3))],90),[]); hold all
+Blbd=bwboundaries(imrotate(BlueBoundary{stimROI}(crop_roi(2):crop_roi(2)+crop_roi(4),crop_roi(1):crop_roi(1)+crop_roi(3)),90));
+plot(Blbd{1}(:,2),Blbd{1}(:,1),'color',[0 0.6 1])
+nexttile([1 1]);
+imshow2(imrotate([subimage],90),[]); hold all
+cb=colorbar;
+cb.Ticks=[0 0.5 1];
+cb.TickLabels=[cax_sub(1) mean(cax_sub) cax_sub(2)];
+cb.Label.String = '\DeltaF/F';
+
+nexttile([1 1]);
+imshow2(imrotate([spimage],90),[]); hold all
+cb=colorbar;
+cb.Ticks=[0 0.5 1];
+cb.TickLabels=[cax_sp(1) mean(cax_sp) cax_sp(2)];
+cb.Label.String = '\DeltaF/F';
+%plot(BlueBoundary{1}(:,2),BlueBoundary{1}(:,1),'color',[0 0.5 1])
+end
+colormap(turbo);
+colormap(ax1(1),gray);
+colormap(ax1(2),gray);  
+
+%% Short pulses Soma vs Dend
+nTau=[-60:100];
+SP_STA=[]; distFromSoma=[]; SP_STA_std=[];
+dendriteaxis_bin=[-280:50:600];
+perisomadist=[-70 70]; cmap=[0 0 0; 1 0 0];  cmap_light=[0.7 0.7 0.7; 1 0.7 0.7];
+baseline_time=[1:5];
+figure(10); clf;
+tiledlayout(5,2)
+for n=5%1:size(CatResult,3)
+    cax=[];
+    for wvf=[2 4]
+        for rep=1%:size(CatResult,2)            
+            if ~isempty(CatResult{wvf,rep,n})
+            normTr=CatResult{wvf,rep,n}.normTraces./CatResult{wvf,rep,n}.F0_PCA;
+            %noi=CatResult{wvf,rep,n}.maintrunkROI; % only main trunks
+            noi=[1:size(CatResult{wvf,rep,n}.normTraces,1)]; % all ROIs
+            
+            nROI=length(noi);
+            nTime=size(CatResult{wvf,rep,n}.normTraces,2);
+            noi_dist=find(ismember(CatResult{wvf,rep,n}.dist_order,noi));
+            dOrder=CatResult{wvf,rep,n}.dist_order(noi_dist);
+            %[~, dOrder]=sort(CatResult{wvf,rep,n}.dist_order(noi_dist),'ascend');
+            som_spike=max(CatResult{wvf,rep,n}.spike([1],:),[],1);
+            
+            som_1st_spike=[]; som_2ndst_spike=[];
+            for b=1:max(bwlabel(CatResult{wvf,rep,n}.Blue))
+                pulseon=find(bwlabel(CatResult{wvf,rep,n}.Blue)==b,1);
+                pulseonVec=ind2vec(nTime,pulseon+[0:50],1);
+                spind=find((som_spike.*pulseonVec)>0);
+                if length(spind)>0
+                som_1st_spike=[som_1st_spike spind(1)];
+                end
+                if length(spind)>1
+                som_2ndst_spike=[som_2ndst_spike spind(2)];
+                end
+            end
+            som_1st_spike_vec=ind2vec(nTime,som_1st_spike,1);
+            som_2ndst_spike_vec=ind2vec(nTime,som_2ndst_spike,1);
+            
+            [~, SP_STAmat]=get_STA(normTr(dOrder,:),som_1st_spike_vec,-nTau(1),nTau(end));
+            SP_STAmat=SP_STAmat-mean(SP_STAmat(:,:,baseline_time),3,'omitnan');
+            SP_STA{wvf,n,1}(:,:,rep)=squeeze(mean(SP_STAmat,2,'omitnan'));
+            SP_STA_std{wvf,n,1}(:,:,rep)=squeeze(std(SP_STAmat,0,2,'omitnan'))/sqrt(size(SP_STAmat,2));
+            SP_STA{wvf,n,1}(:,:,rep)=SP_STA{wvf,n,1}(:,:,rep)-mean(SP_STA{wvf,n,1}(:,baseline_time,rep),2);
+
+            if ~isempty(som_2ndst_spike)
+            SP_STA{wvf,n,2}(:,:,rep)=get_STA(normTr(dOrder,:),som_2ndst_spike_vec,-nTau(1),nTau(end));
+            SP_STA{wvf,n,2}(:,:,rep)=SP_STA{wvf,n,2}(:,:,rep)-mean(SP_STA{wvf,n,2}(:,baseline_time,rep),2);
+            end
+
+            if isempty(cax)
+                cax=[prctile(tovec(SP_STA{wvf,n,1}(:,:,rep)),5) prctile(tovec(SP_STA{wvf,n,1}(:,:,rep)),99.9)];
+            end
+
+            Dsign=ones(1,size(CatResult{wvf,rep,n}.interDendDist,2));
+            Dsign(CatResult{wvf,rep,n}.dist_order(1:find(CatResult{wvf,rep,n}.dist_order==1)-1))=-1;
+            dendaxis=CatResult{wvf,rep,n}.interDendDist(1,:).*Dsign;
+            distFromSoma{wvf,n}=dendaxis*CatResult{wvf,rep,n}.pixelsize;
+            distFromSoma{wvf,n}=distFromSoma{wvf,n}(dOrder);
+
+            nexttile(2*n-2+wvf/2,[1 1])
+            imagesc(nTau,[1:size(normTr,1)],SP_STA{wvf,n,1}(:,:),cax)
+            title([num2str(n) '#,' num2str(wvf) ',' num2str(rep)])
+
+            if find(dOrder==1)~=1
+            set(gca,'YTick',[1 find(dOrder==1) length(dOrder)],'YTickLabel',num2str([min(distFromSoma{wvf,n}) 0 max((distFromSoma{wvf,n}))]',3))
+        else
+            set(gca,'YTick',[1 length(dOrder)],'YTickLabel',num2str([0 max((distFromSoma{wvf,n}))]',3))
+            end
+            end
+        end
+    end
+end
+colormap(turbo);
+figure(14); clf; tiledlayout(2,1);
+nexttile([1 1]);
+errorbar_shade(nTau,SP_STA{2,5,1}(8,:),SP_STA_std{2,5,1}(8,:),[1 0 0]); hold all
+errorbar_shade(nTau,SP_STA{2,5,1}(33,:),SP_STA_std{2,5,1}(33,:),[0.2 0 1]); hold all
+xlabel('Peri-spike time (ms)')
+ylabel('\DeltaF/F')
+nexttile([1 1]);
+errorbar_shade(nTau,SP_STA{4,5,1}(8,:),SP_STA_std{4,5,1}(8,:),[1 0 0]); hold all
+errorbar_shade(nTau,SP_STA{4,5,1}(33,:),SP_STA_std{4,5,1}(33,:),[0.2 0 1]); hold all
+xlabel('Peri-spike time (ms)')
+ylabel('\DeltaF/F')
+
+figure(11); clf; l=[]; ls=[];
+bAPamp_kink=[]; bAPamp=[];
+
+for n=1:size(SP_STA,2)
+    for wvf=[2 4]
+        for rep=1:size(SP_STA{wvf,n,1},3)
+        if ~isempty(SP_STA{wvf,n,1})
+        perisomaInd=find(distFromSoma{wvf,n}'>perisomadist(1) & distFromSoma{wvf,n}'<perisomadist(2));
+        bAPamp{n,wvf}=[distFromSoma{wvf,n}' max(SP_STA{wvf,n,1}(:,-nTau(1)+[0:3],rep),[],2)];
+        bAPamp_kink{n,wvf}=[distFromSoma{wvf,n}' max(SP_STA{wvf,n,1}(:,-nTau(1)+[0:3],rep),[],2)-mean(SP_STA{wvf,n,1}(:,-nTau(1)+[-4:-1],rep),2,'omitnan')];
+
+        bAPamp{n,wvf}(:,3)=bAPamp{n,wvf}(:,2)./mean(bAPamp{n,wvf}(perisomaInd,2));
+        bAPamp_kink{n,wvf}(:,3)=bAPamp_kink{n,wvf}(:,2)./mean(bAPamp_kink{n,wvf}(perisomaInd,2));
+        end
+        end
+    end
+end
+
+l=[];
+isdat=~cell2mat(cellfun(@isempty,bAPamp(:,[2 4]),'UniformOutput',false));
+cmap=[0 0 0; 1 0 0]; cmap_light=[0.7 0.7 0.7;1 0.7 0.7];
+M=[]; S=[]; D=[];
+for wvf=[2 4]
+show_dat=bAPamp(isdat(:,wvf/2),wvf); %change this line to show kink
+show_dat=cellfun(@(x) x(:,[1 3]),show_dat,'UniformOutput',false);
+for n=1:size(show_dat,1)
+[~, s]=sort(show_dat{n}(:,1),'ascend');
+plot(show_dat{n}(s,1),show_dat{n}(s,2),'color',cmap_light(wvf/2,:)); hold all
+end
+[M{wvf/2} S{wvf/2} D{wvf/2} ind]=binning_data(show_dat,dendriteaxis_bin);
+S{wvf/2}=S{wvf/2}./sqrt(size(show_dat,1));
+end
+for pp=1:2
+l(pp)=errorbar(D{pp}, M{pp}, S{pp}, 'o-', 'CapSize', 5,'color',cmap(pp,:),'LineWidth',2); hold all    
+end
+
+    xlabel('Distance from Soma (\mum)')
+    ylabel('Normalized bAP amplitude')
+legend(l,{'Soma Stim.','Distal dend Stim.'})
+
+
+figure(12); clf; ls=[];
+Sndamp_kink=[]; Sndamp=[];
+
+for n=1:size(SP_STA,2)
+    for wvf=[2]
+        for rep=1:size(SP_STA{wvf,n,2},3)
+        if ~isempty(SP_STA{wvf,n,2})
+        perisomaInd=find(distFromSoma{wvf,n}'>perisomadist(1) & distFromSoma{wvf,n}'<perisomadist(2));
+        Sndamp{n,wvf}=[distFromSoma{wvf,n}' max(SP_STA{wvf,n,2}(:,-nTau(1)+[0:3],rep),[],2)];
+        Sndamp_kink{n,wvf}=[distFromSoma{wvf,n}' max(SP_STA{wvf,n,2}(:,-nTau(1)+[0:3],rep),[],2)-mean(SP_STA{wvf,n,2}(:,-nTau(1)+[-4:-1],rep),2,'omitnan')];
+
+        Sndamp{n,wvf}(:,3)=Sndamp{n,wvf}(:,2)./mean(Sndamp{n,wvf}(perisomaInd,2));
+        Sndamp_kink{n,wvf}(:,3)=Sndamp_kink{n,wvf}(:,2)./mean(Sndamp_kink{n,wvf}(perisomaInd,2));
+        end
+        end
+    end
+end
+
+fst_snd_Mat=[bAPamp(:,[2]) Sndamp(:,2)];
+isdat=~cell2mat(cellfun(@isempty,fst_snd_Mat,'UniformOutput',false));
+cmap=[0 0 0; 0 0 1]; cmap_light=[0.7 0.7 0.7;0.7 0.7 1];
+M=[]; S=[]; D=[];
+for wvf=[1 2]
+show_dat=fst_snd_Mat(isdat(:,wvf),wvf);
+show_dat=cellfun(@(x) x(:,[1 3]),show_dat,'UniformOutput',false);
+for n=1:size(show_dat,1)
+[~, s]=sort(show_dat{n}(:,1),'ascend');
+plot(show_dat{n}(s,1),show_dat{n}(s,2),'color',cmap_light(wvf,:)); hold all
+end
+[M{wvf} S{wvf} D{wvf} ind]=binning_data(show_dat,dendriteaxis_bin);
+S{wvf}=S{wvf}./sqrt(size(show_dat,1));
+end
+for pp=1:2
+ls(pp)=errorbar(D{pp}, M{pp}, S{pp}, 'o-', 'CapSize', 5,'color',cmap(pp,:),'LineWidth',2); hold all    
+end
+
+    xlabel('Distance from Soma (\mum)')
+    ylabel('Normalized bAP amplitude')
+legend(ls,{'1st spike','2nd spike'})
+
+%% Pulse (Soma Stim)
+nTau=[-70:70]; nTauPeriSp=[-3:7]; nTauPeriSp2=[-3:3]; conductionspeed=170; %um/ms
+g=ones(1,4); SP_STA=[]; distFromSoma=[];
+dendriteaxis_bin=[-80:80:600];
+perisomadist=[-50 50]; cmap=[0 0 0; 1 0 0];  cmap_light=[0.7 0.7 0.7; 1 0.7 0.7];
+BlueStimN=[2 5 1;3 3 1;3 4 1;4 2 1;4 3 1;4 4 1;5 3 1;5 5 1;6 4 1;6 5 1;6 3 2;6 4 2;6 5 2;7 1 1;7 2 1;7 3 1;]; % Neuron number, Blue Pulse # , N th session
+%BlueStimN=[2 6 1;3 6 1;4 6 1;5 6 1;6 6 1;6 6 2;7 6 1];
+
+SpikeAmp=[]; SpikeAUC=[]; g=1;
+for n=1:size(BlueStimN,1) % neuron
+    cax=[];
+    Neuron=BlueStimN(n,1);
+    rep=BlueStimN(n,3);
+    BluePulseN=BlueStimN(n,2);
+    wvf=1;
+    if ~isempty(CatResult{wvf,rep,Neuron})
+
+        normTr=CatResult{wvf,rep,Neuron}.normTraces./CatResult{wvf,rep,Neuron}.F0_PCA;
+        noi=[1:size(CatResult{wvf,rep,Neuron}.normTraces,1)];
+        %noi=CatResult{wvf,rep,Neuron}.maintrunkROI;
+        normTr=normTr(noi,:);
+
+        nROI=length(noi);
+        nTime=size(CatResult{wvf,rep,Neuron}.normTraces,2);
+        [~, dOrder]=sort(CatResult{wvf,rep,Neuron}.dist_order(noi),'ascend');
+        som_spike=max(CatResult{wvf,rep,Neuron}.SpClass([1 2],:),[],1);
+        bwBlue=bwlabel(CatResult{wvf,rep,Neuron}.Blue);
+        bwBlue((bwBlue-(max(bwBlue)-5))<0)=0;
+        bwBlue=bwlabel(bwBlue>0);
+        SpikeinBlue=som_spike.*(bwBlue==BluePulseN);
+        SpikeinBlue_ind=find(SpikeinBlue);
+        BlueOnset=find(bwBlue==BluePulseN,1);
+        normTr=normTr-prctile(normTr(:,BlueOnset+[-500:-200]),30,2);
+
+        Dsign=ones(1,size(CatResult{wvf,rep,Neuron}.interDendDist,2));
+        Dsign(CatResult{wvf,rep,Neuron}.dist_order(1:find(CatResult{wvf,rep,Neuron}.dist_order==1)-1))=-1;
+        dendaxis=CatResult{wvf,rep,Neuron}.interDendDist(1,:).*Dsign;
+        dendaxis=dendaxis(noi);
+        distFromSoma=dendaxis*CatResult{wvf,rep,Neuron}.pixelsize;
+        perisomaInd=find(distFromSoma'>perisomadist(1) & distFromSoma'<perisomadist(2));
+
+        SpikeMat=permute(reshape(normTr(:,SpikeinBlue_ind'+nTauPeriSp),nROI,[],length(nTauPeriSp)),[1 3 2]); %1: ROI, 2:time, 3:event
+        SpikeAmp{g}=[[NaN SpikeinBlue_ind-BlueOnset]; [distFromSoma' squeeze(max(SpikeMat,[],2))]];
+        SpikeAmp{g}(2:end,2:end)=SpikeAmp{g}(2:end,2:end)./mean(SpikeAmp{g}(perisomaInd+1,2:end),[1]);
+        SpikeAmp{g}(2:end,:)=SpikeAmp{g}(dOrder+1,:);
+        [~, reorder_dist]=sort(SpikeAmp{g}(2:end,1),'ascend');
+        SpikeAmp{g}(2:end,:)=SpikeAmp{g}(reorder_dist+1,:);
+
+        SPdelay=round(abs(distFromSoma)/conductionspeed);
+        sub=[];
+        for r=1:size(normTr,1)
+            sp_vec=ind2vec(size(normTr,2),find(som_spike)+SPdelay(r),1,0);
+        [~, sub(r,:)]=get_subthreshold(normTr(r,:),sp_vec,2*(2+SPdelay(r))+1,15);
+        end
+        normTr_sub=normTr-sub;
+
+        SpikeMat_sub=permute(reshape(normTr(:,SpikeinBlue_ind'+nTauPeriSp),nROI,[],length(nTauPeriSp)),[1 3 2]); %1: ROI, 2:time, 3:event
+        AUC=squeeze(sum(SpikeMat_sub,2,'omitnan'));
+        % 
+        % for r=1:size(SpikeMat,1)
+        %     for s=1:size(SpikeMat,3)
+        %     AUC(r,s)=get_AUC(squeeze(SpikeMat(r,:,s)),-nTauPeriSp(1)+1+SPdelay(r),3,3);
+        %     end
+        % end
+
+        SpikeAUC{g}=[[NaN SpikeinBlue_ind-BlueOnset]; [distFromSoma' AUC]];
+        SpikeAUC{g}(2:end,2:end)=SpikeAUC{g}(2:end,2:end)./mean(SpikeAUC{g}(perisomaInd+1,2:end),[1]);
+        SpikeAUC{g}(2:end,:)=SpikeAUC{g}(dOrder+1,:);
+
+        g=g+1;
+    end
+end
+
+figure(13); clf; %tiledlayout(1,2);
+nexttile([1 1]);
+[binnedZ binX binY]=show3Dbinning(SpikeAmp, 11, 9, 'image'); hold all
+shading flat
+allX=[]; allY=[]; allZ=[];
+  for n = 1:numel(SpikeAmp)
+        timeAxis = SpikeAmp{n}(1, 2:end);
+        xAxis = SpikeAmp{n}(2:end, 1);
+        zData = SpikeAmp{n}(2:end, 2:end);
+        [X, Y] = meshgrid(timeAxis, xAxis);
+        allX = [allX; X(:)];
+        allY = [allY; Y(:)];
+        allZ = [allZ; zData(:)];
+    end
+%scatter3(allX,allY,allZ,20,[0.7 0.7 0.7],'filled')
+set(gca, 'YDir', 'reverse');
+colormap("turbo")
+%zlim([0.3 1.6])
+xlabel('Time after blue onset (ms)')
+ylabel('Distance from soma (\mum)')
+title('Normalized Spike Amplitude')
+%view(0,90)
+% 
+% nexttile([1 1]);
+% [binnedZ binX binY]=show3Dbinning(SpikeAUC, 11, 9, 'image'); hold all
+% allX=[]; allY=[]; allZ=[];
+% shading flat
+%   for n = 1:numel(SpikeAUC)
+%         timeAxis = SpikeAUC{n}(1, 2:end);
+%         xAxis = SpikeAUC{n}(2:end, 1);
+%         zData = SpikeAUC{n}(2:end, 2:end);
+%         [X, Y] = meshgrid(timeAxis, xAxis);
+%         allX = [allX; X(:)];
+%         allY = [allY; Y(:)];
+%         allZ = [allZ; zData(:)];
+%     end
+% %scatter3(allX,allY,allZ,20,[0.8 0.8 0.8],'filled')
+% set(gca, 'YDir', 'reverse');
+% colormap("turbo")
+% %zlim([0.3 1.4])
+% xlabel('Time after blue onset (ms)')
+% ylabel('Distance from soma (\mum)')
+% title('Normalized Spike AUC')
+% %view(0,90)
+%% Representative pulse/Ramp
+
+normTr=CatResult{1,1,7}.normTraces./CatResult{1,1,7}.F0_PCA;
+normTr=normTr(CatResult{1,1,7}.dist_order,:);
+normTr=pcafilterTrace(normTr,[1 2 3 4 9 10]);
+cax=[-0.005 0.02];
+
+Dsign=ones(1,size(CatResult{1,1,7}.interDendDist,2));
+Dsign(CatResult{1,1,7}.dist_order(1:find(CatResult{1,1,7}.dist_order==1)-1))=-1;
+dendaxis=CatResult{1,1,7}.interDendDist(1,:).*Dsign;
+dendaxis=dendaxis(CatResult{1,1,7}.dist_order);
+
+SomaROI=[6 10 16];
+distalROI=[29 31 33];
+dendriteaxis_bin=[-100:10:220];
+taxis=[-99:600];
+[~, sortind]=sort(dendaxis,'ascend');
+[Xq, Yq] = meshgrid([taxis], dendriteaxis_bin);
+normTr_interp = interp2([taxis], dendaxis(sortind), normTr(sortind,2901:3600), Xq, Yq, 'linear');
+Sptime=find(CatResult{1,1,7}.spike(1,2901:3600)>0)-100;
+
+figure(14); clf; tiledlayout(4,1);
+ax1=nexttile([1 1]);
+% pcolor(Xq,Yq,normTr_interp); hold all
+plot(taxis,mean(normTr(SomaROI,2901:3600),1)); hold all
+plot(taxis,mean(normTr(distalROI,2901:3600),1)); hold all
+%plot(Sptime,normTr(SomaROI,Sptime+3000),'kv','markersize',3); axis tight off; 
+%set(gca,'YDir','reverse')
+%caxis([cax])
+%shading flat
+%colormap(turbo);
+ax2=nexttile([1 1]);
+plot(taxis,CatResult{1,1,7}.Blue(2901:3600),'color',[0 0.6 1]); axis off;
+linkaxes([ax1 ax2],'x')
+
+N=7; wvf=3; rep=2;
+SomaROI=[6 10 16];
+distalROI=[29 31 33];
+normTr=CatResult{wvf,rep,N}.normTraces./CatResult{wvf,rep,N}.F0_PCA;
+normTr=normTr(CatResult{wvf,rep,N}.dist_order,:);
+%normTr=pcafilterTrace(normTr,[1 2 3 4 9 10]);
+cax=[-0.005 0.02];
+
+Dsign=ones(1,size(CatResult{wvf,rep,N}.interDendDist,2));
+Dsign(CatResult{wvf,rep,N}.dist_order(1:find(CatResult{wvf,rep,N}.dist_order==1)-1))=-1;
+dendaxis=CatResult{wvf,rep,N}.interDendDist(1,:).*Dsign;
+dendaxis=dendaxis(CatResult{wvf,rep,N}.dist_order);
+
+dendriteaxis_bin=[-100:10:220];
+taxis=[1:9999]; time_show=[1:9999];
+[~, sortind]=sort(dendaxis,'ascend');
+[Xq, Yq] = meshgrid([taxis], dendriteaxis_bin);
+normTr_interp = interp2([taxis], dendaxis(sortind), normTr(sortind,time_show), Xq, Yq, 'linear');
+Sptime=find(CatResult{wvf,rep,N}.spike(1,time_show)>0)-100;
+%figure(15); clf; tiledlayout(2,1);
+ax3=nexttile([1 1]);
+plot(taxis,mean(normTr(SomaROI,time_show),1)); hold all
+plot(taxis,mean(normTr(distalROI,time_show),1)); hold all
+%pcolor(Xq,Yq,normTr_interp); hold all
+%plot(Sptime,-110,'k','marker','v','markersize',3); axis tight off; 
+%set(gca,'YDir','reverse')
+%caxis([cax]);
+%shading flat
+%colormap(turbo);
+ax4=nexttile([1 1]);
+plot(taxis,CatResult{wvf,rep,N}.Blue(time_show),'color',[0 0.6 1]); axis off;
+linkaxes([ax4 ax3],'x')
+
+%%
+figure(15); clf;
+% show dStim, CS examples
+BlueStimN=[6 1;6 2;7 1]; scale=0.03;
+wvf=3;
+for n=1:size(BlueStimN,1) % neuron
+    cax=[];
+    Neuron=BlueStimN(n,1);
+    rep=BlueStimN(n,2);
+
+    normTr=CatResult{wvf,rep,Neuron}.normTraces./CatResult{wvf,rep,Neuron}.F0_PCA;
+    tax=[1:size(normTr,2)];
+    CStr=normTr(1,:);
+    CStr(CatResult{wvf,rep,Neuron}.CStrace==0)=NaN;
+    plot(tax,normTr(1,:)+scale*(n-1),'k');
+     hold all
+plot(tax,CStr+scale*(n-1),'color',[0.7 0 0.1]);
+end
+%% Ramp (Soma Stim)
+nTau=[-70:70]; nTauPeriSp=[-3:7]; nTauPeriSp2=[-3:3]; conductionspeed=170; %um/ms
+g=ones(1,4); SP_STA=[]; distFromSoma=[];
+dendriteaxis_bin=[-80:80:600];
+perisomadist=[-50 50]; cmap=[0 0 0; 1 0 0];  cmap_light=[0.7 0.7 0.7; 1 0.7 0.7];
+%BlueStimN=[2 5 1;3 3 1;3 4 1;4 2 1;4 3 1;4 4 1;5 3 1;5 5 1;6 4 1;6 5 1;6 3 2;6 4 2;6 5 2;7 1 1;7 2 1;7 3 1;];
+BlueStimN=[2 6 1;3 6 1;4 6 1;5 6 1;6 6 1;6 6 2;7 6 1];
+
+SpikeAmp=[]; SpikeAUC=[]; g=1;
+for n=1:size(BlueStimN,1) % neuron
+    cax=[];
+    Neuron=BlueStimN(n,1);
+    rep=BlueStimN(n,3);
+    BluePulseN=BlueStimN(n,2);
+    wvf=1;
+    if ~isempty(CatResult{wvf,rep,Neuron})
+
+        normTr=CatResult{wvf,rep,Neuron}.normTraces./CatResult{wvf,rep,Neuron}.F0_PCA;
+        %noi=[1:size(CatResult{wvf,rep,Neuron}.normTraces,1)];
+        noi=CatResult{wvf,rep,Neuron}.maintrunkROI;
+        normTr=normTr(noi,:);
+
+        nROI=length(noi);
+        nTime=size(CatResult{wvf,rep,Neuron}.normTraces,2);
+        [~, dOrder]=sort(CatResult{wvf,rep,Neuron}.dist_order(noi),'ascend');
+        som_spike=max(CatResult{wvf,rep,Neuron}.SpClass([1 2],:),[],1);
+        bwBlue=bwlabel(CatResult{wvf,rep,Neuron}.Blue);
+        bwBlue((bwBlue-(max(bwBlue)-5))<0)=0;
+        bwBlue=bwlabel(bwBlue>0);
+        SpikeinBlue=som_spike.*(bwBlue==BluePulseN);
+        SpikeinBlue_ind=find(SpikeinBlue);
+        BlueOnset=find(bwBlue==BluePulseN,1);
+        Rheobase=mean(CatResult{wvf,rep,Neuron}.Blue(SpikeinBlue_ind(1:2)));
+
+        
+        normTr=normTr-prctile(normTr(:,BlueOnset+[-500:-200]),30,2);
+
+        Dsign=ones(1,size(CatResult{wvf,rep,Neuron}.interDendDist,2));
+        Dsign(CatResult{wvf,rep,Neuron}.dist_order(1:find(CatResult{wvf,rep,Neuron}.dist_order==1)-1))=-1;
+        dendaxis=CatResult{wvf,rep,Neuron}.interDendDist(1,:).*Dsign;
+        dendaxis=dendaxis(noi);
+        distFromSoma=dendaxis*CatResult{wvf,rep,Neuron}.pixelsize;
+        perisomaInd=find(distFromSoma'>perisomadist(1) & distFromSoma'<perisomadist(2));
+
+        SpikeMat=permute(reshape(normTr(:,SpikeinBlue_ind'+nTauPeriSp),nROI,[],length(nTauPeriSp)),[1 3 2]); %1: ROI, 2:time, 3:event
+        %SpikeAmp{g}=[[NaN SpikeinBlue_ind-BlueOnset]; [distFromSoma' squeeze(max(SpikeMat,[],2))]]; 
+        RheoBase_trace=CatResult{wvf,rep,Neuron}.Blue(SpikeinBlue_ind)/Rheobase;
+        SpikeAmp{g}=[[NaN RheoBase_trace]; [distFromSoma' squeeze(max(SpikeMat,[],2))]]; %RheoBase
+        SpikeAmp{g}(2:end,2:end)=SpikeAmp{g}(2:end,2:end)./mean(SpikeAmp{g}(perisomaInd+1,2:end),[1]);
+        SpikeAmp{g}(2:end,:)=SpikeAmp{g}(dOrder+1,:);
+        [~, reorder_dist]=sort(SpikeAmp{g}(2:end,1),'ascend');
+        SpikeAmp{g}(2:end,:)=SpikeAmp{g}(reorder_dist,:);
+
+        SPdelay=round(abs(distFromSoma)/conductionspeed);
+        sub=[];
+        for r=1:size(normTr,1)
+            sp_vec=ind2vec(size(normTr,2),find(som_spike)+SPdelay(r),1,0);
+        [~, sub(r,:)]=get_subthreshold(normTr(r,:),sp_vec,2*(2+SPdelay(r))+1,15);
+        end
+        normTr_sub=normTr-sub;
+
+        SpikeMat_sub=permute(reshape(normTr_sub(:,SpikeinBlue_ind'+nTauPeriSp),nROI,[],length(nTauPeriSp)),[1 3 2]); %1: ROI, 2:time, 3:event
+        AUC=squeeze(sum(SpikeMat_sub,2,'omitnan'));
+        % 
+        % for r=1:size(SpikeMat,1)
+        %     for s=1:size(SpikeMat,3)
+        %     AUC(r,s)=get_AUC(squeeze(SpikeMat(r,:,s)),-nTauPeriSp(1)+1+SPdelay(r),3,3);
+        %     end
+        % end
+
+        %SpikeAUC{g}=[[NaN SpikeinBlue_ind-BlueOnset]; [distFromSoma' AUC]];
+        SpikeAUC{g}=[[NaN RheoBase_trace]; [distFromSoma' AUC]]; %RheoBase
+        SpikeAUC{g}(2:end,2:end)=SpikeAUC{g}(2:end,2:end)./mean(SpikeAUC{g}(perisomaInd+1,2:end),[1]);
+        SpikeAUC{g}(2:end,:)=SpikeAUC{g}(dOrder+1,:);
+
+        g=g+1;
+    end
+end
+
+figure(14); clf; %tiledlayout(1,2);
+nexttile([1 1]);
+[binnedZ binX binY]=show3Dbinning(SpikeAmp, 11, 8, 'image'); hold all
+shading flat
+allX=[]; allY=[]; allZ=[];
+  for n = 1:numel(SpikeAmp)
+        timeAxis = SpikeAmp{n}(1, 2:end);
+        xAxis = SpikeAmp{n}(2:end, 1);
+        zData = SpikeAmp{n}(2:end, 2:end);
+        [X, Y] = meshgrid(timeAxis, xAxis);
+        allX = [allX; X(:)];
+        allY = [allY; Y(:)];
+        allZ = [allZ; zData(:)];
+    end
+%scatter3(allX,allY,allZ,20,[0.7 0.7 0.7],'filled')
+set(gca, 'YDir', 'reverse');
+colormap("turbo")
+%zlim([0.3 1.6])
+xlabel('Optical Rheobase')
+ylabel('Distance from soma (\mum)')
+title('Normalized Spike Amplitude')
+%view(0,90)
+% 
+% nexttile([1 1]);
+% [binnedZ binX binY]=show3Dbinning(SpikeAUC, 11, 8, 'image'); hold all
+% shading flat
+% allX=[]; allY=[]; allZ=[];
+%   for n = 1:numel(SpikeAUC)
+%         timeAxis = SpikeAUC{n}(1, 2:end);
+%         xAxis = SpikeAUC{n}(2:end, 1);
+%         zData = SpikeAUC{n}(2:end, 2:end);
+%         [X, Y] = meshgrid(timeAxis, xAxis);
+%         allX = [allX; X(:)];
+%         allY = [allY; Y(:)];
+%         allZ = [allZ; zData(:)];
+%     end
+% %scatter3(allX,allY,allZ,20,[0.8 0.8 0.8],'filled')
+% set(gca, 'YDir', 'reverse');
+% colormap("turbo")
+% %zlim([0.3 1.4])
+% xlabel('Optical Rheobase')
+% ylabel('Distance from soma (\mum)')
+% title('Normalized Spike AUC')
+% %view(0,90)
+
+% %% Pulse (WF Stim)
+% nTau=[-70:70]; nTauPeriSp=[-3:7]; nTauPeriSp2=[-3:3]; conductionspeed=170; %um/ms
+% g=ones(1,4); SP_STA=[]; distFromSoma=[];
+% dendriteaxis_bin=[-80:80:600];
+% perisomadist=[-50 50]; cmap=[0 0 0; 1 0 0];  cmap_light=[0.7 0.7 0.7; 1 0.7 0.7];
+% BlueStimN=[10 3 1;10 4 1;10 5 1;11 4 1;11 5 1;12 3 1;12 4 1;12 5 1;13 4 1;13 5 1; 14 5 1;15 4 1;15 5 1]; % Neuron number, Blue Pulse # , N th session
+% %BlueStimN=[2 6 1;3 6 1;4 6 1;5 6 1;6 6 1;6 6 2;7 6 1]; 
+% 
+% SpikeAmp=[]; SpikeAUC=[]; g=1;
+% for n=1:size(BlueStimN,1) % neuron
+%     cax=[];
+%     Neuron=BlueStimN(n,1);
+%     rep=BlueStimN(n,3);
+%     BluePulseN=BlueStimN(n,2);
+%     wvf=5;
+%     if ~isempty(CatResult{wvf,rep,Neuron})
+% 
+%         normTr=CatResult{wvf,rep,Neuron}.normTraces./CatResult{wvf,rep,Neuron}.F0_PCA;
+%         %noi=[1:size(CatResult{wvf,rep,Neuron}.normTraces,1)];
+%         noi=CatResult{wvf,rep,Neuron}.maintrunkROI;
+%         normTr=normTr(noi,:);
+% 
+%         nROI=length(noi);
+%         nTime=size(CatResult{wvf,rep,Neuron}.normTraces,2);
+%         [~, dOrder]=sort(CatResult{wvf,rep,Neuron}.dist_order(noi),'ascend');
+%         som_spike=max(CatResult{wvf,rep,Neuron}.SpClass([1 2],:),[],1);
+%         bwBlue=bwlabel(CatResult{wvf,rep,Neuron}.Blue);
+%         bwBlue((bwBlue-(max(bwBlue)-5))<0)=0;
+%         bwBlue=bwlabel(bwBlue>0);
+%         SpikeinBlue=som_spike.*(bwBlue==BluePulseN);
+%         SpikeinBlue_ind=find(SpikeinBlue);
+%         BlueOnset=find(bwBlue==BluePulseN,1);
+%         normTr=normTr-prctile(normTr(:,BlueOnset+[-500:-200]),30,2);
+% 
+%         Dsign=ones(1,size(CatResult{wvf,rep,Neuron}.interDendDist,2));
+%         Dsign(CatResult{wvf,rep,Neuron}.dist_order(1:find(CatResult{wvf,rep,Neuron}.dist_order==1)-1))=-1;
+%         dendaxis=CatResult{wvf,rep,Neuron}.interDendDist(1,:).*Dsign;
+%         dendaxis=dendaxis(noi);
+%         distFromSoma=dendaxis*CatResult{wvf,rep,Neuron}.pixelsize;
+%         perisomaInd=find(distFromSoma'>perisomadist(1) & distFromSoma'<perisomadist(2));
+% 
+%         SpikeMat=permute(reshape(normTr(:,SpikeinBlue_ind'+nTauPeriSp),nROI,[],length(nTauPeriSp)),[1 3 2]); %1: ROI, 2:time, 3:event
+%         SpikeAmp{g}=[[NaN SpikeinBlue_ind-BlueOnset]; [distFromSoma' squeeze(max(SpikeMat,[],2))]];
+%         SpikeAmp{g}(2:end,2:end)=SpikeAmp{g}(2:end,2:end)./mean(SpikeAmp{g}(perisomaInd+1,2:end),[1]);
+%         SpikeAmp{g}(2:end,:)=SpikeAmp{g}(dOrder+1,:);
+% 
+%         SPdelay=round(abs(distFromSoma)/conductionspeed);
+%         sub=[];
+%         for r=1:size(normTr,1)
+%             sp_vec=ind2vec(size(normTr,2),find(som_spike)+SPdelay(r),1,0);
+%         [~, sub(r,:)]=get_subthreshold(normTr(r,:),sp_vec,2*(2+SPdelay(r))+1,15);
+%         end
+%         normTr_sub=normTr-sub;
+% 
+%         SpikeMat_sub=permute(reshape(normTr_sub(:,SpikeinBlue_ind'+nTauPeriSp),nROI,[],length(nTauPeriSp)),[1 3 2]); %1: ROI, 2:time, 3:event
+%         AUC=squeeze(sum(SpikeMat_sub,2,'omitnan'));
+%         % 
+%         % for r=1:size(SpikeMat,1)
+%         %     for s=1:size(SpikeMat,3)
+%         %     AUC(r,s)=get_AUC(squeeze(SpikeMat(r,:,s)),-nTauPeriSp(1)+1+SPdelay(r),3,3);
+%         %     end
+%         % end
+% 
+%         SpikeAUC{g}=[[NaN SpikeinBlue_ind-BlueOnset]; [distFromSoma' AUC]];
+%         SpikeAUC{g}(2:end,2:end)=SpikeAUC{g}(2:end,2:end)./mean(SpikeAUC{g}(perisomaInd+1,2:end),[1]);
+%         SpikeAUC{g}(2:end,:)=SpikeAUC{g}(dOrder+1,:);
+% 
+%         g=g+1;
+%     end
+% end
+% 
+% figure(13); clf; tiledlayout(1,2);
+% nexttile([1 1]);
+% [binnedZ binX binY]=show3Dbinning(SpikeAmp, 9, 6, 'image'); hold all
+% allX=[]; allY=[]; allZ=[];
+%   for n = 1:numel(SpikeAmp)
+%         timeAxis = SpikeAmp{n}(1, 2:end);
+%         xAxis = SpikeAmp{n}(2:end, 1);
+%         zData = SpikeAmp{n}(2:end, 2:end);
+%         [X, Y] = meshgrid(timeAxis, xAxis);
+%         allX = [allX; X(:)];
+%         allY = [allY; Y(:)];
+%         allZ = [allZ; zData(:)];
+%     end
+% scatter3(allX,allY,allZ,20,[0.7 0.7 0.7],'filled')
+% set(gca, 'YDir', 'reverse');
+% colormap("turbo")
+% %zlim([0.3 1.6])
+% xlabel('Time after blue onset (ms)')
+% ylabel('Distance from soma (\mum)')
+% title('Normalized Spike Amplitude')
+% %view(0,90)
+% 
+% nexttile([1 1]);
+% [binnedZ binX binY]=show3Dbinning(SpikeAUC, 9, 7, 'image'); hold all
+% allX=[]; allY=[]; allZ=[];
+%   for n = 1:numel(SpikeAUC)
+%         timeAxis = SpikeAUC{n}(1, 2:end);
+%         xAxis = SpikeAUC{n}(2:end, 1);
+%         zData = SpikeAUC{n}(2:end, 2:end);
+%         [X, Y] = meshgrid(timeAxis, xAxis);
+%         allX = [allX; X(:)];
+%         allY = [allY; Y(:)];
+%         allZ = [allZ; zData(:)];
+%     end
+% %scatter3(allX,allY,allZ,20,[0.8 0.8 0.8],'filled')
+% set(gca, 'YDir', 'reverse');
+% colormap("turbo")
+% %zlim([0.3 1.4])
+% xlabel('Time after blue onset (ms)')
+% ylabel('Distance from soma (\mum)')
+% title('Normalized Spike AUC')
+% %view(0,90)
+
+% %% Ramp (WF Stim)
+% nTau=[-70:70]; nTauPeriSp=[-2:3]; nTauPeriSp2=[-3:3]; conductionspeed=170; %um/ms
+% g=ones(1,4); SP_STA=[]; distFromSoma=[];
+% dendriteaxis_bin=[-80:80:600];
+% perisomadist=[-10 10]; cmap=[0 0 0; 1 0 0];  cmap_light=[0.7 0.7 0.7; 1 0.7 0.7];
+% BlueStimN=[10 6 1;12 6 1;13 6 1;14 6 1];
+% 
+% SpikeAmp=[]; SpikeAUC=[]; g=1;
+% for n=1:size(BlueStimN,1) % neuron
+%     cax=[];
+%     Neuron=BlueStimN(n,1);
+%     rep=BlueStimN(n,3);
+%     BluePulseN=BlueStimN(n,2);
+%     wvf=5;
+%     if ~isempty(CatResult{wvf,rep,Neuron})
+% 
+%         normTr=CatResult{wvf,rep,Neuron}.normTraces./CatResult{wvf,rep,Neuron}.F0_PCA;
+%         %noi=[1:size(CatResult{wvf,rep,Neuron}.normTraces,1)];
+%         noi=CatResult{wvf,rep,Neuron}.maintrunkROI;
+%         normTr=normTr(noi,:);
+% 
+%         nROI=length(noi);
+%         nTime=size(CatResult{wvf,rep,Neuron}.normTraces,2);
+%         [~, dOrder]=sort(CatResult{wvf,rep,Neuron}.dist_order(noi),'ascend');
+%         som_spike=max(CatResult{wvf,rep,Neuron}.SpClass([1 2],:),[],1);
+%         bwBlue=bwlabel(CatResult{wvf,rep,Neuron}.Blue);
+%         bwBlue((bwBlue-(max(bwBlue)-5))<0)=0;
+%         bwBlue=bwlabel(bwBlue>0);
+%         SpikeinBlue=som_spike.*(bwBlue==BluePulseN);
+%         SpikeinBlue_ind=find(SpikeinBlue);
+%         BlueOnset=find(bwBlue==BluePulseN,1);
+%         Rheobase=mean(CatResult{wvf,rep,Neuron}.Blue(SpikeinBlue_ind(1:2)));
+% 
+%         normTr=normTr-prctile(normTr(:,BlueOnset+[-500:-200]),30,2);
+% 
+%         Dsign=ones(1,size(CatResult{wvf,rep,Neuron}.interDendDist,2));
+%         Dsign(CatResult{wvf,rep,Neuron}.dist_order(1:find(CatResult{wvf,rep,Neuron}.dist_order==1)-1))=-1;
+%         dendaxis=CatResult{wvf,rep,Neuron}.interDendDist(1,:).*Dsign;
+%         dendaxis=dendaxis(noi);
+%         distFromSoma=dendaxis*CatResult{wvf,rep,Neuron}.pixelsize;
+%         perisomaInd=find(distFromSoma'>perisomadist(1) & distFromSoma'<perisomadist(2));
+% 
+%         SpikeMat=permute(reshape(normTr(:,SpikeinBlue_ind'+nTauPeriSp),nROI,[],length(nTauPeriSp)),[1 3 2]); %1: ROI, 2:time, 3:event
+%         %SpikeAmp{g}=[[NaN SpikeinBlue_ind-BlueOnset]; [distFromSoma' squeeze(max(SpikeMat,[],2))]]; 
+%         RheoBase_trace=CatResult{wvf,rep,Neuron}.Blue(SpikeinBlue_ind)/Rheobase;
+%         SpikeAmp{g}=[[NaN RheoBase_trace]; [distFromSoma' squeeze(max(SpikeMat,[],2))]]; %RheoBase
+%         SpikeAmp{g}(2:end,2:end)=SpikeAmp{g}(2:end,2:end)./mean(SpikeAmp{g}(perisomaInd+1,2:end),[1]);
+%         %SpikeAmp{g}(2:end,:)=SpikeAmp{g}(dOrder+1,:);
+% 
+%         SPdelay=round(abs(distFromSoma)/conductionspeed);
+%         sub=[];
+%         for r=1:size(normTr,1)
+%             sp_vec=ind2vec(size(normTr,2),find(som_spike)+SPdelay(r),1,0);
+%         [~, sub(r,:)]=get_subthreshold(normTr(r,:),sp_vec,2*(2+SPdelay(r))+1,15);
+%         end
+%         normTr_sub=normTr-sub;
+% 
+%         SpikeMat_sub=permute(reshape(normTr_sub(:,SpikeinBlue_ind'+nTauPeriSp),nROI,[],length(nTauPeriSp)),[1 3 2]); %1: ROI, 2:time, 3:event
+%         AUC=squeeze(sum(SpikeMat_sub,2,'omitnan'));
+%         % 
+%         % for r=1:size(SpikeMat,1)
+%         %     for s=1:size(SpikeMat,3)
+%         %     AUC(r,s)=get_AUC(squeeze(SpikeMat(r,:,s)),-nTauPeriSp(1)+1+SPdelay(r),3,3);
+%         %     end
+%         % end
+% 
+%         %SpikeAUC{g}=[[NaN SpikeinBlue_ind-BlueOnset]; [distFromSoma' AUC]];
+%         SpikeAUC{g}=[[NaN RheoBase_trace]; [distFromSoma' AUC]]; %RheoBase
+%         SpikeAUC{g}(2:end,2:end)=SpikeAUC{g}(2:end,2:end)./mean(SpikeAUC{g}(perisomaInd+1,2:end),[1]);
+%         %SpikeAUC{g}(2:end,:)=SpikeAUC{g}(dOrder+1,:);
+% 
+%         g=g+1;
+%     end
+% end
+% 
+% figure(14); clf; tiledlayout(1,2);
+% nexttile([1 1]);
+% [binnedZ binX binY]=show3Dbinning(SpikeAmp, 11, 8, 'image'); hold all
+% allX=[]; allY=[]; allZ=[];
+%   for n = 1:numel(SpikeAmp)
+%         timeAxis = SpikeAmp{n}(1, 2:end);
+%         xAxis = SpikeAmp{n}(2:end, 1);
+%         zData = SpikeAmp{n}(2:end, 2:end);
+%         [X, Y] = meshgrid(timeAxis, xAxis);
+%         allX = [allX; X(:)];
+%         allY = [allY; Y(:)];
+%         allZ = [allZ; zData(:)];
+%     end
+% %scatter3(allX,allY,allZ,20,[0.7 0.7 0.7],'filled')
+% set(gca, 'YDir', 'reverse');
+% colormap("turbo")
+% %zlim([0.3 1.6])
+% xlabel('Optical Rheobase')
+% ylabel('Distance from soma (\mum)')
+% title('Normalized Spike Amplitude')
+% %view(0,90)
+% 
+% nexttile([1 1]);
+% [binnedZ binX binY]=show3Dbinning(SpikeAUC, 11, 8, 'image'); hold all
+% allX=[]; allY=[]; allZ=[];
+%   for n = 1:numel(SpikeAUC)
+%         timeAxis = SpikeAUC{n}(1, 2:end);
+%         xAxis = SpikeAUC{n}(2:end, 1);
+%         zData = SpikeAUC{n}(2:end, 2:end);
+%         [X, Y] = meshgrid(timeAxis, xAxis);
+%         allX = [allX; X(:)];
+%         allY = [allY; Y(:)];
+%         allZ = [allZ; zData(:)];
+%     end
+% %scatter3(allX,allY,allZ,20,[0.8 0.8 0.8],'filled')
+% set(gca, 'YDir', 'reverse');
+% colormap("turbo")
+% %zlim([0.3 1.4])
+% xlabel('Optical Rheobase')
+% ylabel('Distance from soma (\mum)')
+% title('Normalized Spike AUC')
+% %view(0,90)
+
+%% Dendrite targeted stimulation
+
+
+

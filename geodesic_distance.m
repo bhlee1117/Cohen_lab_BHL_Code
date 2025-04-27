@@ -55,7 +55,7 @@ SE = strel("disk",r);
 addimg=imdilate(addimg,SE);
 bwimg=max(cat(3,bwimg,addimg),[],3);
 bwss=bwlabel(bwimg);
-r=r+1;
+r=r+3;
     end
 end
 bwimg=bwimg>0;

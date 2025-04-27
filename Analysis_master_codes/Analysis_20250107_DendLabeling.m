@@ -108,7 +108,7 @@ end
 corrMat=get_corrMat(sub_ch{1},sub_ch{2},Goodframe);
 
 dendmask=[];
-
+figure(121); clf;
 for d=1:max(Result.BranchLabel)
     dendmask(:,:,d)=max(Result.ftprnt(:,:,find(Result.BranchLabel==d)),[],3);
 end

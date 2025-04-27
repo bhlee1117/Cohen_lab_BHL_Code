@@ -1,0 +1,623 @@
+clear
+clc;
+[~, ~, raw] = xlsread(['/Volumes/cohen_lab/Lab/Labmembers' ...
+    '/Byung Hun Lee/Data/PrismPCdata_Arrangement.xlsx'], 'Sheet1', 'C5:AA31');
+
+ref_ROI=cellfun(@(x) (str2num(num2str(x))),raw(:,9),'UniformOutput',false);
+
+oblique_ROI=cellfun(@(x) (str2num(num2str(x))),raw(:,10),'UniformOutput',false);
+PeriSoma_ROI=cellfun(@(x) (str2num(num2str(x))),raw(:,11),'UniformOutput',false);
+basal_ROI=cellfun(@(x) (str2num(num2str(x))),raw(:,12),'UniformOutput',false);
+apical_ROI=cellfun(@(x) (str2num(num2str(x))),raw(:,13),'UniformOutput',false);
+distal_ROI=cellfun(@(x) (str2num(num2str(x))),raw(:,14),'UniformOutput',false);
+
+fpath=raw(:,1)';
+StructureData=raw(:,8);
+BadROI=cellfun(@(x) (str2num(num2str(x))),raw(:,17),'UniformOutput',false);
+EndFrame=cell2mat(raw(:,15));
+ifmotionReject=cell2mat(raw(:,16));
+ifdirtRemov=cell2mat(raw(:,18));
+NcomponentGlobal=cell2mat(cellfun(@(x) (str2num(num2str(x))),raw(:,25),'UniformOutput',false));
+Pixelsize=cell2mat(raw(:,6));
+save_figto='/Volumes/BHL_WD18TB/PP72_PlaceCellResults';
+place_bin=150; time_segment=15000; overlap=200;
+alignedMovFN = {'STA_Mat_SS','STA_Mat_CS','STA_Mat_dSP'};
+bound=6;
+title_str={'Basal','Apical','Peri-Soma'};
+PlaceFieldList=cellfun(@(x) (str2num(num2str(x))),raw(:,21),'UniformOutput',false);
+PlaceFieldBin=cellfun(@(x) (str2num(num2str(x))),raw(:,22),'UniformOutput',false);
+set(0,'DefaultFigureWindowStyle','docked')
+%foi=[1 4 5 6 8 10 11 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27];
+foi=[1 4 5 6 8 10 11 15 16 17 18 19 20 21 22 23 24 25 26 27];
+%foi=23;
+%%
+nTau={[-200:50],[-200:50],[-200:50]}; %SS, CS, Brst
+clear SpikeInd MatSpike MatSTA MatBlue MatCStrace MatSub SpikeList NormalizedTrace_ch NormalizedTrace_dirt SpikeIndBlueOff Dist_order allSpikeMat noi interDendDist noi_dist derivSub LapSubSilent
+clear Subthreshold Subthreshold_ch dendaxis BrstOrder roisD roisD_order
+
+for f=foi
+    f
+    load(fullfile(fpath{f},'PC_Result.mat'),'Result') %load traces
+    if ~isempty(find(ismember(Result.spike(1,:),Result.SpClass(1,:))==0)) | ~isempty(find(ismember(Result.spike(1,:),Result.SpClass(2,:))==0))
+        error('Spclass and spike mat is not matching');
+    end
+
+    Result.spike=Result.spike>0; Result.SpClass=Result.SpClass>0;
+    Dist_order{f}=Result.BrancDist_order;
+    interDendDist{f}=Result.interDendDist*Pixelsize(f);
+    Dsign=ones(1,size(interDendDist{f},1));
+    Dsign(Dist_order{f}(1:find(Dist_order{f}==1)-1))=-1;
+    perisomaROI=setdiff(find(interDendDist{f}(1,:)<40),BadROI{f}); % ROIs < 40 um from soma
+    noi=setdiff([1:size(Result.ftprnt,3)],BadROI{f});
+    noi_dist{f}=ismember(Dist_order{f},noi);
+    roisD(f,:)={basal_ROI{f},PeriSoma_ROI{f},apical_ROI{f},oblique_ROI{f},distal_ROI{f}}; %set the ROIs
+    for dClass=1:size(roisD,2)
+        g=1;
+        if ~isnan(roisD{f,dClass})
+      for d=roisD{f,dClass}
+          dind=setdiff(find(Result.BranchLabel==d),BadROI{f});
+          roisD_order{f}{dClass,g}=ismember(Dist_order{f}(noi_dist{f}),dind)*d;
+          g=g+1;
+      end
+        end
+    end
+
+    dendaxis{f}=interDendDist{f}(1,:).*Dsign;
+    dendaxis{f}=dendaxis{f}(Dist_order{f}(noi_dist{f}));
+
+    NormalizedTrace=(Result.normTraces)./Result.F0_PCA;
+    bAP_STA=get_STA(NormalizedTrace, Result.spike(1,:), 30, 20);
+    bAP_STA=bAP_STA-prctile(bAP_STA,20,2);
+    SpikeHeight=max(mean(bAP_STA(perisomaROI,:),1),[],2);
+
+    NormalizedTrace=NormalizedTrace/SpikeHeight;
+    NormalizedTrace_dirt{f,1}=NormalizedTrace;
+    NormalizedTrace_dirt{f,1}(:,Result.motionReject>0)=NaN;
+    NormalizedTrace_ch(f,:)=cellfun(@(x) x./Result.F0_PCA,Result.norm_trace_check,'UniformOutput',false);
+    NormalizedTrace_ch{f,1}(:,Result.motionReject>0)=NaN; NormalizedTrace_ch{f,2}(:,Result.motionReject>0)=NaN;
+    if ifdirtRemov(f)
+        NormalizedTrace_dirt{f,1}(Result.dirtTrace>0)=NaN;
+        NormalizedTrace_ch{f,1}(Result.dirtTrace>0)=NaN; NormalizedTrace_ch{f,2}(Result.dirtTrace>0)=NaN;
+    end
+    NormalizedTrace_dirt{f,1}=NormalizedTrace_dirt{f,1}(Dist_order{f}(noi_dist{f},:),:);
+    NormalizedTrace_ch{f,1}=NormalizedTrace_ch{f,1}(Dist_order{f}(noi_dist{f},:),:);
+    NormalizedTrace_ch{f,2}=NormalizedTrace_ch{f,2}(Dist_order{f}(noi_dist{f},:),:);
+
+    Subthreshold{f}=get_subthreshold(NormalizedTrace_dirt{f},max(Result.spike(1,:),[],1)>0,7,17);
+    Subthreshold{f}(isnan(NormalizedTrace_dirt{f}))=NaN;
+
+    Subthreshold_ch{f,1}=get_subthreshold(NormalizedTrace_ch{f,1},max(Result.spike(1,:),[],1)>0,7,17);
+    Subthreshold_ch{f,1}(isnan(NormalizedTrace_dirt{f}))=NaN;
+
+    Subthreshold_ch{f,2}=get_subthreshold(NormalizedTrace_ch{f,2},max(Result.spike(1,:),[],1)>0,7,17);
+    Subthreshold_ch{f,2}(isnan(NormalizedTrace_dirt{f}))=NaN;
+
+    % spike class, SS:1, CS:2, dSP:3, BS:4
+    ss_time=find(Result.SpClass(1,:)); % BS is subclass of SS
+    brst=bwlabel((ss_time(2:end)-ss_time(1:end-1))<=20); % SSs that have an ISI shorter than 20 ms are BS.
+    SpClass=Result.SpClass; BS_trace=zeros(1,size(Result.traces,2));
+    for b=1:max(brst)
+        bwn=find(brst==b);
+        SpClass(1,ss_time([bwn bwn(end)+1]))=0;
+        SpClass(4,ss_time([bwn(1)]))=1;
+        BS_trace(1,[ss_time(bwn): ss_time(bwn(end)+1)])=b;
+    end
+    SpClass=SpClass([1 2 4],:);
+    Classvec = get_Class2index(SpClass);
+    SpikeClassvec=Classvec.*Result.spike(1,:);
+
+    BrstOrder = get_BurstOrder(Result.spike(1,:), 20) - SpClass(1,:);
+    BrstOrder(find(SpClass(3,:)))=1;
+    ComplexSpikeOrder=get_spikeOrder(Result.CStrace,Result.spike(1,:));
+
+    for stype=1:3
+        s_list=find(SpClass(stype,:)>0);
+        [~, MatSpClass{f,stype}]=get_STA(SpikeClassvec,SpClass(stype,:),-nTau{stype}(1),nTau{stype}(end));
+        [~, MatSpike{f,stype}]=get_STA(Result.spike(1,:),SpClass(stype,:),-nTau{stype}(1),nTau{stype}(end));
+        [~, MatBlue{f,stype}]=get_STA(Result.Blue,SpClass(stype,:),-nTau{stype}(1),nTau{stype}(end));
+        [~, MatCStrace{f,stype}]=get_STA(Result.CStrace,SpClass(stype,:),-nTau{stype}(1),nTau{stype}(end));
+        [~, MatSub{f,stype}]=get_STA(Subthreshold{f},SpClass(stype,:),-nTau{stype}(1),nTau{stype}(end));
+        [~, MatOrder{f,stype}]=get_STA(BrstOrder,SpClass(stype,:),-nTau{stype}(1),nTau{stype}(end));
+
+        switch stype
+            case 1
+                [~, MatSTA{f,stype,1} sptime]=get_STA(NormalizedTrace_dirt{f,1},SpClass(stype,:),-nTau{stype}(1),nTau{stype}(end));
+                SpikeList{f,stype,1}=ind2vec(size(NormalizedTrace_dirt{f},2),sptime,1);
+            case 2
+                for ns=1:5
+                    [~, MatSTA{f,stype,ns} sptime]=get_STA(NormalizedTrace_dirt{f,1},(ComplexSpikeOrder)==ns,-nTau{stype}(1),nTau{stype}(end));
+                    SpikeList{f,stype,ns}=ind2vec(size(NormalizedTrace_dirt{f},2),sptime,1);
+                end
+            case 3
+                for ns=1:5
+                    [~, MatSTA{f,stype,ns} sptime]=get_STA(NormalizedTrace_dirt{f,1},(BrstOrder.*(1-Result.CStrace))==ns,-nTau{stype}(1),nTau{stype}(end));
+                    SpikeList{f,stype,ns}=ind2vec(size(NormalizedTrace_dirt{f},2),sptime,1);
+                end
+        end
+    end
+
+    allSpikeMat{f}=double(Result.spike);
+    allSpikeMat{f}(:,Result.motionReject>0)=NaN;
+    if ifdirtRemov(f)
+        allSpikeMat{f}(Result.dirtTrace>0)=NaN;
+    end
+    allSpikeClassMat{f}=SpClass;
+
+    BlueStim{f}=Result.Blue;
+    VRtrack{f}=Result.VR;
+    CStrace{f}=Result.CStrace;
+    Ftprnts{f}=Result.ftprnt;
+    AvgImg{f}=Result.ref_im;
+
+    % LapFR{f}=PlaceTrigger_average(double(allSpikeMat{f}(1,:)==1),150,VRtrack{f},0.002,115); %total trace
+    % LapV{f}=PlaceTrigger_average(NormalizedTrace_dirt{f},150,VRtrack{f},0.002,115); %total trace
+    % LapSub{f}=PlaceTrigger_average(Subthreshold{f},150,VRtrack{f},0.002,115); %total trace
+    % 
+    % subthreshold_silent=Subthreshold{f};
+    % subthreshold_silent(:,unique(get_perispikeIndex(allSpikeMat{f}(1,:),[-8:30])))=NaN;
+    % LapSubSilent{f}=PlaceTrigger_average(subthreshold_silent,150,VRtrack{f},0.002,115); %total trace
+end
+
+MatSTA=cellfun(@(x) permute(x,[1 3 2]),MatSTA,'UniformOutput',false);
+MatSpClass=cellfun(@(x) permute(x,[1 3 2]),MatSpClass,'UniformOutput',false);
+MatSpike=cellfun(@(x) permute(x,[1 3 2]),MatSpike,'UniformOutput',false);
+MatBlue=cellfun(@(x) permute(x,[1 3 2]),MatBlue,'UniformOutput',false);
+MatSub=cellfun(@(x) permute(x,[1 3 2]),MatSub,'UniformOutput',false);
+MatOrder=cellfun(@(x) permute(x,[1 3 2]),MatOrder,'UniformOutput',false);
+MatCStrace=cellfun(@(x) permute(x,[1 3 2]),MatCStrace,'UniformOutput',false);
+%% show eigenvectors and correlation matrix
+
+% Scan local activity
+dFimg=[]; g=1;
+pc_ind=[7 7 3];
+f_list=[17 18 26];
+for f2=1:3
+f=f_list(f2);
+load(fullfile(fpath{f},'PC_Result.mat'),'Result')
+validFrm=find((sum(isnan(Subthreshold{f}),1)==0).*(BlueStim{f}==0));
+[V D eigTrace]=get_eigvector(Subthreshold{f}(:,validFrm));
+eigTrace_onFrame=NaN(size(Subthreshold{f}'));
+eigTrace_onFrame(validFrm,:)=eigTrace;
+%Lap_eigTrace=PlaceTrigger_average(eigTrace_onFrame',150,VRtrack{f},-0.002,115); %total trace
+%figure(11); clf;
+% moviesc(Lap_eigTrace)
+% colormap(turbo(256))
+[ics]=sorted_ica(eigTrace,15);
+Vics=Subthreshold{f}(:,validFrm)*ics;
+icsTrace_onFrame=NaN(size(Subthreshold{f}',1),size(ics,2));
+icsTrace_onFrame(validFrm,:)=ics;
+   
+figure(10); clf;
+nexttile([1 1]);
+imagesc(V);
+nexttile([1 1]);
+imagesc(Vics);
+colormap(turbo(256))
+
+localtrace=(movmean(eigTrace_onFrame(:,pc_ind(f2)),100,1)./std(eigTrace_onFrame(:,pc_ind(f2)),0,1,'omitnan'))';
+[T]=detect_transientSimple(localtrace,[3 1]);
+
+for p=1
+    bwT=bwlabel(T(p,:));
+    for b=1:max(bwT)
+        bind=find(bwT==b);
+        if length(bind)>100
+            fprintf(['\n p = %d , b=%f \n'],p,b)
+            [readFrm]=sort(unique(bind'+[-2000:1000]))';
+            readFrm(readFrm<=0)=[];
+            mov_seg=readBinMov_BHL_multiple(fpath{f},3,readFrm,15000);
+            bleaching_exp=Result.SpikeHeight_fit(readFrm);
+            mc=Result.mcTrace(readFrm,:);
+            mov_res = SeeResiduals(mov_seg,bleaching_exp);
+            mov_res = SeeResiduals(mov_res,mc);
+            mov_res = SeeResiduals(mov_res,mc.^2);
+            mov_res = SeeResiduals(mov_res,mc(:,1).*mc(:,end));
+            mov_res = mov_res.*double(max(Result.bvMask,[],3)==0);
+
+            [~, maxT]=max(localtrace(p,bind));
+            maxT=maxT+2000;
+            try
+                dFimg{g}=-mean(mov_res(:,:,maxT+[-50:50]),3);
+                g=g+1;
+            end
+        end
+    end
+end
+end
+
+%%
+FractionGlobal=NaN(max(foi),1);
+for f=foi
+
+validFrm=find((sum(isnan(Subthreshold{f}),1)==0).*(BlueStim{f}==0));
+[V D eigTrace]=get_eigvector(Subthreshold{f}(:,validFrm));
+
+FractionGlobal(f)=sum(D(1:NcomponentGlobal(f)))/sum(D);
+end
+
+Boxplot_wPoints(FractionGlobal,FractionGlobal,[1 0 0])
+
+%%
+
+cxy=[[196 72];repmat([212 48],3,1)]; 
+pxsize=[Pixelsize(18); repmat(Pixelsize(26),3,1)];
+f=18; load(fullfile(fpath{f},'PC_Result.mat'),'Result');
+RefImg={imwarp(Result.Structure_bin, Result.tform, 'OutputView', imref2d(size(Result.ref_im))), AvgImg{[26 26 26]}};
+FtImg=Ftprnts([18 26 26 26]);
+
+figure(14); clf; g=1; intensity=[2 5 5 5];
+for n=[10 12 15 16]%1:37
+    nexttile([1 1])
+    dFimg_filt=imgaussfilt(dFimg{n},2);
+    %imshow2(dFimg_filt,[0 20]); hold all
+
+highpix=bwlabel(toimg(zscore(dFimg_filt)>2,size(dFimg_filt,1),size(dFimg_filt,2)));
+highpix_prop=regionprops("table",highpix,'Area','Centroid');
+highpix_prop.Area(find(distance_BH(double(highpix_prop.Centroid),cxy(g,:))>50))=0;
+[~, maxlab]=max(double(highpix_prop.Area));
+highpix=(highpix==maxlab);
+
+FWHMpix=bwlabel(toimg(tovec(dFimg_filt)>max(tovec(dFimg_filt(highpix)))/3,size(dFimg_filt,1),size(dFimg_filt,2)));
+FWHMpix_prop=regionprops("table",FWHMpix,'Area','Centroid');
+FWHMpix_prop.Area(find(distance_BH(double(FWHMpix_prop.Centroid),cxy)>50))=0;
+[~, maxlab]=max(double(FWHMpix_prop.Area));
+FWHMpix=(FWHMpix==maxlab);
+
+[length, width, box] = measureRectangle(double(FWHMpix), 0);
+
+colorSTA=grs2rgb(tovec(dFimg_filt),colormap('turbo'),0,max(tovec(dFimg_filt(highpix))));
+colorSTA=reshape(colorSTA,size(dFimg_filt,1),size(dFimg_filt,2),1,[]);
+colorSTA=permute(colorSTA,[1 2 4 3]);
+LocalImage=colorSTA.*mat2gray(RefImg{g}-100)*intensity(g);
+
+imshow2(LocalImage,[]); hold all
+cb=colorbar;
+cb.Label.String='\DeltaF';
+cb.Ticks=[0 1];
+cb.TickLabels=[0 round(max(tovec(dFimg_filt(highpix))))];
+%ftprnt_boundary=bwboundaries(ftprnt(:,:,n)>300);
+%[~, arg]=max(cellfun(@(x) size(x,1),ftprnt_boundary));
+%plot(ftprnt_boundary{arg}(:,2),ftprnt_boundary{arg}(:,1),'LineStyle','--')
+
+scatter(cxy(1)-45,cxy(2),25,[1 0 1],'filled','>')
+plot(box(:,2),box(:,1),'r','LineStyle','-.')
+title(['Width: ' num2str(width*pxsize(g),3) '\mum Length: ' num2str(length*pxsize(g),3) ' \mum'])
+if g>=2
+set(gca,'Xdir','reverse')
+end
+g=g+1;
+end
+%colormap('bone')
+
+%%
+
+
+
+plot(eigTrace_onFrame(:,[3 5 9]))
+
+ mc=Result.mcTrace(f_seg(j)+1:f_seg(j+1),:);
+    bleaching_exp=Result.SpikeHeight_fit(f_seg(j)+1:f_seg(j+1));
+
+    mov_res = SeeResiduals(mov_mc,bleaching_exp);
+    mov_res = SeeResiduals(mov_res,mc);
+    mov_res = SeeResiduals(mov_res,mc.^2);
+    mov_res = SeeResiduals(mov_res,mc(:,1).*mc(:,end));
+    mov_res = mov_res.*double(max(Result.bvMask,[],3)==0);
+
+
+
+Reconstructed_trace=NaN(size(Subthreshold{f}));
+Reconstructed_trace(:,validFrm)=pcafilterTrace(Subthreshold{f}(:,validFrm),[1:3]);
+
+time_segment=15000; overlap=200;
+load(fullfile(fpath{f},'PC_Result.mat'),'Result')
+bound=4;
+load([fpath{f} '/output_data.mat'])
+
+soi=[9 9]; %interest segment;
+sz=double(Device_Data{1, 3}.ROI([2 4]));
+frm_end=EndFrame(f);
+f_seg=[[1:time_segment:frm_end] frm_end+1]; f_seg(2:end)=f_seg(2:end)-1;
+f_seg(1)=0;
+
+toi=[f_seg(soi(1))+1:f_seg(soi(2)+1)]; %interest time;
+take_window=repmat([1 time_segment],length(f_seg)-1,1);
+take_window(2:end,1)=take_window(2:end,1)+overlap; take_window(1:end-1,2)=take_window(1:end-1,2)+overlap;
+take_window(end)=mod(f_seg(end),time_segment);
+take_window(take_window==0)=time_segment;
+
+mov_res_small_cat=[];
+for j=soi(1):soi(2)%length(f_seg)-1
+    j
+    mov_mc=double(readBinMov_times([fpath{f} '/mc_ShutterReg' num2str(j,'%02d') '.bin'],sz(2),sz(1),[1:time_segment]));
+
+    mc=Result.mcTrace(f_seg(j)+1:f_seg(j+1),:);
+%    bleaching_exp=Result.SpikeHeight_fit(f_seg(j)+1:f_seg(j+1));
+bkg(1,:) = linspace(-1, 1, size(mov_mc,3));  % linear term
+bkg(2,:) = linspace(-1, 1, size(mov_mc,3)).^2;  % quadratic term
+
+    mov_res = SeeResiduals(mov_mc,bkg);
+    mov_res = SeeResiduals(mov_res,mc);
+    mov_res = SeeResiduals(mov_res,mc.^2);
+    mov_res = SeeResiduals(mov_res,mc(:,1).*mc(:,end));
+    %mov_res = mov_res.*double(max(Result.bvMask,[],3)==0);
+
+    mov_res_small=imresize(mov_res,1/2);
+    sz_small=size(mov_res_small);
+    mov_res_small_cat=cat(3,mov_res_small_cat,mov_res_small);
+end
+
+tr2corr=eigTrace_onFrame(toi,:)';
+nonnanfrm=find(sum(isnan(tr2corr),1)==0);
+
+corrImg=corr(tovec(mov_res_small_cat(:,:,nonnanfrm))',tr2corr(:,nonnanfrm)');
+corrImg=toimg(corrImg,size(mov_res_small_cat,1),size(mov_res_small_cat,2));
+
+figure(5); clf;
+imshow2_patch(corrImg(:,:,1:5))
+
+
+PerispikeInd_vec=ind2vec(size(Subthreshold{f},2),tovec(find(allSpikeMat{f}(1,:))'+[-5:20]),1);
+SubOn=Subthreshold{f};
+SubOn(:,BlueStim{f}==0)=NaN;
+SubOn(:,PerispikeInd_vec>0)=NaN;
+SubOff=Subthreshold{f};
+SubOff(:,BlueStim{f}>0)=NaN;
+SubOff(:,PerispikeInd_vec>0)=NaN;
+LapOn=PlaceTrigger_average(SubOn,50,VRtrack{f},-0.002,115); %total trace
+LapOff=PlaceTrigger_average(SubOff,50,VRtrack{f},-0.002,115); %total trace
+LapOnMap=squeeze(mean(LapOn(3:end,:,:),1,'omitnan'))';
+LapOffMap=squeeze(mean(LapOff(3:end,:,:),1,'omitnan'))';
+LapFR=PlaceTrigger_average(allSpikeMat{f}(1,:),150,VRtrack{f},-0.002,115)*1000; %total trace
+
+figure(7); clf; tiledlayout(4,1); cax=[-0.002 0.01]*50;
+nexttile([1 1])
+imagesc(LapOnMap,cax);
+nexttile([1 1])
+imagesc(LapOffMap,cax);
+nexttile([1 1])
+imagesc(LapOnMap-LapOffMap,cax);
+nexttile([1 1])
+imagesc(LapFR);
+colormap(turbo)
+
+
+
+
+%%
+
+
+
+
+
+vfm=~isnan(eigTrace_onFrame(105760+[-2000:12000],3));
+eT=eigTrace_onFrame(105760+[-2000:2000],3);
+eT=eT(vfm);
+figure; imshow2(toimg(corr(tovec(imgaussfilt(mov_mc(:,:,vfm),2))',eT),size(mov_mc,1),size(mov_mc,2)),[])
+
+figure(10); clf;
+nexttile([1 1]);
+imagesc(V);
+
+res_func=@(x) squeeze(SeeResiduals(permute(x(:,validFrm),[3 1 2]),eigTrace(:,1:2)));
+
+Residual=NaN(size(Subthreshold{f}));
+Residual(:,validFrm)=res_func(NormalizedTrace_dirt{f});
+for ch=1:2
+Residual_ch{ch}=NaN(size(Subthreshold_ch{f,ch}));
+Residual_ch{ch}(:,validFrm)=res_func(Subthreshold_ch{f,ch});
+end
+
+Subthres_CorrMat = get_corrMat(Subthreshold_ch{f,1}, Subthreshold_ch{f,2});
+Residual_CorrMat = get_corrMat(Residual_ch{1}, Residual_ch{2});
+nexttile([1 1]);
+imagesc(Residual_CorrMat)
+
+nexttile([1 1]);
+imagesc(Subthres_CorrMat)
+
+interdend=interDendDist{f};
+interdend=max(cat(3,interdend,interdend'),[],3);
+interdend=interdend(Dist_order{f}(noi_dist{f}),Dist_order{f}(noi_dist{f}));
+% %%
+% figure(12); clf; bin_tick=17;
+% l=plot(interdend,Residual_CorrMat,'.','markersize',25);
+% arrayfun(@(l,c) set(l,'Color',c{:}),l,num2cell(summer(size(interdend,2)),2));
+% xlabel('Distance between two ROI (\mum)')
+% ylabel('Correlation')
+% colormap(summer);
+% cb=colorbar;
+% cb.Label.String='Basal to Apical';
+% cb.Ticks=[];
+% 
+% for n=1:size(interdend,1)
+% dat{n}=[interdend(:,n) Residual_CorrMat(:,n)];
+% end
+% [M S B N]=binning_data(dat,[-bin_tick:bin_tick*2:300+bin_tick]);
+% N=sum(cell2mat(cellfun(@double,N,'UniformOutput',false)'),1);
+% hold all; 
+% errorbar(B',M',S'/sqrt(N'),'color',[1 0 0],'LineWidth',2);
+% 
+% exp_model = @(params, x) params(3) + params(1) * exp(params(2) * x);
+% initial_guess = [max(M) - min(M), -1 / (max(B) - min(B))  , min(M)];
+% 
+% options = optimoptions('lsqcurvefit', 'FunctionTolerance', 1e-6, 'OptimalityTolerance', 1e-6, 'MaxIterations', 10000);
+% params_fit = lsqcurvefit(exp_model, initial_guess, B, M, [], [], options);
+% 
+% % Compute fitted values
+% y_fit = exp_model(params_fit, B);
+% 
+% % Compute R^2
+% SS_res = sum((M - y_fit).^2);  % Residual sum of squares
+% SS_tot = sum((M - mean(M)).^2);  % Total sum of squares
+% R_squared = 1 - (SS_res / SS_tot);
+% 
+% % Compute Length Scale (1/|b|)
+% length_scale = 1 / abs(params_fit(2));
+% 
+% title(['Fit func. : a*exp(bx)+c , 1/|b| = ' num2str(length_scale,3) ' \mum, R^2 = ' num2str(R_squared,3)])
+
+Lap_Res=PlaceTrigger_average(Residual,150,VRtrack{f},-0.002,115); %total trace
+Lap_Sub=PlaceTrigger_average(Subthreshold{f},150,VRtrack{f},-0.002,115); %total trace
+globalTrace=pcafilterTrace(Subthreshold{f},[1]);
+seesawTrace=pcafilterTrace(Subthreshold{f},[2]);
+
+Lap_glob=PlaceTrigger_average(globalTrace,150,VRtrack{f},-0.002,115); %total trace
+Lap_seesaw=PlaceTrigger_average(seesawTrace,150,VRtrack{f},-0.002,115); %total trace
+
+%lap2mean={[3:11],[22:30]};
+lap2mean={[3:21]};
+
+figure(13); clf; tiledlayout(2,4)
+[d ds]=sort(dendaxis{f});
+
+for lm=1:length(lap2mean)
+TC_Res=squeeze(mean(ringmovMean(Lap_Res(lap2mean{lm},:,:),3),1,'omitnan'));
+TC_global=squeeze(mean(ringmovMean(Lap_glob(lap2mean{lm},:,:),3),1,'omitnan'));
+TC_seesaw=squeeze(mean(ringmovMean(Lap_seesaw(lap2mean{lm},:,:),3),1,'omitnan'));
+TC_sub=squeeze(mean(ringmovMean(Lap_Sub(lap2mean{lm},:,:),3),1,'omitnan'));
+nexttile([1 1])
+imagesc([1:150]/150*2,dendaxis{f}(ds),TC_sub(:,ds)')
+shading flat; set(gca,'YDir','reverse'); 
+title('Subthreshold')
+xlabel('VR position (m)'); ylabel('Distance from soma (\mum)');
+
+nexttile([1 1])
+imagesc([1:150]/150*2,dendaxis{f}(ds),TC_global(:,ds)')
+shading flat; set(gca,'YDir','reverse'); 
+title('Subthreshold')
+xlabel('VR position (m)'); ylabel('Distance from soma (\mum)');
+
+nexttile([1 1])
+imagesc([1:150]/150*2,dendaxis{f}(ds),TC_seesaw(:,ds)')
+shading flat; set(gca,'YDir','reverse'); 
+title('Subthreshold')
+xlabel('VR position (m)'); ylabel('Distance from soma (\mum)');
+
+nexttile([1 1])
+imagesc([1:150]/150*2,dendaxis{f}(ds),TC_Res(:,ds)')
+shading flat; set(gca,'YDir','reverse');
+title('Residual'); 
+xlabel('VR position (m)'); ylabel('Distance from soma (\mum)');
+end
+
+
+STA_ResMat=[];
+for spclass=1:3
+STA_ResMat{spclass}=get_STA(Residual,allSpikeClassMat{f}(spclass,:),100,50);
+end
+
+figure(14); clf; tiledlayout(1,3);
+for spclass=1:3
+    nexttile([1 1])
+imagesc([-100:50],dendaxis{f},STA_ResMat{spclass},[-0.05 0.2])
+end
+colormap(turbo)
+
+%%
+clf;
+for f=foi
+[V D eigTace]=get_eigvector(Subthreshold{f},10);
+nexttile([1 1])
+imagesc(V)
+end
+Residual
+globalTrace
+seesawTrace
+
+PSD_sub=[];
+for n=1:size(Subthreshold{f},1)
+[freq PSD_sub(n,:)]=nanPSD(Subthreshold{f}(n,:),1000,10000);
+end
+
+%% Do this in movie domain
+time_segment=15000; overlap=200;
+load(fullfile(fpath{f},'PC_Result.mat'),'Result')
+bound=4;
+load([fpath{f} '/output_data.mat'])
+
+soi=[9 15]; %interest segment;
+sz=double(Device_Data{1, 3}.ROI([2 4]));
+frm_end=EndFrame(f);
+f_seg=[[1:time_segment:frm_end] frm_end+1]; f_seg(2:end)=f_seg(2:end)-1;
+f_seg(1)=0;
+
+toi=[f_seg(soi(1))+1:f_seg(soi(2)+1)]; %interest time;
+take_window=repmat([1 time_segment],length(f_seg)-1,1);
+take_window(2:end,1)=take_window(2:end,1)+overlap; take_window(1:end-1,2)=take_window(1:end-1,2)+overlap;
+take_window(end)=mod(f_seg(end),time_segment);
+take_window(take_window==0)=time_segment;
+
+mov_res_small_cat=[];
+for j=soi(1):soi(2)%length(f_seg)-1
+    j
+    mov_mc=double(readBinMov_times([fpath{f} '/mc_ShutterReg' num2str(j,'%02d') '.bin'],sz(2),sz(1),[1:time_segment]));
+
+    mc=Result.mcTrace(f_seg(j)+1:f_seg(j+1),:);
+    bleaching_exp=Result.SpikeHeight_fit(f_seg(j)+1:f_seg(j+1));
+
+    mov_res = SeeResiduals(mov_mc,bleaching_exp);
+    mov_res = SeeResiduals(mov_res,mc);
+    mov_res = SeeResiduals(mov_res,mc.^2);
+    mov_res = SeeResiduals(mov_res,mc(:,1).*mc(:,end));
+    mov_res = mov_res.*double(max(Result.bvMask,[],3)==0);
+
+    mov_res_small=imresize(mov_res,1/4);
+    sz_small=size(mov_res_small);
+    mov_res_small_cat=cat(3,mov_res_small_cat,mov_res_small);
+end
+
+eigTrace_sub=eigTrace_onFrame(toi,:);
+ResidualTrace=Residual(:,toi);
+%validFrame2=[sum(isnan(ResidualTrace),1)==0 | ~ismember([1:length(toi)],[12636:20000])];
+validFrame2=[sum(isnan(ResidualTrace),1)==0];
+
+mov_res_small_cat=get_subthreshold(tovec(mov_res_small_cat),Result.spike(1,toi),7,17);
+mov_res_small_cat=toimg(mov_res_small_cat,sz_small(1),sz_small(2));
+
+[V D eigTrace]=get_eigvector(tovec(mov_res_small_cat(bound:end-bound,bound:end-bound,validFrame2)),20);
+V=toimg(V,sz_small(1)-2*bound+1,sz_small(2)-2*bound+1);
+mov_res_Residual=[];
+mov_res_Residual(:,:,validFrame2)=SeeResiduals(mov_res_small_cat(:,:,validFrame2),eigTrace(:,[1 2 3 5 17 19 20]));
+mov_res_Residual(:,:,~validFrame2)=NaN;
+
+ResidualImg=corr(tovec(-mov_res_Residual(bound:end-bound,bound:end-bound,validFrame2))',ResidualTrace(:,validFrame2)');
+ResidualImg=toimg(ResidualImg,sz_small(1)-2*bound+1,sz_small(2)-2*bound+1);
+ResidualImg=imresize(ResidualImg,4);
+
+figure(15); clf;
+ftprnt=imresize(Ftprnts{f}(:,:,Dist_order{f}(noi_dist{f})),1/4);
+ftprnt=ftprnt(bound:end-bound,bound:end-bound,:);
+ftprnt=imresize(ftprnt,4);
+ResImg_vec=tovec(ResidualImg);
+
+for n=[1 2 16 17]%1:37
+    nexttile([1 1])
+[cxy]=get_coord(ftprnt(:,:,n));
+    imshow2(ResidualImg(:,:,n),[-0.1 0.3]); hold all
+
+highpix=bwlabel(toimg(zscore(ResImg_vec(:,n))>3,size(ResidualImg,1),size(ResidualImg,2)));
+highpix_prop=regionprops("table",highpix,'Area','Centroid');
+highpix_prop.Area(find(distance_BH(double(highpix_prop.Centroid),cxy)>50))=0;
+[~, maxlab]=max(double(highpix_prop.Area));
+highpix=(highpix==maxlab);
+
+FWHMpix=bwlabel(toimg(ResImg_vec(:,n)>max(ResImg_vec(highpix,n))/2,size(ResidualImg,1),size(ResidualImg,2)));
+FWHMpix_prop=regionprops("table",FWHMpix,'Area','Centroid');
+FWHMpix_prop.Area(find(distance_BH(double(FWHMpix_prop.Centroid),cxy)>50))=0;
+[~, maxlab]=max(double(FWHMpix_prop.Area));
+FWHMpix=(FWHMpix==maxlab);
+
+[length, width, box] = measureRectangle(double(FWHMpix), 0);
+
+%ftprnt_boundary=bwboundaries(ftprnt(:,:,n)>300);
+%[~, arg]=max(cellfun(@(x) size(x,1),ftprnt_boundary));
+%plot(ftprnt_boundary{arg}(:,2),ftprnt_boundary{arg}(:,1),'LineStyle','--')
+
+scatter(cxy(1)-45,cxy(2),25,[1 0 1],'filled','>')
+plot(box(:,2),box(:,1),'r','LineStyle','-.')
+title(['Width: ' num2str(width*Pixelsize(f),3) '\mum Length: ' num2str(length*Pixelsize(f),3) ' \mum'])
+end
+colormap('bone')
+
+%%

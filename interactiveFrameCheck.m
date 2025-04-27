@@ -11,6 +11,7 @@ function modifiedMarkerMatrix = interactiveFrameCheck(dataMatrix, markerMatrix, 
     assert(size(markerMatrix, 2) == T, ...
         'Marker matrix must have dimensions k x T (k features, T time points).');
 
+    disp('press u to unmark, press q to quit, press number to mark')
     % Generate unique colors for k features
     colors = lines(k); % Generates k unique colors
 
@@ -19,7 +20,7 @@ function modifiedMarkerMatrix = interactiveFrameCheck(dataMatrix, markerMatrix, 
 
     % Initialize current index and color scale
     currentIndex = 1;
-    colorLimits = [prctile(dataMatrix(:),2), prctile(dataMatrix(:),99.5)]; % Set consistent color scale
+    colorLimits = [prctile(dataMatrix(:),2), prctile(dataMatrix(:),99.9)]; % Set consistent color scale
 
     % Create a figure for visualization
     hFig = figure('Name', 'Interactive Frame Checker (k Features)', ...
@@ -57,7 +58,7 @@ function modifiedMarkerMatrix = interactiveFrameCheck(dataMatrix, markerMatrix, 
 
             clf;
             imagesc(dataSegment, colorLimits);
-            colormap('jet');
+            colormap('turbo');
             colorbar;
             xlabel('Time');
             ylabel('Channels');

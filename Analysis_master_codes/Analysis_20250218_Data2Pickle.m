@@ -1,0 +1,308 @@
+clear; clc;
+
+% VoltagePath='/Volumes/cohen_lab/Lab/Labmembers/Byung Hun Lee/Data/20240730_BHLm149_lowStim/152737BHLm149_N2_WF_RP';
+% swc_file='/Volumes/cohen_lab/Lab/Labmembers/Byung Hun Lee/Deconvolution/BHLm338_AnatomyStack_registered_deconvolution_sigma_20_gamma_0_truncate_4_lambda_0-000.swc';
+
+VoltagePath='/Volumes/BHL18TB_D2/20240207/150333BHLm113_N2_DDStim_SP';
+swc_file='/Volumes/BHL18TB_D2/20240208/BHLm133_N1_Tracing/Fill_Binary_mask-000.swc';
+addpath(genpath('/Users/bhlee1117/Documents/GitHub/Cohen_lab_BHL_Code/treestoolbox-master'));
+
+load(fullfile(VoltagePath,'OP_Result.mat'))
+
+%%
+fid = fopen(swc_file, 'r');
+
+% Read the file, skipping comment lines (starting with '#')
+data = textscan(fid, '%f %f %f %f %f %f %f', 'CommentStyle', '#', 'Delimiter', {' ', '\t'});
+
+% Close the file
+fclose(fid);
+
+% Extract SWC columns
+id = data{1};       % Node IDs
+type = data{2};     % Node type
+x = data{3};        % X coordinate
+y = data{4};        % Y coordinate
+z = data{5};        % Z coordinate
+radius = data{6};   % Radius
+parent = data{7};   % Parent IDs
+
+% Identify branch points & endpoints
+[unique_parents, ~, parent_counts] = unique(parent);
+branch_counts = accumarray(parent_counts, 1);
+branch_points = unique_parents(branch_counts > 1);
+all_parents = parent(parent ~= -1);
+end_points = setdiff(id, all_parents);
+
+% Averaging window size
+window_size = 70;
+
+% Initialize new SWC storage
+new_swc = [];
+new_id = 1;  % New node counter
+node_map = containers.Map('KeyType', 'double', 'ValueType', 'double'); % Map old to new IDs
+mapping_matrix = []; % Stores mapping of original nodes to averaged index
+
+% Iterate through each branch
+for i = 1:length(branch_points)
+    parent_node = branch_points(i);
+    child_nodes = id(parent == parent_node);
+    
+    for j = 1:length(child_nodes)
+        % Store the branch path
+        branch_path = [parent_node];
+        next_node = child_nodes(j);
+        
+        % Traverse the branch
+        while ~ismember(next_node, branch_points) && ~ismember(next_node, end_points)
+            branch_path = [branch_path; next_node];
+            next_node = id(parent == next_node);
+            if isempty(next_node)
+                break;
+            end
+        end
+        branch_path = [branch_path; next_node]; % Include final endpoint
+        
+        % Group nodes into sets of 3 and compute their average
+        num_groups = ceil(length(branch_path) / window_size);
+        averaged_branch = zeros(num_groups, 7);  % New branch storage
+        prev_new_id = -1; % Track previous new node for parent assignment
+        
+        for k = 1:num_groups
+            % Get node indices for this group
+            start_idx = (k - 1) * window_size + 1;
+            end_idx = min(k * window_size, length(branch_path));
+            group_nodes = branch_path(start_idx:end_idx);
+            
+            % Compute average coordinates
+            avg_x = mean(x(ismember(id, group_nodes)));
+            avg_y = mean(y(ismember(id, group_nodes)));
+            avg_z = mean(z(ismember(id, group_nodes)));
+            avg_radius = mean(radius(ismember(id, group_nodes)));
+            
+            % Determine parent relationship
+            if prev_new_id == -1
+                new_parent = -1; % Root node case
+            else
+                new_parent = prev_new_id; % Assign previous averaged node as parent
+            end
+            
+            % Store new averaged node
+            averaged_branch(k, :) = [new_id, type(id == group_nodes(1)), avg_x, avg_y, avg_z, avg_radius, new_parent];
+            prev_new_id = new_id; % Update previous new node
+            
+            % Store mapping information
+            for original_node = group_nodes'
+                mapping_matrix = [mapping_matrix; original_node, new_id];
+            end
+            
+            node_map(group_nodes(1)) = new_id;  % Map the first node in the group to the new ID
+            new_id = new_id + 1;
+        end
+        
+        % Append to final SWC data
+        new_swc = [new_swc; averaged_branch];
+    end
+end
+data=cell2mat(data);
+% Append mapping index to original data
+data_with_mapping = [data, zeros(size(data, 1), 1)];
+for i = 1:size(mapping_matrix,1)
+    data_with_mapping(data_with_mapping(:,1) == mapping_matrix(i,1), end) = mapping_matrix(i,2);
+end
+
+[xyzr] = new_swc;
+%%
+mov_mc=readBinMov_BHL(VoltagePath,3);
+mov_res=mov_mc-movmedian(mov_mc,1000,3);
+mov_res=SeeResiduals(mov_res,Result.mc);
+mov_res=SeeResiduals(mov_res,Result.mc.^2);
+mov_res=SeeResiduals(mov_res,Result.mc.*Result.mc);
+%%
+rotang=1.8; mask_R=15;
+
+mask_boundary=zeros(size(Result.ref_im));
+mask_boundary(7:end-7,7:end-50)=1;
+
+R_z = [cosd(rotang) -sind(rotang) 0; sind(rotang) cosd(rotang) 0; 0 0 1];
+
+xy_hom = [xyzr(:,3) xyzr(:,4) ones(size(xyzr,1), 1)];
+xy_transformed=(Result.tform.T*R_z*xy_hom')';
+xy_transformed(:,1:2)=xy_transformed(:,1:2)-[81 133];
+invalid_point=[];
+for ind=1:size(xy_transformed,1)
+    if round(xy_transformed(ind,2))<=0 | round(xy_transformed(ind,1))<=0 | round(xy_transformed(ind,2))>size(Result.ref_im,1) |  round(xy_transformed(ind,1))>size(Result.ref_im,2)
+invalid_point=[invalid_point ind];
+    else if mask_boundary(round(xy_transformed(ind,2)),round(xy_transformed(ind,1)))==0
+invalid_point=[invalid_point ind];
+end
+end
+end
+
+dat_hom = [data_with_mapping(:,3) data_with_mapping(:,4) ones(size(data_with_mapping,1), 1)];
+data_transformed=(Result.tform.T*R_z*dat_hom')';
+data_transformed(:,1:2)=data_transformed(:,1:2)-[81 133];
+invalid_point2=find([data_transformed(:,1)<0 | data_transformed(:,2)<0 | data_transformed(:,1)>size(Result.ref_im,2) | data_transformed(:,2)>size(Result.ref_im,1)]);
+data_with_mapping(invalid_point2,:)=[];
+
+clf;
+imagesc(Result.Structure_bin);
+hold all
+plot(xy_transformed(:,1),xy_transformed(:,2),'.')
+plot(xy_transformed(invalid_point,1),xy_transformed(invalid_point,2),'ro')
+
+mask = zeros(size(mov_res,1), size(mov_res,2),size(xy_transformed,1));
+
+[Xgrid, Ygrid] = meshgrid(1:size(mov_res,2), 1:size(mov_res,1));  % Create coordinate grid
+
+for n = 1:size(xy_transformed, 1)
+    xx = xy_transformed(n,1);
+    yy = xy_transformed(n,2);
+    mask(:,:,n) = ((Xgrid - xx).^2 + (Ygrid - yy).^2 <= mask_R^2);
+end
+mask=mask.*(Result.Structure_bin>0);
+
+voltageData=tovec(imresize(mov_res,0.5))'*tovec(imresize(mask,0.5));
+
+
+%%
+bwBlue=bwlabel(Result.Blue>0);
+sp_list=[];
+for b=1:max(bwBlue)
+    bonset=find(bwBlue==b,1);
+    sp_list=[sp_list bonset+find(Result.spike(1,bonset:bonset+50),1)-1];
+end
+
+sp_vec=ind2vec(size(Result.traces,2),sp_list,1);
+STAvolt=get_STA(-voltageData',sp_vec,100,100);
+STAvolt(invalid_point,:)=NaN;
+STAvolt=STAvolt-mean(STAvolt,2);
+%STAvolt=pcafilterTrace(STAvolt,[1:4]);
+F0PCA=abs(sqrt(mean(STAvolt(:,2:end).*STAvolt(:,1:end-1),2)));
+STAvolt=STAvolt-mean(STAvolt(:,1:15),2);
+%F0PCA=mean(STAvolt(:,115:120),2);   
+STAvolt=STAvolt./abs(F0PCA);
+STAvolt(isnan(STAvolt))=0;
+STAvolt(266,:)=0;
+
+STAvolt=pcafilterTrace(STAvolt,[1:4]);
+
+%STAvolt=mat2gray(STAvolt);
+clf;
+imagesc(STAvolt)
+
+
+STAvolt_interp=[];
+for n=1:size(STAvolt,1)
+STAvolt_interp(n,:)=interp1([60:180],STAvolt(n,60:180),[60:0.2:180],'spline');
+end
+
+STAvolt=mat2gray(STAvolt_interp);
+% F0PCA=get_F0PCA(STAvolt);
+% F0PCA=abs(sqrt(mean(STAvolt(:,2:end).*STAvolt(:,1:end-1),2)));
+
+%STAvolt=STAvolt./F0PCA;
+% STAmov=get_STA(tovec(mov_res),sp_vec,100,100);
+% STAmov=toimg(STAmov,size(mov_res,1),size(mov_res,2));
+%%
+% Add NXT data as an extra column in the SWC structure
+% Save the mapped SWC structure with NXT data
+data_with_mapping(:,3:5)=(data_with_mapping(:,3:5)-median(data_with_mapping(:,3:5),1));
+data_with_mapping(:,3:4)=data_with_mapping(:,3:4)*0.46;
+data_with_mapping(:,5)=data_with_mapping(:,5)*0.5;
+
+save(fullfile(VoltagePath,'XYZR.mat'), 'data_with_mapping','-v7.3');
+save(fullfile(VoltagePath,'Voltage.mat'), 'STAvolt','-v7.3');
+
+disp('Saved coordinate and voltage trace')
+%%
+% Ensure xyzrV is in double format
+xyzrV = double(xyzrV);  
+
+% Number of nodes
+num_nodes = size(xyzrV, 1);  
+
+% Import Python module for pickle
+pickle = py.importlib.import_module('pickle');
+
+% Initialize Python list to store nodes
+py_nodes_list = py.list();
+
+% Loop through each node
+for i = 1:10%num_nodes
+    % Create a dictionary for each node
+    node = py.dict();
+
+    % Convert to lists so Blender can easily reformat them
+    node.update(pyargs( ...
+        "ID", int32(xyzrV(i,1)), ...
+        "type", "dend", ...  % Change type if needed
+        "X", py.list(num2cell([xyzrV(i,3)])), ...
+        "Y", py.list(num2cell([xyzrV(i,4)])), ...
+        "Z", py.list(num2cell([xyzrV(i,5)])), ...
+        "DIAM", py.list(num2cell([xyzrV(i,6)])) ...
+    ));
+
+    % Create an empty Voltage dictionary
+    voltage_dict = py.dict();
+
+    % Store Voltage as a list of lists (Blender will convert to NumPy)
+    for t = 1:(size(xyzrV, 2) - 7)  % Voltage starts at column 8
+        voltage_dict{int32(t-1)} = py.list(num2cell([xyzrV(i, 7+t)])); 
+    end
+
+    % Add voltage data to node
+    node{"Voltage"} = voltage_dict;
+
+    % Append node to list
+    py_nodes_list.append(node);
+end
+
+% Save to .pickle file
+fid = py.open("mapped_neuron.pickle", "wb");
+pickle.dump(py_nodes_list, fid);
+fid.close();
+
+disp("SWC data with NXT mapping saved as a .pickle file.");
+
+
+
+%%
+% Load the Python pickle module
+pickle = py.importlib.import_module('pickle');
+
+% Open the pickle file
+%pickle_file = '/Volumes/cohen_lab/Lab/Labmembers/Byung Hun Lee/BlenderModeling/BlenderSpike-main/demos/CA1 pyramidal/CA1 random input.pickle'; % Replace with your file path
+pickle_file = '/Volumes/BHL18TB_D2/20240207/150333BHLm113_N2_DDStim_SP/full_neuron_data.pickle';
+fid = py.open(pickle_file, 'rb');
+
+% Load the data
+py_data2 = pickle.load(fid);
+fid.close();
+
+clear X Y Z
+
+% Iterate over the structured neuron data
+for l = 1:length(py_data2)
+    
+    % Access the Python dictionary directly
+    data_struct = py_data2{l}; % This is already a Python dictionary
+    
+    % Extract X, Y, Z arrays directly from the Python dictionary
+    X(l,:) = double(py.array.array('d', data_struct{'X'}));  % Convert to double array
+    Y(l,:) = double(py.array.array('d', data_struct{'Y'}));
+    Z(l,:) = double(py.array.array('d', data_struct{'Z'}));
+    
+    % Plot each segment
+    plot3(X(l,:), Y(l,:), Z(l,:), '-o');
+    hold on;
+end
+
+xlabel('X');
+ylabel('Y');
+zlabel('Z');
+grid on;
+title('Neuron Morphology from Pickle File');
+hold off;
+
+

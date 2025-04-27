@@ -14,6 +14,7 @@ V = V.*vSign;
 
 if nargin<2
     N=find(cumsum(D)/sum(D)>0.9,1);
+    fprintf('%d component is used',N);
 end
 F0_PCA=sqrt(sum(((V(:,[1:N]).^2).*D([1:N])'),2));
 end
