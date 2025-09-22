@@ -80,44 +80,43 @@ STAmov=reshape(STAmov,size(Result.ref_im,1),size(Result.ref_im,2),[]);
 STAmov=(-STAmov).*(max(Result.bvMask,[],3)==0);
 STAmov=pcafilt(STAmov,5);
 STAmov=STAmov-mean(STAmov(:,:,1:10),3);
-
+%%
 SkelDend = Skeletonize_dendrite(Result.ref_im,7,0.02,10);
-RobustdFF_const=get_robustdFF(STAmov,Result.ftprnt,(Result.ref_im-100).*(max(Result.bvMask,[],3)==0));
+%RobustdFF_const=get_robustdFF(STAmov,Result.ftprnt,(Result.ref_im-100).*(max(Result.bvMask,[],3)==0));
 %normTrace = Result.traces_bvMask./RobustdFF_const';
 STAtmp=get_STA(Result.normTraces,Result.spike(1,:),20,20);
 STAtmp= STAtmp-median(STAtmp(:,1:10),2);
 F_ref=mean(STAtmp(:,20+[9:10]),2);
 Subthreshold=get_subthreshold(Result.normTraces,Result.spike(1,:),7,17);
-F0_PCA=get_F0PCA(Subthreshold,3);
+%F0_PCA=get_F0PCA(Subthreshold,3);
 
-normTrace = Result.normTraces./F0_PCA;
+ROIvec=Result.maintrunk;
+normTrace = Result.normTraces./Result.F0_PCA;
 %normTrace = Result.normTraces./F_ref;
 normTrace = normTrace - prctile(normTrace,20,2);
+normTrace_main= normTrace(ROIvec,:);
 normTrace = normTrace(Result.dist_order,:);
 STAtr=get_STA(normTrace,Result.spike(1,:),20,20);
-normTrace_filt = pcafilterTrace(normTrace, [1:3]); %filter subthreshold
+STAtr_main=get_STA(normTrace_main,Result.spike(1,:),20,20);
 %normTrace_filt = normTrace; %filter subthreshold
-%normTrace_filt_bd=get_bandstop(normTrace_filt,1000,[45 60]);
-
+normTrace_filt = pcafilterTrace(normTrace, [1:5]); %filter subthreshold
+normTrace_filt_main=normTrace_filt(find_index_bh(Result.dist_order,ROIvec),:);
 ftprnt=Result.ftprnt(:,:,Result.dist_order).*SkelDend;
 
-%%
 ROIs = {[2 5],[7],[11 14 16],[21],[29]}; %Basal, Soma, trunk, Oblique, tuft
 ROIaxis = [2 5 7 11 14 20 26 29 30 31]; %Basal, Soma, trunk, Oblique, tuft
 ROIaxis2 = [2 5 7 11 14 20 26 29];
 
 % ROIs = {[6 9 10],[11],[15 17 20],[14 16],[22 24 27]}; %Basal, Soma, trunk, Oblique, tuft
 % ROIaxis = [6 9 10 11 15 17 20 22 24 27]; %Basal, Soma, trunk, Oblique, tuft
-cl
 Show_tr=[]; cmap=gen_colormap(Plasma,6);
 %cmap=distinguishable_colors(5);
 Dsign=ones(1,size(Result.interDendDist,2));
 Dsign(Result.dist_order(1:find(Result.dist_order==1)-1))=-1;
-contourdist=Result.interDendDist(1,Result.dist_order).*Dsign(Result.dist_order)*PixelSize(f);
-contourdist_show=contourdist(ROIaxis);
-contourdist_show2=contourdist(ROIaxis2);
+contourdist=Result.interDendDist(1,ROIvec).*Dsign(ROIvec)*PixelSize(f);
+%contourdist_show2=contourdist(ROIaxis2);
 
-figure(1); clf; tiledlayout(6,1); scale=0.04;
+figure(1); clf; tiledlayout(6,1); scale=8;
 ax1=nexttile([6 1]);
 ftprnt_mask=[];
 for r=[1:5]
@@ -128,12 +127,10 @@ for r=[1:5]
 end
 axis off;
 
-plot(Result.Blue/100-scale*6,'color',[0 0.6 1]); axis off;
+plot(Result.Blue-scale*6,'color',[0 0.6 1]); axis off;
 %linkaxes([ax1 ax2],'x')
 xlim([10 9999])
 
-cmap_tr=hot(62);
-cmap_tr=cmap_tr(1:31,:);
 figure(2); clf; l=[];
 tiledlayout(8,1);
 ax1=nexttile([6 1]);
@@ -144,17 +141,20 @@ for r=[2 5]
     l(g)=plot(Show_tr(r,:)-mean(Show_tr(r,3900:3950),2,'omitnan'),'color',cmap(r,:)); hold all
     g=g+1;
 end
-plot(Result.Blue/100-scale/2,'color',[0 0.6 1]);
+plot(Result.Blue/2-scale/2,'color',[0 0.6 1]);
 %legend(l,{'Soma','Distal'})
 axis tight off;
 
 ax3=nexttile([2 1]);
-[~, dind]=sort(contourdist_show2,'ascend');
-[X, Y] = meshgrid([1:size(Result.normTraces,2)], min(contourdist_show2):40:max(contourdist_show2));
-normTrace_showq = interp2([1:size(Result.normTraces,2)], contourdist_show2(dind), normTrace_filt(ROIaxis2(dind),:), X, Y, 'linear');
-imagesc([1:size(Result.normTraces,2)],Y(:,1),normTrace_showq)
+[~, dind]=sort(contourdist,'ascend');
+[X, Y] = meshgrid([1:size(normTrace_main,2)], min(contourdist):35:max(contourdist));
+normTrace_showq = interp2([1:size(normTrace_main,2)], contourdist, normTrace_filt_main, X, Y, 'linear');
+imagesc([1:size(normTrace_main,2)],Y(:,1),normTrace_showq)
+%imagesc([1:size(normTrace_main,2)],contourdist,normTrace_filt_main)
+cb=colorbar;
+cb.Label.String = 'Z score';
 set(gca,'YDir','reverse');
-caxis([-0.01 0.055])
+caxis([-0.5 7])
 colormap(turbo(256));
 
 linkaxes([ax1 ax3],'x')
@@ -170,29 +170,30 @@ ylabel(['Distance from' newline 'soma (\mum)'])
 figure(3); clf; tiledlayout(1,2);
 h=nexttile([1 1]);
 STAtr_show=STAtr-mean(STAtr(:,1:10),2);
+STAtr_show_main=STAtr_main-mean(STAtr_main(:,1:10),2);
 l=plot([-20:20],STAtr_show');
 arrayfun(@(l,c) set(l,'Color',c{:}),l,num2cell(gen_colormap(Plasma,31),2));
 xlim([-4 10])
 set(gca,'XTick',[-4 0 4 8])
 xlabel('Time (ms)')
-ylabel(['\DeltaF/F'])
+ylabel(['Z score']); box off;
 cb = colorbar;
 cb.Ticks = []; % Disable all ticks
 cb.Label.String = 'Basal to distal';
 colormap(h, gen_colormap(Plasma));
 
 h2=nexttile([1 1]);
-[~, dind]=sort(contourdist_show2,'ascend');
-[X, Y] = meshgrid([-20:0.5:20], min(contourdist_show2):15:max(contourdist_show2));
-STAtr_showq = interp2([-20:20], contourdist_show(dind), STAtr_show(ROIaxis(dind),:), X, Y, 'linear');
-imagesc(X(1,:),Y(:,1),STAtr_showq,[0 0.025]);
-colormap(h2,"turbo")
+[~, dind]=sort(contourdist,'ascend');
+[X, Y] = meshgrid([-20:0.5:20], min(contourdist):15:max(contourdist));
+STAtr_showq = interp2([-20:20], contourdist, STAtr_show_main, X, Y, 'linear');
+imagesc(X(1,:),Y(:,1),STAtr_showq,[-0.2 3.7]);
+colormap(h2,turbo(256))
 set(gca,'YDir','reverse')
 xlim([-4 10])
 xlabel('Time (ms)')
 ylabel(['Distance from' newline 'soma (\mum)'])
 cb = colorbar;
-cb.Label.String = '\DeltaF/F';
+cb.Label.String = 'Z score';
 %% SNAPT
 
 [superlocColormov dtimg dFF]=generate_SNAPTmov(-STAmov(:,:,26:36),Result.Structure,[],[]);

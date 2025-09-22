@@ -21,7 +21,7 @@ else
     for z=1:size(image,3)
 
         if nargin<2
-            cax=[prctile(tovec(image(:,:,z)),1) prctile(tovec(image(:,:,z)),99)];
+            cax=[prctile(image(:),1) prctile(image(:),99)];
         end
 
         nexttile([1 1])

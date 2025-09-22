@@ -1,92 +1,112 @@
-function interactive_scatter_matrix_viewer(Mat1, Mat2, A, B)
-    % Validate input dimensions
-    assert(size(A,1) == 2, 'A must be 2 x S1');
-    assert(size(B,1) == 2, 'B must be 2 x S2');
-    assert(size(Mat1,1) == size(Mat2,1), 'N must be the same for both matrices');
-    
-    N = size(Mat1,1);
-    S1 = size(Mat1,2);
-    S2 = size(Mat2,2);
-    T = size(Mat1,3);
-    T2 = size(Mat2,3);
+function interactive_scatter_matrix_viewer(Mat1, A, B)
+% INTERACTIVE_SCATTER_MATRIX_VIEWER Visualizes data by linking scatter plot to matrix slices.
+%
+%   interactive_scatter_matrix_viewer(Mat1, A, B) creates an interactive
+%   figure where A and B define the scatter plot, and Mat1 can be either
+%   a 3D numeric array (N x T x R) or a cell array where each cell is N_i x T_i.
+
+    % Validate A/B
+    assert(isvector(A) && isvector(B) && numel(A) == numel(B), ...
+        'A and B must be vectors of equal length');
+
+    useCell = iscell(Mat1);
+    if useCell
+        assert(numel(Mat1) == numel(A), 'Length of cell array Mat1 must match A/B');
+    else
+        assert(ndims(Mat1) == 3, 'Mat1 must be N x T x R if numeric');
+        assert(size(Mat1, 3) == numel(A), 'Third dimension of Mat1 must match A/B');
+    end
+
+    % Precompute color axis
+    if useCell
+        allvals=cell2mat(cellfun(@(x) x(:),Mat1,'UniformOutput',false)');
+        %allvals = vertcat(Mat1{:});
+        allvals = allvals(:);
+    else
+        allvals = Mat1(:);
+    end
+    cax = [prctile(allvals, 5), prctile(allvals, 99)];
 
     % Create figure
-    fig = figure('Name', 'Interactive Scatter Plot', 'NumberTitle', 'off', ...
-        'WindowScrollWheelFcn', @scroll_callback);
+    fig = figure('Name', 'Interactive Matrix Viewer', 'NumberTitle', 'off', ...
+                 'WindowScrollWheelFcn', @scroll_callback);
 
-    % Left Panel: Scatter plot
-    ax1 = subplot(1,2,1);
-    hold on;
-    scatterA = scatter(A(1,:), A(2,:), 'bo', 'DisplayName', 'A points');
-    scatterB = scatter(B(1,:), B(2,:), 'r.', 'DisplayName', 'B points');
-    legend;
-    title('Select a point');
-    xlabel('X'); ylabel('Y');
+    % Left panel: Scatter plot
+    ax1 = subplot(2,2,[1 3]);
+    scatterPlot = scatter(A, B, 'filled');
+    hold(ax1, 'on'); grid on;
+    highlightHandle = plot(ax1, NaN, NaN, 'ro', 'LineWidth', 2, 'MarkerSize', 10);
+    hold(ax1, 'off');
+    title('Click a point');
+    xlabel('A'); ylabel('B');
+    axis tight;
 
-    % Right Panel: Image display
-    ax2 = subplot(1,2,2);
-    img = imagesc(zeros(N, N)); % Placeholder image
-    colormap(ax2, gray);
-    axis tight off;
-    title('Selected Matrix Slice');
+    % Top-right panel: Image
+    ax2 = subplot(2,2,2);
+    imgHandle = imagesc(nan, cax);
+    colormap(ax2, parula);
+    axis tight;
+    title('Matrix Slice (N x T)');
 
-    % State tracking
+    % Bottom-right panel: Traces
+    ax3 = subplot(2,2,4);
+    traceHandles = gobjects(0,1);
+    hold(ax3, 'on');
+    hold(ax3, 'off');
+    title('All Traces');
+    xlabel('Time'); ylabel('Signal');
+    grid on;
+
+    % Link axes
+    linkaxes([ax2, ax3], 'x');
+
+    % State
     selectedIdx = NaN;
-    selectedSet = NaN; % 1 for Mat1, 2 for Mat2
-    currentTime = 1;
 
-    % Set callbacks
-    scatterA.ButtonDownFcn = @point_callback;
-    scatterB.ButtonDownFcn = @point_callback;
+    % Click callback
+    scatterPlot.ButtonDownFcn = @click_callback;
 
-    function point_callback(~, event)
-        clickPoint = event.IntersectionPoint(1:2)';
-        
-        % Find nearest point in A
-        [~, idxA] = min(vecnorm(A - clickPoint, 2, 1));
-        distA = norm(A(:, idxA) - clickPoint);
-        
-        % Find nearest point in B
-        [~, idxB] = min(vecnorm(B - clickPoint, 2, 1));
-        distB = norm(B(:, idxB) - clickPoint);
-        
-        % Choose the closest point
-        if distA < distB
-            selectedIdx = idxA;
-            selectedSet = 1;
-            currentTime = min(currentTime, T);
-        else
-            selectedIdx = idxB;
-            selectedSet = 2;
-            currentTime = min(currentTime, T2);
-        end
-        
-        % Update plot
-        update_image();
+    function click_callback(~, event)
+        pt = event.IntersectionPoint(1:2);
+        dist = vecnorm([A(:) B(:)]' - pt(:), 2, 1);
+        [~, selectedIdx] = min(dist);
+        update_panels();
     end
 
-    function scroll_callback(~, event)
+    function scroll_callback(~, ~)
+        % Reserved for future use
+    end
+
+    function update_panels()
         if isnan(selectedIdx), return; end
-        % Scroll up/down
-        if event.VerticalScrollCount > 0
-            currentTime = max(1, currentTime - 1);
-        else
-            if selectedSet == 1
-                currentTime = min(T, currentTime + 1);
-            else
-                currentTime = min(T2, currentTime + 1);
-            end
-        end
-        update_image();
-    end
 
-    function update_image()
-        if selectedSet == 1
-            img.CData = squeeze(Mat1(:, selectedIdx, :));
+        % Update red circle on selected point
+        set(highlightHandle, 'XData', A(selectedIdx), 'YData', B(selectedIdx));
+
+        % Update matrix slice
+        if useCell
+            matSlice = Mat1{selectedIdx};
         else
-            img.CData = squeeze(Mat2(:, selectedIdx, :));
+            matSlice = Mat1(:,:,selectedIdx);
         end
-        title(ax2, sprintf('Selected: %s(%d) at T=%d', ...
-            char(64+selectedSet), selectedIdx, currentTime));
+
+        [N, T] = size(matSlice);
+        set(imgHandle, 'CData', matSlice);
+        set(ax2, 'XLim', [0.5, T+0.5], 'YLim', [0.5, N+0.5]);
+
+        % Clear and replot traces
+        cla(ax3);
+        hold(ax3, 'on');
+        cmap = turbo(N);
+        traceHandles = gobjects(N,1);
+        for i = 1:N
+            traceHandles(i) = plot(ax3, 1:T, matSlice(i,:), 'Color', cmap(i,:));
+        end
+        hold(ax3, 'off');
+        xlim(ax3, [1 T]);
+        ylim(ax3, [min(matSlice(:)), max(matSlice(:))]);
+
+        title(ax2, sprintf('Slice #%d (N x T)', selectedIdx));
+        title(ax3, sprintf('All Traces (Slice #%d)', selectedIdx));
     end
 end

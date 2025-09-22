@@ -140,18 +140,18 @@ Blue_intensity=mean(cell2mat(Blue_intensity'),1);
 CSRateMat=cell2mat(CSRate');
 M = mean(CSRateMat,1,'omitnan'); S = std(CSRateMat,0,1,'omitnan')/sqrt(size(CSRateMat,1));
 
-figure(3); clf;
-cmap_t=turbo(5);
-for s=1:5
-    N_t=sum(~isnan(CSNumber_tMat(:,:,s)));
-    M_t=mean(CSNumber_tMat(:,:,s),1,'omitnan');
-    S_t=std(CSNumber_tMat(:,:,s),0,1,'omitnan');
-    errorbar(t,M_t,S_t./sqrt(N_t),'color',cmap_t(s,:),'LineWidth',2); hold all
-end
-xlim([0 0.6])
-xlabel('Time after stimulus onset (s)')
-ylabel('Fraction of complex spike')
-legend({'0.3 mW/mm^2','1.4 mW/mm^2','3.2 mW/mm^2','5.4 mW/mm^2','7.7 mW/mm^2'})
+% figure(3); clf;
+% cmap_t=turbo(5);
+% for s=1:5
+%     N_t=sum(~isnan(CSNumber_tMat(:,:,s)));
+%     M_t=mean(CSNumber_tMat(:,:,s),1,'omitnan');
+%     S_t=std(CSNumber_tMat(:,:,s),0,1,'omitnan');
+%     errorbar(t,M_t,S_t./sqrt(N_t),'color',cmap_t(s,:),'LineWidth',2); hold all
+% end
+% xlim([0 0.6])
+% xlabel('Time after stimulus onset (s)')
+% ylabel('Fraction of complex spike')
+% legend({'0.3 mW/mm^2','1.4 mW/mm^2','3.2 mW/mm^2','5.4 mW/mm^2','7.7 mW/mm^2'})
 
 figure(4); clf;
 

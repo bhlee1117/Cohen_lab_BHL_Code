@@ -1,40 +1,46 @@
-function [y_fit, params, R2] = fitExpDecay(x, y)
-% fitExpDecay: Fits data to a * exp(-x / b) + c
+function [y_fitc, params, R2] = fitExpDecay(x, y, xc)
+% fitExpDecay: Fits data to a * exp(-x / b) with heavier weight on first 3 points
+% [y_fitc, params, R2] = fitExpDecay(x, y, xc)
 %
 % Inputs:
-%   x - Independent variable (e.g., time), vector
-%   y - Dependent variable (e.g., signal), vector
+%   x - Independent variable (vector)
+%   y - Dependent variable (vector)
+%   xc - Points to evaluate the fitted curve
 %
 % Outputs:
-%   y_fit - Fitted y values
-%   params - [a, b, c] coefficients
-%   R2 - Coefficient of determination
+%   y_fitc - Fitted values at xc
+%   params - [a, b] coefficients
+%   R2 - Coefficient of determination (on original x)
 
-    if length(x) ~= length(y)
-        error('x and y must be the same length.');
-    end
+    % Remove NaNs
+    valid = ~isnan(x) & ~isnan(y);
+    x = x(valid);
+    y = y(valid);
 
-    % Initial parameter guess: [a, b, c]
+    % Initial guess
     a0 = max(y) - min(y);
     b0 = (max(x) - min(x)) / 2;
-    %c0 = min(y);
-    %p0 = [a0, b0, c0];
     p0 = [a0, b0];
 
-    % Fit model using nonlinear least squares
+    % Weights: boost first 3 points
+    weights = ones(size(y));
+    weights(1:min(3,end)) = 5;  % give 5x weight to first 3 points
+
+    % Weighted residual
     model = @(p, x) p(1) * exp(-x / p(2));
-    %model = @(p, x) p(1) * exp(-x / p(2)) + p(3);
-    opts = optimoptions('lsqcurvefit', 'Display', 'off');
-    % lb = [-Inf, 0, -Inf];  % b must be positive
-    % ub = [Inf, Inf, Inf];
-    lb = [-Inf, 0];  % b must be positive
+    residual = @(p) sqrt(weights(:)) .* (model(p, x) - y(:));
+
+    % Optimization
+    lb = [-Inf, 30];
     ub = [Inf, 2000];
+    opts = optimoptions('lsqnonlin', 'Display', 'off');
+    params = lsqnonlin(residual, p0, lb, ub, opts);
 
-    params = lsqcurvefit(model, p0, x, y, lb, ub, opts);
-
+    % Output
+    y_fitc = model(params, xc);
     y_fit = model(params, x);
 
-    % Compute R²
+    % R² (on original data)
     SSres = sum((y - y_fit).^2);
     SStot = sum((y - mean(y)).^2);
     R2 = 1 - SSres / SStot;

@@ -1,21 +1,48 @@
-function h= errorbar_shade(x,y,error,cmap)
-error=error;
+function h = errorbar_shade(x, y, error, cmap)
+% errorbar_shade - Plots a line with a shaded error region, robust to NaNs
+%
+% Syntax:
+%   h = errorbar_shade(x, y, error)
+%   h = errorbar_shade(x, y, error, cmap)
+%
+% Inputs:
+%   x     - x values (vector)
+%   y     - y values (vector)
+%   error - error margins (vector, same size as y), can contain NaNs
+%   cmap  - color (optional, RGB triplet)
+%
+% Output:
+%   h - handle to the main plot line
 
-if nargin<4
-    cmap=distinguishable_colors(1);
-end
-if size(error,1)>size(error,2)
-    error=error';
-end
-if size(y,1)>size(y,2)
-    y=y';
-end
-curve1 = y + error;
-curve2 = y - error;
-x2 = tovec([x, fliplr(x)]);
-inBetween = tovec([curve1, fliplr(curve2)]);
-fill(x2, inBetween, cmap , 'FaceAlpha', 0.3,'LineStyle','none');
-hold on;
-h= plot(x, y, 'color', cmap , 'LineWidth', 2);
+    % Ensure row vectors
+    x = x(:)';
+    y = y(:)';
+    error = error(:)';
 
+    % Validate input sizes
+    if ~isequal(size(x), size(y)) || ~isequal(size(y), size(error))
+        error('x, y, and error must be vectors of the same size.');
+    end
+
+    % Default color
+    if nargin < 4 || isempty(cmap)
+        cmap = distinguishable_colors(1);
+        cmap = cmap(1, :);
+    end
+
+    % Create upper/lower curves, ignoring NaNs
+    upper = y + error;
+    lower = y - error;
+
+    % Find finite (non-NaN) segments to shade
+    valid = isfinite(upper) & isfinite(lower) & isfinite(x);
+    if any(valid)
+        fill([x(valid), fliplr(x(valid))], ...
+             [upper(valid), fliplr(lower(valid))], ...
+             cmap, 'FaceAlpha', 0.3, 'LineStyle', 'none');
+        hold on;
+    end
+
+    % Plot central line (will handle its own NaNs)
+    h = plot(x, y, 'Color', cmap, 'LineWidth', 2);
 end

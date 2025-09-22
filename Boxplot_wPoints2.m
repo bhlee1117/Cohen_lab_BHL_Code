@@ -94,7 +94,11 @@ for i = 1:numGroups
         else
             xi = data{i}(~isnan(data{i}));
             xj = data{j}(~isnan(data{j}));
-            [~, p] = ttest2(xi, xj);
+            if ~isempty(xi) & ~isempty(xj)
+            p = ranksum(xi, xj);
+            else
+            p = NaN;
+            end
         end
         p_values(i,j) = p;
         p_values(j,i) = p;

@@ -23,23 +23,26 @@ open(myVideo)
 %try
 for i=stack
     clf;
-    i
+    %i
     pbaspect([size(double(movie),2) size(double(movie),1) 1]*2)
-    imshow2(squeeze(movie(:,:,:,i)),range)
+    h=imshow2(squeeze(movie(:,:,:,i)),range);
+    % alphaMask = squeeze(sum(movie(:,:,:,i),3)) ~= 0; % 1 for non-zero, 0 for zero
+    % set(h, 'AlphaData', alphaMask); % Apply transparency
     axis tight off equal
     hold on
     if ~isempty(dmd_mask_sequence_rois)
-        %plot(dmd_mask_sequence_rois(:,1),dmd_mask_sequence_rois(:,2),'color',[0 0.6 1],'linewidth',2)
-        plot(dmd_mask_sequence_rois(:,1),dmd_mask_sequence_rois(:,2),'ro','markersize',12)
+        plot(dmd_mask_sequence_rois(:,1),dmd_mask_sequence_rois(:,2),'color',[0 0.6 1],'linewidth',2)
+        %plot(dmd_mask_sequence_rois(:,1),dmd_mask_sequence_rois(:,2),'ro','markersize',12)
     end
-    title([num2str(stack2(i)/frmrate) ' ms'])
+    title([num2str(stack2(i)/frmrate) ' ms'],'Color',[0 0 0])
     %set(gca, 'Position', [100, 100, 1700, 800]);
     %title([num2str(i*frmrate) ' \mum'],'HorizontalAlignment','left')
     %pause(0.005) %Pause and grab frame
 colormap(turbo)
 cb=colorbar;
-cb.Label.String='\DeltaF';
+cb.Label.String='Z score';
 cb.FontSize=15;
+cb.Color=[0 0 0];
 %cb.Tick()
 %colormap(jet)
 %colormap(gen_colormap([0 0.5 1; 1 1 1; 1 0 0]))

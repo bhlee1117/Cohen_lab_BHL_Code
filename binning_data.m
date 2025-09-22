@@ -1,5 +1,5 @@
 function [mean_amplitudes std_amplitudes x_bin_centers indicies binnedData]=binning_data(Data,x_bin_edges)
-
+% [mean_amplitudes std_amplitudes x_bin_centers indicies binnedData]=binning_data(Data,x_bin_edges)
 % 2024.10.27 Byung Hun Lee
 % Binning data, input: Data(cell variable, N x 2, matrix, 1 st column: x
 % axis (axis to bin), 2nd column: measure))
@@ -8,7 +8,7 @@ x_bin_centers = mean([x_bin_edges(1:end-1); x_bin_edges(2:end)],1);
 
 mean_amplitudes = zeros(1, length(x_bin_centers));
 std_amplitudes = zeros(1, length(x_bin_centers));
-
+indicies=[];
 
 for j = 1:length(x_bin_centers)
     bin_values = [];  % To collect all amplitude values in this bin

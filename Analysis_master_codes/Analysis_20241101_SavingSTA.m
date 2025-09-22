@@ -117,7 +117,7 @@ for f=[27]
     save(fullfile(fpath{f},'PC_Result.mat'),'Result','-v7.3')
 end
 
-%%
+%% Load movie
 nTau_bAP=[-25:15];
 nTau=[-70:50];
 for f=[27]

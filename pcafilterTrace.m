@@ -1,11 +1,11 @@
-function filteredData = pcafilterTrace(data, numComponents)
+function filteredData = pcafilterTrace(data, components2remain)
 % PCAFILTEROMITNAN Filters an N x T matrix using PCA, omitting frames with NaN values.
 %
 % filteredData = pcaFilterOmitNaN(data, numComponents)
 %
 % INPUT:
 %   data          - N x T input matrix (N features, T time points), may contain NaN values.
-%   numComponents - Number of principal components to retain.
+%   components2remain - PC components to take
 %
 % OUTPUT:
 %   filteredData  - PCA-filtered data matrix (N x T), with NaN frames restored.
@@ -24,8 +24,9 @@ function filteredData = pcafilterTrace(data, numComponents)
     [U, S, V] = svd(centeredData, 'econ');
 
     % Retain the specified number of components
-nTake=numComponents;
+nTake=components2remain;
 
+if length(U)>length(nTake) & ~isempty(U)
     U_reduced = U(:, nTake); % Leading components
     S_reduced = S(nTake, nTake); % Reduced singular values
     V_reduced = V(:, nTake); % Right singular vectors
@@ -39,4 +40,6 @@ nTake=numComponents;
     % Restore filtered data to the original size, keeping NaN frames
     filteredData = NaN(size(data)); % Initialize output with NaN
     filteredData(:, validFrames) = filteredDataValid; % Fill valid frames
+else
+    filteredData=NaN(size(data));
 end

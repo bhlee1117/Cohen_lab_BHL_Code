@@ -68,7 +68,7 @@ save('Result_V2CheRiffST_20230902.mat','fpath','Result','-v7.3')
 
 %%
 clear cellnumber drug_ind
-load('/Volumes/cohen_lab/Lab/Labmembers/Byung Hun Lee/Data/20230901/Result_V2CheRiffST_20230902.mat')
+load('/Volumes/BHL18TB_D2/20230901_PP68_Adaptation_IsoKetCpp/Result_V2CheRiffST_20240110.mat')
 containString={'Awake','ket','CPP'};
 for i=1:length(Result)
     sp=split(Result{i}.fpath,'_');

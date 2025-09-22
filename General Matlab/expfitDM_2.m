@@ -1,5 +1,6 @@
 function [y_fit t_consts coeffY]  = expfitDM_2(x,y,xs,t_guess)
 % finds a least-squares fit of n exponentials (plus a const)
+% [y_fit t_consts coeffY]  = expfitDM_2(x,y,xs,t_guess)
 % xs is x points at whic to sample for output (allowing extrapolation etc)
 % x, y, xs should be column vectors.  t_guess should be a row vector.
 % 4-19-2012 Now making it fit multiple curves (all to the same

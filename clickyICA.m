@@ -1,5 +1,5 @@
 function [ROI, PCA, ICA] = clickyICA(mov, refImg, nPCs,hideOutput)
-% function [ROI, intens, eigVals, pcImgs] = clickyPCA(mov, refimg, nPCs);
+% function [ROI, PCA, ICA] = clickyICA(mov, refImg, nPCs,hideOutput)
 % mov: input movie.
 % refImg: optional image (black and white or color) on which to click to
 % select ROIs.

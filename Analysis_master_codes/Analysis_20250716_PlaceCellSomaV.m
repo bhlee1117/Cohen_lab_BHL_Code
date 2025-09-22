@@ -1,0 +1,601 @@
+clear
+clc;
+cd '/Volumes/BHL18TB_D2/YQ601_PlaceCellResults';
+[~, fpath, raw] = xlsread(['/Volumes/cohen_lab/Lab/Labmembers/Byung Hun Lee/Data/' ...
+    'PlaceCellData_Arrangement.xlsx'], 'Sheet1', 'C8:N60');
+
+save_figto='/Volumes/BHL18TB_D2/YQ601_PlaceCellResults';
+place_bin=150;
+velocity_threshold=0.002;
+VRsession=cell2mat(raw(:,12));
+time_size=15000; %segment size
+overlap=200;
+set(0,'DefaultFigureWindowStyle','docked')
+foi=setdiff([1:length(fpath)],[36]);
+%% Parameter setting and get cell coordinate
+block_size=30;
+
+for i=36:39%1:length(fpath)
+    clear bs ROI
+    load(fullfile(fpath{i},"output_data.mat"))
+    sz=double(Device_Data{1, 3}.ROI([2 4]));
+    mov_test=double(readBinMov_times([fpath{i} '/frames1.bin'],sz(2),sz(1),[3000:4000]));
+    avgImg=mean(mov_test,3);
+    [CellCoordinate, ~]=Cell_segment_circle_25x_VU(avgImg,0.99);
+    CellCoordinate=cell_detection_manual(avgImg,CellCoordinate,[]);
+
+    figure(1); clf;
+    imshow2(avgImg,[]); hold all
+    MaskImg=zeros(sz(2),sz(1));
+    for n=1:size(CellCoordinate,1)
+        ROI(n,:)=round([CellCoordinate(n,1)-block_size CellCoordinate(n,1)+block_size ...
+            CellCoordinate(n,2)-block_size CellCoordinate(n,2)+block_size]);
+        bs(n)=block_size;
+
+        % if ROI go further than outbound, reduce window size
+        while sum([ROI(n,1) > 1, ROI(n,2)<sz(1), ROI(n,3)> 1, ROI(n,4)<sz(2)])<4
+            bs(n)=bs(n)-1;
+            ROI(n,:)=round([CellCoordinate(n,1)-bs(n) CellCoordinate(n,1)+bs(n) ...
+                CellCoordinate(n,2)-bs(n) CellCoordinate(n,2)+bs(n)]);
+        end
+        ROI_box=[ROI(n,[1 3]); ROI(n,[1 4]); ROI(n,[2 4]); ROI(n,[2 3]); ROI(n,[1 3])];
+        plot(ROI_box(:,1),ROI_box(:,2),'r')
+        MaskImg(ROI_box(1,2):ROI_box(3,2),ROI_box(1,1):ROI_box(3,1))=1;
+    end
+    bwMask=bwlabel(MaskImg); CamFOVs=[];
+    MaskProps=regionprops(bwMask);
+    for b=1:max(bwMask(:))
+        CamFOVs(b,:)=round(MaskProps(b).BoundingBox);
+        draw_rectangle(CamFOVs(b,:),1,[0 0.5 1]);
+    end
+    CamFOVs(:,3:4)=CamFOVs(:,3:4)+CamFOVs(:,[1 2]);
+    CamFOVs=CamFOVs(:,[1 3 2 4]);
+    plot(CellCoordinate(:,1),CellCoordinate(:,2),'ro','markersize',15)
+    saveas(gca,[fpath{i} '/ROIs.png'])
+    save([fpath{i} '/Analysis_parameter.mat'],'CellCoordinate','bs','ROI','CamFOVs','-v7.3')
+    disp(['Parm saved'])
+end
+%% motion correction
+
+
+for i=[49] %1:length(fpath)
+    clear mcTrace_block ave_im
+    %load the center positions
+    load(fullfile(fpath{i},"output_data.mat"))
+    load(fullfile(fpath{i},'Analysis_parameter.mat'))
+    sz=double(Device_Data{1, 3}.ROI([2 4]));
+    CamCounter=Device_Data{1, 2}.Counter_Inputs(1, 1).data;
+    CamTrigger=find(CamCounter(2:end)-CamCounter(1:end-1));
+    ref_time=[10000:11000];
+
+    % make time segment
+    t_seg=[[1:time_size:length(CamTrigger)] length(CamTrigger)+1];
+    t_seg=[t_seg(1:end-1)' t_seg(2:end)'+overlap-1];
+    t_seg(2:end,1)=t_seg(2:end,1)-overlap;
+    t_seg(end)=length(CamTrigger);
+
+    for n=1:size(CamFOVs,1)
+
+        % load ROI reference
+        mov_seg=double(readBinMov_times_ROI([fpath{i} '/frames1.bin'],sz(1),sz(2),ref_time,CamFOVs(n,:)));
+        mov_seg=permute(mov_seg,[2 1 3]);
+
+        % motion correction of reference
+        if min(size(mov_seg))<50
+            [mov_seg,xyField]= optical_flow_motion_correction_LBH_ROIBlock(mov_seg,double(mean(mov_seg,3)),'normcorre');
+        else
+            [mov_seg,xyField]= optical_flow_motion_correction_LBH(mov_seg,(mean(mov_seg,3)),'normcorre');
+        end
+
+        % make reference image
+        mov_seg=  vm(mov_seg);
+        mov_seg = single(mov_seg)./single(max(mov_seg.data(:)));
+        mov_seg = movmean(mov_seg,10,3);
+        mov_ref = squeeze(median(mov_seg,3));
+
+        % load time segment of ROI
+        for t=1:size(t_seg,1)
+            mcTrace_block{n,t}=[];
+            mov=vm(readBinMov_times_ROI([fpath{i} '/frames1.bin'],sz(1),sz(2),[t_seg(t,1):t_seg(t,2)],CamFOVs(n,:)));
+            mov=permute(mov,[2 1 3]);
+            if min(size(mov_seg))<50
+                [mov_mc,xyField]= optical_flow_motion_correction_LBH_ROIBlock(mov,double(mov_ref),'normcorre');
+            else
+                [mov_mc,xyField]= optical_flow_motion_correction_LBH(mov,double(mov_ref),'normcorre');
+            end
+
+            ave_im{n,t}=mean(mov_mc,3);
+            mov_mc=vm(mov_mc);
+            mov_mc.transpose.savebin([fpath{i} '/mc' num2str(n,'%02d') '_' num2str(t,'%02d') '.bin'])
+            if isfield(xyField,'xymean')
+            mcTrace=xyField'; mcTrace=mcTrace.xymean;
+            else
+            mcTrace=xyField;
+            end
+            save(fullfile([fpath{i} '/mcTrace' num2str(n,'%02d') '_' num2str(t,'%02d') '.mat']),'mcTrace');
+        end
+    end
+    save([fpath{i} '/Analysis_parameter.mat'],'CamFOVs','CellCoordinate','ave_im','ROI','bs','-v7.3')
+    disp(['MC done:' fpath{i}])
+end
+
+%% ROI setting
+for i=[36:39]
+    Result=[];
+    load(fullfile(fpath{i},"output_data.mat"))
+    load(fullfile(fpath{i},'Analysis_parameter.mat'))
+    disp([fpath{i} ' , file:' num2str(i)])
+    cd(fpath{i})
+
+    try
+        sz=double(Device_Data{1, 3}.ROI([2 4]));
+        Result.CamType='fusion';
+        camind=3;
+    catch
+        sz=double(Device_Data{1, 4}.ROI([2 4]));
+        Result.CamType='flash';
+        camind=4;
+    end
+
+    for n=1:size(CamFOVs,1)
+
+        ref_time=[2500:7000];
+        sz_ROI=[(CamFOVs(n,2)-CamFOVs(n,1)) (CamFOVs(n,4)-CamFOVs(n,3))]+1;
+        mov_mc=double(readBinMov_times([fpath{i} '/mc' num2str(n,'%02d') '_' num2str(1,'%02d') '.bin'],sz_ROI(2),sz_ROI(1),ref_time));
+        avgImg=mean(mov_mc,3);
+
+        [u,s,v] = svds(tovec(mov_mc-mean(mov_mc,3)),20);
+        reshape_u=reshape(u,sz_ROI(2),sz_ROI(1),[]);
+        Result.bvMask{n}=[];
+        [~, Result.bvMask{n}]=get_ROI(max(abs(reshape_u),[],3),Result.bvMask{n});
+
+        load(fullfile([fpath{i} '/mcTrace' num2str(n,'%02d') '_' num2str(1,'%02d') '.mat']),'mcTrace');
+        Result.ref_im{n}=mean(mov_mc,3);
+        mov_res= mov_mc-mean(mov_mc,3);
+        mov_res = SeeResiduals(mov_res,mcTrace(ref_time,:));
+        mov_res = SeeResiduals(mov_res,mcTrace(ref_time,:).^2);
+        mov_res = SeeResiduals(mov_res,mcTrace(ref_time,1).*mcTrace(ref_time,end));
+        mov_res = mov_res.*double(max(Result.bvMask{n},[],3)==0);
+
+        ROIimg=mean(mov_mc,3);
+
+        figure(3); clf;
+        imshow2(ROIimg,[])
+        title('set extraction ROI');
+        % set extraction ROI
+        g=1; ROIpoly=[];
+        while g
+            h = drawpolygon('Color','r');
+            if size(h.Position,1)==1 %no more ROI
+                g=0;
+            else
+                ROIpoly=[ROIpoly; {h.Position}];
+                hold all
+                plot(h.Position(:,1),h.Position(:,2))
+            end
+        end
+        close(figure(3));
+        Result.ROIpoly{n}=ROIpoly;
+
+        n_comp=6;
+        mov_res_reg=mov_res;
+        mov_filt=imgaussfilt3(mov_res_reg.*double(max(Result.bvMask{n},[],3)==0),[1.5 1.5 0.1]);
+        movVec=tovec(mov_filt);
+        Npoly=size(Result.ROIpoly{n},1);
+        ftprnt = zeros(size(mov_filt,1)*size(mov_filt,2),Npoly);
+        clear mask
+        figure(4); clf;
+        for p=1:Npoly %each ROIs
+            p
+            clf; ax2=[];
+            tiledlayout(n_comp/2+2,2)
+            mask(:,:,p) = poly2mask(Result.ROIpoly{n}{p}(:,1), Result.ROIpoly{n}{p}(:,2), sz_ROI(2), sz_ROI(1));
+            pixelList=find(tovec(squeeze(mask(:,:,p))));
+            subMov = movVec(pixelList,:);
+            [V D eigTrace]=get_eigvector(subMov);
+            nexttile([2 2])
+            plot(rescale2(eigTrace(:,1:n_comp),1)+[1:n_comp])
+
+            for npc=1:n_comp
+                eigImg=NaN(size(mov_filt,1)*size(mov_filt,2),1);
+                ax2=[ax2 nexttile([1 1])];
+                eigImg(pixelList,1)=V(:,npc);
+                eigImg=toimg(eigImg,size(mov_filt,1),size(mov_filt,2));
+                imshow2(im_merge(cat(3,mat2gray(Result.ref_im{n}),(eigImg)*10),[1 1 1;1 0 0]),[])
+                title([num2str(npc) ', Fraction: ' num2str(D(npc)/sum(D),2)])
+            end
+            linkaxes(ax2,'xy')
+            n_take = input('#components to take: ', 's');
+            n_take = str2num(n_take);
+            coeff=subMov*mean(eigTrace(:,n_take)*V(:,n_take)',2);
+            ftprnt(pixelList,p)=coeff;
+        end
+        close(figure(4));
+        Result.ftprnt{n}=toimg(ftprnt,sz_ROI(2),sz_ROI(1));
+
+        figure(99); clf;
+        nexttile([1 1]);
+        show_footprnt(Result.ftprnt{n},Result.ref_im{n})
+    end
+    save(fullfile(fpath{i},'SomPC_Result.mat'),'Result','-v7.3')
+    disp([num2str(i) ' th file is done'])
+end
+
+%% Signal extraction from multiple movie files, in streaming mode
+bound = 5;
+for f=[49]
+
+    disp([fpath{f} ' , file:' num2str(f)])
+    load([fpath{f} '/SomPC_Result.mat'])
+    load(fullfile(fpath{f},"output_data.mat"))
+    load(fullfile(fpath{f},'Analysis_parameter.mat'))
+
+    if ~isfield(Result,'CamType')
+        Result.CamType='flash';
+    end
+    switch char(Result.CamType)
+        case 'flash'
+            sz=double(Device_Data{1, 4}.ROI([2 4]));
+        case 'fusion'
+            sz=double(Device_Data{1, 3}.ROI([2 4]));
+    end
+
+    CamCounter=Device_Data{1, 2}.Counter_Inputs(1, 1).data;
+    CamTrigger=find(CamCounter(2:end)-CamCounter(1:end-1));
+
+    t_seg=[[1:time_size:length(CamTrigger)] length(CamTrigger)+1];
+    t_seg=[t_seg(1:end-1)' t_seg(2:end)'+overlap-1];
+    t_seg(2:end,1)=t_seg(2:end,1)-overlap;
+    t_seg(end)=length(CamTrigger);
+
+    take_window=repmat([1 time_size],length(t_seg),1);
+    take_window(2:end,1)=take_window(2:end,1)+overlap; take_window(2:end,2)=take_window(2:end,2)+overlap;
+    take_window(end)=mod(t_seg(end),time_size);
+    take_window(take_window==0)=time_size;
+
+    Result.CamFOV=CamFOVs;
+    Result.traces_bvMask=[];
+
+      h = waitbar(0,['File Ind: ' num2str(f) ', extracting...']);
+    for n=1:size(Result.CamFOV,1)
+
+        Result.mc{n}=[];
+        Result.traces_bvMask{n}=[];
+        ref_im_vec=tovec(Result.ref_im{n}(bound:end-bound,bound:end-bound));
+        sz_ROI=[(CamFOVs(n,2)-CamFOVs(n,1)) (CamFOVs(n,4)-CamFOVs(n,3))]+1;
+
+        for t=1:size(t_seg,1)
+            waitbar((size(t_seg,1)*(n-1)+t)/(size(t_seg,1)*size(Result.CamFOV,1)),h);
+            %readT=[1:diff(t_seg(t,:))+1];
+            %mov_mc=double(readBinMov_times([fpath{i} '/mc' num2str(n,'%02d') '_' num2str(t,'%02d') '.bin'],sz_ROI(2),sz_ROI(1),readT));
+            mov_mc=double(readBinMov([fpath{f} '/mc' num2str(n,'%02d') '_' num2str(t,'%02d') '.bin'],sz_ROI(2),sz_ROI(1)));
+            load(fullfile([fpath{f} '/mcTrace' num2str(n,'%02d') '_' num2str(t,'%02d') '.mat']),'mcTrace');
+            mov_mc=mov_mc(:,:,take_window(t,1):take_window(t,2))-100;
+            %mov_mc=mov_mc.*double(max(Result.bvMask{n},[],3)==0);
+            motionTrace=movmean(mcTrace,5,1);
+            motionTrace=motionTrace(take_window(t,1):take_window(t,2),:);
+            Result.mc{n}=[Result.mc{n}; motionTrace];
+
+            Result.traces_bvMask{n}=[Result.traces_bvMask{n}, -(tovec(mov_mc)'*tovec(Result.ftprnt{n}))'];
+        end
+    end
+    
+    mov_original=double(readBinMov_times([fpath{f} '/frames1.bin'],sz(2),sz(1),[1000:2000]));
+    Result.ref_imFull=mean(mov_original,3);
+    ftprntFull=zeros(sz(1),sz(2)); g=1;
+    for n=1:size(Result.CamFOV,1)
+    ftprntFull(Result.CamFOV(n,3):Result.CamFOV(n,4),Result.CamFOV(n,1):Result.CamFOV(n,2),g:size(Result.ftprnt{n},3)+g-1)=Result.ftprnt{n};
+    g=size(ftprntFull,3)+1;
+    end
+    Result.ftprntFull=ftprntFull;
+
+    close(h);
+    figure(f);
+    clf; tiledlayout(3,2)
+    nexttile([1 2])
+    show_footprnt_contour(ftprntFull,Result.ref_imFull); colormap(gray(256));
+    nexttile([2 2])
+    trAll=cell2mat(Result.traces_bvMask');
+    l=plot(rescale2(trAll,2)'+[1:size(trAll,1)]);
+    arrayfun(@(l,c) set(l,'Color',c{:}),l,num2cell(turbo(length(l)),2));
+    saveas(gca,[fpath{f},'/Traces.png']);
+    drawnow;
+    save([fpath{f} '/SomPC_Result.mat'],'Result','-v7.3')
+    disp([num2str(f) ' th file is saved.'])
+end
+
+
+%% Load VR 
+for f=37:50
+    load([fpath{f} '/output_data.mat'])
+    load(fullfile(fpath{f},'SomPC_Result.mat'),'Result')
+    fileList = dir(fullfile(fpath{f}, '*.data'));
+    TraceAll=cell2mat(Result.traces_bvMask');
+    [nROI nTime] = size(TraceAll);
+    if length(fileList)==1
+        fid = fopen(fullfile(fpath{f},fileList.name));
+    else
+        error('Data file cannot be found');
+    end
+    VRdata = fread(fid,[12 inf],'double');
+
+    WorldITrack=find(VRdata(2,:)==1); %world 1
+    VRdata(5,WorldITrack)=(VRdata(5,WorldITrack)+6)*115/121;
+
+    VRdata(10,:)=bwlabel(VRdata(10,:));
+    VRdata=VRdata(:,VRdata(10,:)==VRsession(f));
+    DAQ_rate=Device_Data{1, 2}.Counter_Inputs.rate;
+    CamCounter=Device_Data{1, 2}.Counter_Inputs(1, 1).data;
+    CamTrigger=find(CamCounter(2:end)-CamCounter(1:end-1));
+    %CamTrigger=CamTrigger(1:nTime);
+    Cam2DAQ_ratio=length(Device_Data{2}.Counter_Inputs(1).data)/length(Device_Data{2}.buffered_tasks(1).channels(1).data);
+
+    t_DAQ=CamTrigger/DAQ_rate;
+    t_VR = datetime(datetime(VRdata(1,:),'ConvertFrom','datenum'), 'InputFormat', 'yyyy-MM-dd HH:mm:ss.SSS');
+    t_VR= t_VR-t_VR(1);
+    t_VR= milliseconds(t_VR)/1000;
+    VRdata(1,:)=t_VR;
+
+    CropVRframe=[1:find(t_VR>max(t_VR)*Cam2DAQ_ratio,1)];
+    VRdata=VRdata(:,CropVRframe);
+    VRdata(1,:)= VRdata(1,:)*t_DAQ(end)/VRdata(1,end);
+    
+    [Virmen_data_int vel_trace]=virmen_interpolate(VRdata,115,t_DAQ);
+    Virmen_data_int(end+1,:)=vel_trace;
+    Result.VR=Virmen_data_int;
+    save(fullfile(fpath{f},'SomPC_Result.mat'),'Result','-v7.3')
+    disp('VR data added.')
+end
+%% Bleaching & motion correction and Spike finding
+exclude_frq=[241.7 242]; %monitor
+exclude_frq2=[55.5 56]; %motion
+
+for f=36
+    load([fpath{f} '/SomPC_Result.mat'])
+
+    TraceAll=cell2mat(Result.traces_bvMask');
+    [nROI nTime] = size(TraceAll);
+    TraceAll_hi=TraceAll-movmedian(TraceAll,100,2);
+    TraceAll_hi=TraceAll_hi./get_threshold(TraceAll_hi,1);
+    PutativeSp=find_spike_bh(TraceAll_hi,4,2);
+    nROI_roi=cell2mat(cellfun(@(x) size(x,3),Result.ftprnt,'UniformOutput',false));
+    nROI_roivec=[];
+    for r=1:length(Result.ftprnt)
+        nROI_roivec=[nROI_roivec; ones(nROI_roi(r),1)*r];
+    end
+    
+    Subth=[]; bleaching_fit=[]; Tracefiltered=[]; PutativeSp2=[]; SpikeHeight_fit=[]; Tracefiltered_hi=[];
+    for n=1:nROI
+        Subth(n,:)=get_subthreshold(TraceAll(n,:),PutativeSp(n,:),10,40);
+        t_fit=setdiff([1:nTime],unique(find(PutativeSp(n,:)>0)'+[-15:50]));
+        t_fit(t_fit>nTime*0.25 & t_fit<nTime*0.75)=[];
+        bleaching_fit(n,:)=expfitDM_2(t_fit',-TraceAll(n,t_fit)',[1:nTime]',[100000]);
+        %Tracefiltered(n,:)=TraceAll(n,:)./bleaching_fit(n,:);
+        Tracefiltered(n,:)=permute(SeeResiduals(permute(TraceAll(n,:),[1 3 2]),bleaching_fit(n,:)'),[1 3 2]);
+        Tracefiltered(n,:)=permute(SeeResiduals_tiling(permute(Tracefiltered(n,:),[1 3 2]),Result.mc{nROI_roivec(n)},1,5000),[1 3 2]);
+        Tracefiltered(n,:)=permute(SeeResiduals_tiling(permute(Tracefiltered(n,:),[1 3 2]),Result.mc{nROI_roivec(n)}.^2,1,5000),[1 3 2]);
+        Tracefiltered(n,:)=permute(SeeResiduals_tiling(permute(Tracefiltered(n,:),[1 3 2]),Result.mc{nROI_roivec(n)}(:,1).*Result.mc{nROI_roivec(n)}(:,end),1,5000),[1 3 2]);
+
+        Tracefiltered_hi(n,:)=Tracefiltered(n,:)-movmedian(Tracefiltered(n,:),50,2);
+        Tracefiltered_hi(n,:)=Tracefiltered_hi(n,:)./get_threshold(Tracefiltered_hi(n,:),1);
+        Tracefiltered(n,:)=Tracefiltered(n,:)./bleaching_fit(n,:);
+
+        PutativeSp2(n,:)=find_spike_bh(Tracefiltered_hi(n,:),4,2);
+        PutativeSp2_frame=find(PutativeSp2(n,:)>0);
+        if length(PutativeSp2_frame)<10
+        SpikeHeight_fit(n,:)=ones(1,nTime);
+        else
+        SpikeHeight_fit(n,:)=expfitDM_2(PutativeSp2_frame',Tracefiltered(n,PutativeSp2_frame)',[1:nTime]',[100000]);
+        SpikeHeight_fit(n,:)=SpikeHeight_fit(n,:)./max(SpikeHeight_fit(n,:));
+        end
+    end
+    
+    Tracefiltered = get_bandstop(Tracefiltered, 1000, exclude_frq);
+    Tracefiltered = get_bandstop(Tracefiltered, 1000, exclude_frq2);
+
+    Result.bleaching=bleaching_fit./max(bleaching_fit,[],2);
+    Result.Spikeheight_decay=SpikeHeight_fit;
+    Result.normtrace=Tracefiltered./Result.bleaching;
+
+    figure(2*f); clf;
+    show_footprnt_contour(Result.ftprntFull,Result.ref_imFull); colormap(gray(256));
+    figure(f);
+    Result.isGood=NaN(1,nROI); Result.nType=NaN(1,nROI);
+    for n=1:nROI
+    clf; tiledlayout(1,2,'Padding','tight');
+    nexttile([1 1])     
+    plot(-TraceAll(n,:)); hold all; yyaxis right;
+    plot(Result.bleaching(n,:))
+    nexttile([1 1])     
+    plot(rescale2(Result.normtrace(n,:),2));
+    drawnow;
+    isGood=input([num2str(n) ', Is good cell? \n']);
+    nType=input('Is EXC? \n');
+    Result.isGood(n)=isGood;
+    Result.nType(n)=nType;
+    end
+
+    targetFile = strrep(fullfile(fpath{f},'SomPC_Result.mat'), '/Volumes/BHL18TB_D1/', '/Volumes/cohen_lab/Lab/Labmembers/Byung Hun Lee/Data/');
+    save(fullfile(fpath{f},'SomPC_Result.mat'),'Result','-v7.3')
+    save(targetFile,'Result','-v7.3')
+    disp(['File :' num2str(f), ', Result is saved to ' targetFile]);
+end
+
+%% find spikes
+figure(201); clf;
+CS_thres=[5 1.5];
+for f=368%:387
+    load([fpath{f} '/SomOP_Result.mat'])
+    f
+    if isfield(Result,'normTraces')
+        Result.normtrace=Result.normTraces;
+        Result = rmfield(Result, 'normTraces');
+    end
+    [nROI nTime]=size(Result.normtrace);
+    isSpikeDetected=isfield(Result,'spike');
+    isCSDetected=isfield(Result,'CS_trace');
+
+    for n=1%find(Result.isGood>0 & Result.nType>0)
+        figure(201); clf;
+        n
+        %Result.normtrace(n,:)=Result.normtrace(n,:).*Result.bleaching(n,:);
+        tr_ref=Result.normtrace(n,:)./get_threshold(Result.normtrace(n,:),1);
+        if isSpikeDetected
+           sp_soma=Result.spike(n,:);
+        else
+           sp_soma=find_spike_bh(tr_ref-movmedian(tr_ref,50,2),6,3);
+        end
+       
+        %tr_hi=mean(tr_ref,1)-get_subthreshold(tr_ref,sp_soma,30,300);
+        tr_hi=mean(tr_ref,1)-movprc(tr_ref,400,30,2);
+
+        if isCSDetected
+            CS_trace=Result.CS_trace(n,:);
+        else
+        %find CS
+        %tr_sub=get_subthreshold(tr_ref,sp_soma,17,20);
+        tr_sub=movmean(tr_ref,20,2);
+        tr_sub=tr_sub-movmedian(tr_sub,300,2);
+        [trans tr_trace]=detect_transient2(tr_sub,CS_thres,sp_soma,20);
+        if isempty(trans.amp)
+            CS_trace=zeros(1,nTime);
+        else
+            transcand=cell2mat(cellfun(@(x) length(x)>1,trans.ISI,'UniformOutput',false));
+            meanISI_frnt=cellfun(@(x) mean(x(1:2)),trans.ISI(transcand));
+            meanISI_first3=zeros(1,length(trans.length));
+            meanISI_first3(transcand)=meanISI_frnt;
+
+            %CS_ind=find(trans.spike_number>2 & trans.mean_ISI<15);
+            CS_ind=find(trans.spike_number>2 & meanISI_first3<20);
+            CS_trace=ismember(tr_trace,CS_ind);
+        end
+        end
+        bwCS=bwlabel(CS_trace);
+        CS_spike=sp_soma.*bwCS;
+        [~, CS_spike_time]=unique(CS_spike);
+        CS_spike_time(CS_spike_time<6)=[];
+        for b=1:max(bwCS)
+            bfrm=find(bwCS==b);
+            CS_trace(bfrm(1):CS_spike_time(bwCS(CS_spike_time)==b)-5)=0;
+        end
+
+        SpikeClassMat=zeros(2,nTime);
+        SpikeClassMat(1,:)=sp_soma.*(1-CS_trace); %bAPs
+        SpikeClassMat(2,CS_spike_time(1:end))=1; %Complex spikes
+
+        Result.spike(n,:)=[sp_soma];
+        bwCS=bwlabel(CS_trace);
+        CStrace=ismember(bwCS,bwCS(find(SpikeClassMat(2,:)>0)+5));
+        Result.CStrace(n,:)=CS_trace;
+
+        SpikeClassMat(1,:)=sp_soma.*(1-CS_trace); %bAPs
+        Result.SpClass(:,:,n)=SpikeClassMat;
+
+        TraceonlyCS=NaN(1,nTime);
+        TraceonlyCS(1,Result.CStrace(n,:)>0)=tr_ref(1,Result.CStrace(n,:)>0);
+
+        clf;
+        plot(tr_ref); hold all;
+        plot(TraceonlyCS,'r');
+        plot(find(Result.spike(n,:)>0),tr_ref(1,Result.spike(n,:)>0),'ro');
+        ScrollXaxis(gca)
+        isGood=input('Is good to go? \n');
+        close(figure(201));
+        while isGood==0
+            tr_hi=mean(tr_ref,1)-movprc(tr_ref,400,30,2);
+            tr_hi = interactive_bandstop_filter(tr_hi, 1000);
+            [spikeIdx, threshold1, threshold2] = interactive_spike_finder(tr_hi);
+            sp_soma=ind2vec(nTime,spikeIdx,1);
+            sp_soma = interactiveFrameCheck(tr_ref, sp_soma, 300,'trace');
+            [CS_trace, CS_thres] = interactive_cs_finder(sp_soma, tr_hi);
+
+            SpikeClassMat=zeros(2,size(tr_ref,2));
+            SpikeClassMat(1,:)=sp_soma.*(1-CS_trace); %bAPs
+            bwCS=bwlabel(CS_trace);
+            CS_spike=sp_soma.*bwCS;
+            [~, CS_spike_time]=unique(CS_spike);
+            CS_spike_time(CS_spike_time<6)=[];
+            for b=1:max(bwCS)
+                bfrm=find(bwCS==b);
+                CS_trace(bfrm(1):CS_spike_time(bwCS(CS_spike_time)==b)-5)=0;
+            end
+            SpikeClassMat(2,CS_spike_time(1:end))=1; %Complex spikes
+
+            SpikeClassMat(2,:) = interactiveFrameCheck(tr_ref, SpikeClassMat(2,:), 600,'trace');
+            sp_soma(find(SpikeClassMat(2,:)>0))=1;
+
+            CS_trace(unique(find(SpikeClassMat(2,:))'+[-3:50]))=1;
+            SpikeClassMat(1,:)=sp_soma.*(1-CS_trace); %bAPs
+            CS_trace(unique(find(SpikeClassMat(1,:))'+[-3:5]))=0;
+            CS_trace=CS_trace(1:nTime);
+            Result.spike(n,:)=[sp_soma];
+            bwCS=bwlabel(CS_trace);
+            bIndwithCS=bwCS(find(SpikeClassMat(2,:)>0)+5); bIndwithCS(bIndwithCS==0)=[];
+            CS_trace=ismember(bwCS,bIndwithCS);
+            SpikeClassMat(1,:)=sp_soma.*(1-CS_trace); %bAPs
+            CS_trace(unique(find(SpikeClassMat(1,:))'+[-3:5]))=0;
+            bwCS=bwlabel(CS_trace);
+            bIndwithCS=bwCS(find(SpikeClassMat(2,:)>0)+5); bIndwithCS(bIndwithCS==0)=[];
+            CS_trace=ismember(bwCS,bIndwithCS);
+            CS_trace=CS_trace(1:nTime);
+            Result.CStrace(n,:)=CS_trace;
+
+            SpikeClassMat(1,:)=sp_soma.*(1-CS_trace); %bAPs
+            Result.SpClass(:,:,n)=SpikeClassMat;
+
+            TraceonlyCS=NaN(1,nTime);
+            TraceonlyCS(1,Result.CStrace(n,:)>0)=Result.normtrace(n,Result.CStrace(n,:)>0);
+
+            figure(f); clf;
+            plot(Result.normtrace(n,:)); hold all;
+            plot(TraceonlyCS,'r');
+            plot(find(Result.spike(n,:)>0),Result.normtrace(n,Result.spike(n,:)>0),'ro');
+            plot(find(Result.SpClass(2,:,n)>0),Result.normtrace(n,find(Result.SpClass(2,:,n)>0)),'co')
+            plot(find(Result.SpClass(1,:,n)>0),Result.normtrace(n,find(Result.SpClass(1,:,n)>0)),'yo')
+            plot(Result.CStrace(n,:));
+            ScrollXaxis(gca)
+            isGood=input('Is good to go? \n');            
+        end
+        disp('done');
+    end
+    save([fpath{f} '/SomOP_Result.mat'],'Result','-v7.3')
+end
+
+%% Place triggered average
+figure; clf;
+place_bin=150;
+for f=[37:50]
+    f
+    load([fpath{f} '/SomPC_Result.mat'])
+    Result.Lap_V=[]; Result.Lap_FR=[]; Result.Lap_CS=[]; Result.Lap_SS=[]; Result.Lap_Sub=[]; Result.Lap_SubSlow=[];
+    Result.subThresholdSlow=[]; Result.subThreshold=[];    
+    if ~isfield(Result,'nType')
+        Result.nType=Result.isGood;
+    end
+    [nROI nTime] = size(Result.normtrace);
+    %if ~isempty(find(Result.isGood>0 & Result.nType>0))
+    for n=find(Result.isGood>0 & Result.nType>0)
+        Result.subThreshold(n,:)=get_subthreshold(Result.normtrace(n,:),Result.spike(n,:),7,20);
+        Result.subThresholdSlow(n,:)=get_subthreshold(Result.normtrace(n,:),max([Result.spike(n,:); Result.CStrace],[],1),7,150);
+        CS_spike=Result.spike(n,:).*Result.CStrace(n,:);
+        SS_spike=Result.spike(n,:).*(1-Result.CStrace(n,:));
+        Tr2average=[Result.normtrace(n,:); Result.spike(n,:); CS_spike; SS_spike; Result.subThreshold(n,:); Result.subThresholdSlow(n,:)];
+        tic; LapAvg=PlaceTrigger_average(Tr2average,place_bin,Result.VR(:,1:nTime),0.0015,115); toc;
+    Result.Lap_V(:,:,:,n) = LapAvg(:,:,1);
+    Result.Lap_FR(:,:,:,n)= LapAvg(:,:,2);
+    Result.Lap_CS(:,:,:,n)= LapAvg(:,:,3);
+    Result.Lap_SS(:,:,:,n)= LapAvg(:,:,4);
+    Result.Lap_Sub(:,:,:,n)= LapAvg(:,:,5);
+    Result.Lap_SubSlow(:,:,:,n)= LapAvg(:,:,6);
+    nexttile([1 1])
+    imagesc(ringmovMean(Result.Lap_FR(:,:,:,n),5));
+    title(['File: ' num2str(f) ', N: ' num2str(n)]);
+    drawnow;
+    %end
+    end
+    targetFile = strrep(fullfile(fpath{f},'SomPC_Result.mat'), '/Volumes/BHL18TB_D2/', '/Volumes/cohen_lab/Lab/Labmembers/Byung Hun Lee/Data/');
+    save(fullfile(fpath{f},'SomPC_Result.mat'),'Result','-v7.3')
+    save(targetFile,'Result','-v7.3')
+    disp(['Result is saved to ' targetFile]);
+end
+

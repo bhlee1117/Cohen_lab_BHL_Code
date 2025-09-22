@@ -1,4 +1,5 @@
 function orderVector = get_BurstOrder(binaryMatrix, maxInterval)
+    % orderVector = get_BurstOrder(binaryMatrix, maxInterval)
     % binaryMatrix: Input binary matrix (1D or 2D array)
     % maxInterval: Maximum interval (in frames) between true points to be in the same train
     % orderVector: Output matrix with order numbers representing the position within each train

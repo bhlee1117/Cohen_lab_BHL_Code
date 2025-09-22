@@ -10,7 +10,7 @@ cd '/Volumes/cohen_lab/Lab/Labmembers/Byung Hun Lee/Data/FromBackup/PP72_PlaceCe
 % NeuronsToUse=cellfun(@(x) (str2num(num2str(x))),NeuronsToUse,'UniformOutput',false);
 ref_ROI=cellfun(@(x) (str2num(num2str(x))),raw(:,10),'UniformOutput',false);
 fpath=raw(:,1)';
-StructureData=raw(:,9);
+StructureData=raw(:,8);
 EndFrame=cell2mat(raw(:,15));
 ifmotionReject=cell2mat(raw(:,16));
 ifregressROI=cell2mat(raw(:,18));
@@ -250,7 +250,7 @@ end
 
 for f=[18]%length(fpath)
     f
-    load(fullfile(fpath{f},'PC_Result.mat'),'Result');
+    load(fullfile(fpath{f},'PC_Result.mat'));
     load([fpath{f} '/output_data.mat'])
     sz=double(Device_Data{1, 3}.ROI([2 4])); blueDMDcontour=[];
     CamCounter=Device_Data{1, 2}.Counter_Inputs(1, 1).data;
@@ -275,7 +275,6 @@ for f=[18]%length(fpath)
     Result.blueDMDcontour=blueDMDcontour;
     Result.traces=[]; Result.traces_bvMask=[]; Result.excludetraces=[];
     Result.traces_checker{1}=[]; Result.traces_checker{2}=[];
-    Result.tracesPCA=[];
     Result.mcTrace=[];
     Result.im_corr=[];
     bound=5;
@@ -332,10 +331,9 @@ for f=[18]%length(fpath)
 
         Result.traces_checker{1}=[Result.traces_checker{1} -(tovec(mov_res.*double(max(Result.bvMask,[],3)==0))'*tovec(oddftprnt))'];
         Result.traces_checker{2}=[Result.traces_checker{2} -(tovec(mov_res.*double(max(Result.bvMask,[],3)==0))'*tovec(evenftprnt))'];
-        %       Result.tracesPCA=[Result.tracesPCA -(tovec(mov_res)'*tovec(Result.pcaMask))'];
+        %Result.tracesPCA=[Result.tracesPCA -(tovec(mov_res)'*tovec(Result.pcaMask))'];
         Result.mcTrace=[Result.mcTrace; mc];
         Result.im_corr=[Result.im_corr corr(rescale2(mov_mc_vec,1),ref_im_vec,'type','Spearman')'];  %image correlation
-
     end
 
     %Result.traces=Result.traces(:,1:length(CamTrigger)-1);
@@ -354,7 +352,7 @@ exclude_frq=[241.7 242]; %monitor
 exclude_frq2=[55.5 56]; %motion
 time_bin=15000; Fs=1000; %2nd trunk is the reliable trace
 
-for f=[18]%:length(fpath)
+for f=[26]%:length(fpath)
     load(fullfile(fpath{f},'PC_Result.mat'),'Result')
     ref_trace=ref_ROI{f}(1);
     nTime=size(Result.traces,2);
@@ -444,7 +442,7 @@ plot(sum(tr_res(ref_ROI{f},:),1,'omitnan'),'k'); hold all
             tr(tN(t):tN(t+1))=squeeze(SeeResiduals(reshape(tr(tN(t):tN(t+1)),1,1,[]),mcTrace(:,(tN(t):tN(t+1)))));
             tr(tN(t):tN(t+1))=squeeze(SeeResiduals(reshape(tr(tN(t):tN(t+1)),1,1,[]),mcTrace(:,(tN(t):tN(t+1))).^2));
             tr(tN(t):tN(t+1))=squeeze(SeeResiduals(reshape(tr(tN(t):tN(t+1)),1,1,[]),mcTrace(1,(tN(t):tN(t+1))).*mcTrace(end,(tN(t):tN(t+1)))));
-            tr(tN(t):tN(t+1))=squeeze(SeeResiduals(reshape(tr(tN(t):tN(t+1)),1,1,[]),excludeTrace(:,(tN(t):tN(t+1)))));
+            %tr(tN(t):tN(t+1))=squeeze(SeeResiduals(reshape(tr(tN(t):tN(t+1)),1,1,[]),excludeTrace(:,(tN(t):tN(t+1)))));
 
             %tr(tN(t):tN(t+1))=squeeze(SeeResiduals(reshape(tr(tN(t):tN(t+1)),1,1,[]),Result.im_corr(:,(tN(t):tN(t+1)))));
             for ch=1:2 % Checkerboard pattern traces
@@ -498,7 +496,11 @@ plot(sum(tr_res(ref_ROI{f},:),1,'omitnan'),'k'); hold all
             % [Ny_fit t_consts coeffY]  = expfitDM_2(tx(~isnan(noise(1:end-1,n)))',noise(~isnan(noise(1:end-1,n)),n),[1:nTime]',[10^6 10^4]);
             % noise_intp=Ny_fit;
             %[y_fit t_consts coeffY]  = expfitDM_2(tx(~isnan(sp_height(1:end-1,n)))',sp_height(~isnan(sp_height(1:end-1,n)),n),[1:size(Result{i}.traces,2)]',10^7);
-            [y_fit t_consts coeffY]  = expfitDM_2(t_fit',sp_height(n,t_fit)',[1:nTime]',[10^7]);
+            [SpikeAmpBinned std_amplitudes t_fit_binned indicies]=binning_data({[t_fit' sp_height(n,t_fit)']},[1:5000:nTime]);
+            validInd=~isnan(SpikeAmpBinned);
+            SpikeAmpBinned=SpikeAmpBinned(validInd); t_fit_binned=t_fit_binned(validInd);
+            %[y_fit t_consts coeffY]  = expfitDM_2(t_fit',sp_height(n,t_fit)',[1:nTime]',[10^7]);
+            [y_fit t_consts coeffY]  = expfitDM_2(t_fit_binned',SpikeAmpBinned',[1:nTime]',[10^7]);
             %[y_fit t_consts coeffY]  = expfitDM_2(t_fit(ind)',sp_height(n,t_fit((ind)))',[1:nTime]',[10^7]);
             SpHeight_intp=y_fit;
 
@@ -749,19 +751,18 @@ Struct_valid=find(1-cell2mat(cellfun(@(x) sum(isnan(x)), StructureData, 'Uniform
 for i=Struct_valid(6)'
     load(fullfile(fpath{i},'PC_Result.mat'))
     StructureStack=mat2gray(double(tiffreadVolume(StructureData{i})));
-    StructureStack(StructureStack==0)=median(StructureStack(:));
-    %StructureStack=StructureStack(:,:,:);
-    %StructureStack_med=medfilt2_mov(StructureStack,[15 15]);
-    %illumination_field=imgaussfilt(max(StructureStack,[],3),50);
-    %StructureStack=StructureStack./illumination_field;
-    %StructureStack_Gauss=imgaussfilt3(StructureStack,[6 6 0.1]);
-    %StructureStack_med(StructureStack_med==0)=median(StructureStack_med(:));
-    %StructureStack=(StructureStack-StructureStack_med)./StructureStack_med;
-    %StructureStack_filt=(StructureStack-StructureStack_Gauss);
-    StructureStack_filt=mat2gray(StructureStack_filt);
+    StructureStack=StructureStack(:,:,50:220);
+    % %StructureStack_med=medfilt2_mov(StructureStack,[15 15]);
+     illumination_field=imgaussfilt(max(StructureStack,[],3),50);
+     StructureStack=StructureStack./illumination_field;
+    % StructureStack_Gauss=imgaussfilt3(StructureStack,[6 6 0.1]);
+    %StructureStack(StructureStack==0)=median(StructureStack(:));
+    % %StructureStack=(StructureStack-StructureStack_med)./StructureStack_med;
+    % StructureStack_filt=(StructureStack-StructureStack_Gauss);
+    StructureStack_filt=mat2gray(StructureStack);
     StructureStack_bin=[]; level=[];
     level = graythresh(StructureStack_filt);
-    StructureStack_bin=StructureStack_filt>level*1.225;
+    StructureStack_bin=StructureStack_filt>level*0.1;
     moviefixsc(StructureStack_bin)
 
     se = strel('sphere', 1);
@@ -770,52 +771,35 @@ for i=Struct_valid(6)'
     segments = regionprops3(bwSeg,'Volume','EquivDiameter');
     segments = table2array(segments);
     %bwlist=find(arrayfun(@(x) x.Volume>4000, segments) & arrayfun(@(x) x.EquivDiameter>10, segments));
-    bwlist = find(segments(:,1)>7000 & segments(:,2)>10);
+    bwlist = find(segments(:,1)>5000 & segments(:,2)>10);
 
     se = strel('sphere',1);
     dendrite_bin=double(ismember(bwSeg,bwlist));
     dendrite_bin= imdilate(dendrite_bin,se);
-    dendrite_bin= imgaussfilt3(dendrite_bin,2);
-
-    figure(3); clf;
-    imshow2(max(dendrite_bin,[],3),[])
-    g=1; ROIrmv=[];
-    while g
-        h = drawpolygon('Color','r');
-        if size(h.Position,1)==1 %no more ROI
-            g=0;
-        else
-            ROIrmv=[ROIrmv; {h.Position}];
-            hold all
-            plot(h.Position(:,1),h.Position(:,2))
-        end
-    end
-    ROIrmvmask=roi2mask(ROIrmv,size(dendrite_bin,1),size(dendrite_bin,2));
-    close(figure(3));
-    dendrite_bin(repmat(ROIrmvmask,1,1,size(dendrite_bin,3)))=0;
-    figure(3); clf;
-    imshow2(max(dendrite_bin,[],3),[])
+    %dendrite_bin= imgaussfilt3(dendrite_bin,2);
+    dendrite_bin=dendrite_bin>0;
+    dendrite_bin=interactiveVoxelEditor(dendrite_bin,max(StructureStack,[],3));
 
     StructureStack_final = double(StructureStack).* dendrite_bin;
     figure(2); clf;
     imshow2(imfuse(mat2gray(max(StructureStack_final,[],3)),mat2gray(max(StructureStack,[],3))),[])
 
-    rot_ang=-90;
+    rot_ang=-50;
     Structure_ref=(imrotate(StructureStack_final,rot_ang));
     ref_img=Result.ref_im; ref_img(ref_img<prctile(ref_img(:),20))=median(ref_img(:)); ref_img=ref_img-prctile(ref_img(:),20);
-    [RegImg,tformReg]=imReg(max(Structure_ref,[],3),ref_img);
+    %[RegImg,tformReg]=imReg(max(Structure_ref,[],3),ref_img);
+    [RegImg, tformReg] = interactiveImageRegistration(max(Structure_ref,[],3),ref_img);
+    RegImg_bin=imwarp(max(imrotate(dendrite_bin,rot_ang),[],3), tformReg, 'OutputView', imref2d(size(ref_img)));
 
+    avgImg=Result.ref_im;
     Result.Structure=RegImg;
-    Result.Structure_bin=imwarp(max(imrotate(dendrite_bin,rot_ang),[],3), tformReg, 'OutputView', imref2d(size(ref_img)));
+    Result.Structure_bin=RegImg_bin;
     Result.tform=tformReg;
-    saveastiff(uint16(mat2gray(Structure_ref)*255), [fpath{i} 'Structure.tiff']);
-
-    Result.Structure=max(Structure_ref,[],3);
-    Result.Structure_bin=max(imrotate(dendrite_bin,rot_ang),[],3);
-    Result.tform=tformReg;
+    targetFile = strrep(fullfile(fpath{i},'PC_Result.mat'), '/Volumes/BHL18TB_D2/', '/Volumes/cohen_lab/Lab/Labmembers/Byung Hun Lee/Data/');
     save(fullfile(fpath{i},'PC_Result.mat'),'Result','-v7.3')
+    save(targetFile,'Result','-v7.3')
+    disp(['Result is saved to ' targetFile]);
 end
-
 %% Place field
 f=14;
 load(fullfile(fpath{f},'PC_Result.mat'))

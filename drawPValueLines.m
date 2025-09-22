@@ -1,19 +1,21 @@
 function drawPValueLines(p_values, yOffset, varargin)
-% drawPValueLinesSeparate Draws separated significance lines avoiding overlap.
+% drawPValueLines Draws significance lines for p-value matrix.
+%   drawPValueLines(p_values, yOffset, 'XCoord', x)
 %
-%   drawPValueLinesSeparate(p_values, yOffset)
-%       p_values : NxN symmetric matrix of p-values.
-%       yOffset  : scalar y-offset.
+%   - p_values: NxN symmetric matrix
+%   - yOffset: scalar for vertical offset above current axis limit
 %
 % Optional name-value pairs:
-%       'Format'      : 'star' (default) or 'text'
-%       'TextYOffset' : height above line for text
-%       'FontSize'    : font size
-%       'Alpha'       : significance threshold (default: 0.05)
-%       'StepHeight'  : vertical spacing between stacked bars
+%   'XCoord'      : 1xN vector of x-axis coordinates
+%   'Format'      : 'star' or 'text'
+%   'TextYOffset' : vertical offset for label
+%   'FontSize'    : font size for label
+%   'Alpha'       : significance threshold
+%   'StepHeight'  : vertical spacing between stacked lines
 
     % --- Parse optional inputs ---
     p = inputParser;
+    addParameter(p, 'XCoord', [], @(x) isnumeric(x) && isvector(x));
     addParameter(p, 'Format', 'star', @(x) ischar(x) || isstring(x));
     addParameter(p, 'TextYOffset', 0.1, @isnumeric);
     addParameter(p, 'FontSize', 12, @isnumeric);
@@ -24,6 +26,16 @@ function drawPValueLines(p_values, yOffset, varargin)
 
     numGroups = size(p_values, 1);
 
+    % --- Set default X coordinates if not provided ---
+    if isempty(opts.XCoord)
+        xCoord = 1:numGroups;
+    else
+        xCoord = opts.XCoord;
+        if numel(xCoord) ~= numGroups
+            error('Length of XCoord must match size of p-value matrix.');
+        end
+    end
+
     % --- Set base height ---
     ylims = ylim;
     if isscalar(yOffset)
@@ -33,8 +45,6 @@ function drawPValueLines(p_values, yOffset, varargin)
     end
 
     hold on;
-
-    % Initialize stack levels
     levelMatrix = [];  % [x1, x2, level]
     stepY = opts.StepHeight;
 
@@ -46,8 +56,8 @@ function drawPValueLines(p_values, yOffset, varargin)
                 continue;
             end
 
-            x1 = i;
-            x2 = j;
+            x1 = xCoord(i);
+            x2 = xCoord(j);
 
             % --- Find available level ---
             currentLevel = 0;
@@ -55,7 +65,6 @@ function drawPValueLines(p_values, yOffset, varargin)
                 overlaps = false;
                 for k = 1:size(levelMatrix, 1)
                     existing = levelMatrix(k,:);
-                    % If horizontal ranges overlap and same level, cannot use
                     if ~(x2 < existing(1) || x1 > existing(2)) && existing(3) == currentLevel
                         overlaps = true;
                         break;
@@ -68,17 +77,15 @@ function drawPValueLines(p_values, yOffset, varargin)
                 end
             end
 
-            % Register this new bar
+            % Register this line
             levelMatrix = [levelMatrix; x1, x2, currentLevel];
 
-            % Calculate Y position
+            % --- Draw line ---
             y = baseHeight + currentLevel * stepY;
             dy = stepY/3;
-
-            % Draw line
             plot([x1 x1 x2 x2], [y y+dy y+dy y], 'k', 'LineWidth', 1);
 
-            % Generate label
+            % --- Label ---
             if strcmpi(opts.Format, 'star')
                 if pVal < 0.001
                     label = '***';
@@ -93,7 +100,6 @@ function drawPValueLines(p_values, yOffset, varargin)
                 label = sprintf('p=%.3g', pVal);
             end
 
-            % Place label
             text(mean([x1 x2]), y + opts.TextYOffset, label, ...
                 'HorizontalAlignment', 'center', ...
                 'FontSize', opts.FontSize, ...

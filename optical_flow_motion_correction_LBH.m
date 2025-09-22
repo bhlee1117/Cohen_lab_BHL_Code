@@ -47,20 +47,32 @@ Y = imfilter(single(mov),psf,'same');
 %Ypc = Yf - Y;
 bound = 2*ceil(gSiz/2);
 
+mov_tempY=imfilter(mov_temp,psf,'same');
+
 
 % % %total number of pixels
-% options_rigid = NoRMCorreSetParms('d1',d1-bound,'d2',d2-bound,'bin_width',200, ...
-%     'grid_size',[360,360],'mot_uf',4,'correct_bidir',false, ...
-%     'overlap_pre',64,'overlap_post',64,'max_shift',50);
 
-%options_rigid = NoRMCorreSetParms('d1',d1-bound,'d2',d2-bound,'bin_width',200,'max_shift',50,'mot_uf',4);
 
+%options_rigid = NoRMCorreSetParms('d1',d1-bound,'d2',d2-bound,'bin_width',200,'max_shift',50,'mot_uf',4,'upd_template',false);
+
+ % options_rigid = NoRMCorreSetParms('d1',d1-bound,'d2',d2-bound,'upd_template', false,'bin_width',200, ...
+ %   'grid_size',[360, 360],'mot_uf',4,'correct_bidir',false, 'max_shift',40,'upd_template',false);
+
+ try
  options_rigid = NoRMCorreSetParms('d1',d1-bound,'d2',d2-bound,'bin_width',200, ...
-   'grid_size',[360, 360],'mot_uf',4,'correct_bidir',false, 'max_shift',40);
+    'grid_size',[360,360],'mot_uf',4,'correct_bidir',false, ...
+    'overlap_pre',64,'overlap_post',64,'max_shift',50,'upd_template',false);
 
 tic; 
-[mov_mc,shifts2,template2] = normcorre_batch(Y(bound/2+1:end-bound/2,bound/2+1:end-bound/2,:),options_rigid,mov_temp(bound/2+1:end-bound/2,bound/2+1:end-bound/2,:)); 
+[mov_mc,shifts2,template2] = normcorre_batch(Y(bound/2+1:end-bound/2,bound/2+1:end-bound/2,:),options_rigid,mov_tempY(bound/2+1:end-bound/2,bound/2+1:end-bound/2,:)); 
 toc 
+ catch
+        disp('Error during motion correction process, move on to rigid correction');
+     options_rigid = NoRMCorreSetParms('d1',d1-bound,'d2',d2-bound,'bin_width',200,'max_shift',50,'mot_uf',4,'upd_template',false);
+     tic; 
+[mov_mc,shifts2,template2] = normcorre_batch(Y(bound/2+1:end-bound/2,bound/2+1:end-bound/2,:),options_rigid,mov_tempY(bound/2+1:end-bound/2,bound/2+1:end-bound/2,:)); 
+toc 
+ end
 % tic; 
 % [mov_mc,shifts2,template2] = normcorre(Y(bound/2+1:end-bound/2,bound/2+1:end-bound/2,:),options_rigid,mov_temp(bound/2+1:end-bound/2,bound/2+1:end-bound/2,:)); 
 % toc 

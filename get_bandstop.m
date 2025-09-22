@@ -1,4 +1,5 @@
 function filtered_traces = get_bandstop(traces, fs, stopband)
+%filtered_traces = get_bandstop(traces, fs, stopband)
 % GET_BANDSTOP Applies a bandstop filter to an N x T matrix of traces.
 % Handles NaNs by filtering only non-NaN segments.
 %

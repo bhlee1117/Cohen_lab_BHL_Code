@@ -62,7 +62,7 @@ bind=find(branchlabel==b);
 Corrmat{b}=get_corrMat(SubTrace{1}(bind,:),SubTrace{2}(bind,:));
 end
 
-SubTrace_filter=pcafilterTrace(SubTrace,5);
+SubTrace_filter=pcafilterTrace(SubTr,1:5);
 LapSub=PlaceTrigger_average(SubTrace_filter,150,Result.VR,-0.002,115); %total trace
 LapFR=PlaceTrigger_average(Result.spike(1,:),150,Result.VR,-0.002,115)*1000; %total trace
 
@@ -99,18 +99,18 @@ xlabel('VR position (cm)');
 
 nexttile([1 1])
 L=repmat(ringmovMean(LapSub(show_lap,:,11),7),1,3);
-imagesc((PFcenter-150+nVRbin)/150*200,[1:length(show_lap)],L(:,PFcenter+150+nVRbin),[-0.002 0.005])
+imagesc((PFcenter-150+nVRbin)/150*200,[1:length(show_lap)],L(:,PFcenter+150+nVRbin),[-0.002 0.005]*1000)
 xlabel('VR position (cm)');
 cb=colorbar;
-cb.Label.String='\DeltaF/F';
+cb.Label.String='Z score';
 
 nexttile([1 1])
 L=repmat(ringmovMean(LapSub(show_lap,:,19),7),1,3);
-imagesc((PFcenter-150+nVRbin)/150*200,[1:length(show_lap)],L(:,PFcenter+150+nVRbin),[-0.002 0.005])
+imagesc((PFcenter-150+nVRbin)/150*200,[1:length(show_lap)],L(:,PFcenter+150+nVRbin),[-0.002 0.005]*1000)
 colormap(turbo);
 xlabel('VR position (cm)');
 cb=colorbar;
-cb.Label.String='\DeltaF/F';
+cb.Label.String='Z score';
 
 nexttile([1 1])
 L=repmat(ringmovMean(cat(3,LapFR(show_lap,:),LapSub(show_lap,:,11),LapSub(show_lap,:,19)),5),1,3);
@@ -123,8 +123,6 @@ plot((PFcenter-150+nVRbin)/150*200,mean(L(:,PFcenter+150+nVRbin,3),1,'omitnan'),
 set(gca,'YColor','k')
 ylabel('\DeltaF/F');
 xlabel('VR position (cm)');
-
-%%
 
 
 %%
@@ -168,28 +166,42 @@ drawnow;
 end
 
 %% Load movie
-
-frame_interest=539750;
+f=26;
+frame_interest=539750; time_segment=15000; overlap=200;
 mov_res_cat=[];
-for j=[36 37]
 load(fullfile(fpath{f},'PC_Result.mat')) % load the result file
 load(fullfile(fpath{f},"output_data.mat")) 
 sz=double(Device_Data{1, 3}.ROI([2 4]));
+frm_end=EndFrame(f);
+[nROI, nTime]=size(Result.traces_bvMask);
+f_seg=[[1:time_segment:frm_end] frm_end+1]; f_seg(2:end)=f_seg(2:end)-1;
+
+perispike_time=unique(find(Result.spike(1,:))'+[-5:30]); perispike_time(perispike_time<1 | perispike_time>nTime)=[];
+periblue_time=unique(find(Result.Blue>0)'+[-5:30]); periblue_time(periblue_time<1 | periblue_time>nTime)=[];
+t_fit= (ind2vec(size(Result.traces_bvMask,2),periblue_time,1)==0) & (ind2vec(size(Result.traces_bvMask,2),perispike_time,1)==0);
+[bleaching_fit] = expfitDM_2(find(t_fit)',-mean(Result.traces_bvMask(:,t_fit))',[1:size(Result.traces_bvMask,2)]',[100000 10000]);
+
+for j=[36 37]
+    j
 mov_mc=double(readBinMov([fpath{f} '/mc_ShutterReg' num2str(j,'%02d') '.bin'],sz(2),sz(1))); %load movie
 load(fullfile(fpath{f},['mcTrace' num2str(j,'%02d') '.mat'])); % load motion correction traces
-
+mov_mc=mov_mc(:,:,1:end-overlap);
+bkg = zeros(1, size(mov_mc,3));
+bkg(1,:) = bleaching_fit(f_seg(j)+1:f_seg(j+1));  % linear term
 mov_res=mov_mc-mean(mov_mc,3);
-mov_res = SeeResiduals(mov_res,mcTrace.xymean);
-mov_res = SeeResiduals(mov_res,mcTrace.xymean.^2);
-mov_res = SeeResiduals(mov_res,mcTrace.xymean(:,1).*mcTrace.xymean(:,end));
+mov_res = SeeResiduals(mov_res,Result.mcTrace(f_seg(j)+1:f_seg(j+1),:));
+mov_res = SeeResiduals(mov_res,Result.mcTrace(f_seg(j)+1:f_seg(j+1),:).^2);
+mov_res = SeeResiduals(mov_res,Result.mcTrace(f_seg(j)+1:f_seg(j+1),1).*Result.mcTrace(f_seg(j)+1:f_seg(j+1),end));
 mov_res_cat=cat(3,mov_res_cat,mov_res);
+mov_res = SeeResiduals(mov_res,bkg,1);
 end
+%F0img=get_F0img(mov_res(:,:,1:1000));
 %mov_res = mov_res.*(max(Result.bvMask,[],3)==0); % mask out blood vessels
 mov_res_cat=mov_res_cat(:,:,15000+[-8000:8000]);
-F0=imgaussfilt(mean(mov_mc,3)-100,5);
-mov_res_dff=mov_res_cat./F0;
+mov_res_dff=-mov_res_cat./Result.F0img;
 
 DendBound=bwboundaries(bwlabel(max(Result.ftprnt>0,[],3)>0));
+cellMask=point2img(Result.SWC(:,1:2),3,size(Result.ref_im));
 
 figure(12); clf; tiledlayout(1,3);
 ax1=nexttile([1 1]);
@@ -226,4 +238,23 @@ title('Local subthreshold')
 cb=colorbar;
 cb.Label.String='\DeltaF';
 linkaxes([ax1 ax2 ax3],'xy')
+
+%% Generate movie
+t_sub=[1:20:size(mov_res_dff,3)];
+mov_res_dff_sub=imgaussfilt3(mov_res_dff(:,:,t_sub),[1 1 5]);
+mov_res_dff_sub=mov_res_dff_sub.*cellMask;
+mov_res_dff_sub_filter=pcafilt(mov_res_dff_sub,50);
+cax_sub=[-1.5 4];
+colorSTA=grs2rgb(tovec(mov_res_dff_sub),colormap(turbo),cax_sub(1),cax_sub(2));
+colorSTA=reshape(colorSTA,sz(2),sz(1),size(mov_res_dff_sub,3),[]);
+colorSTA=permute(colorSTA,[1 2 4 3]);
+
+ref_im_hi=Result.ref_im-medfilt2(Result.ref_im,[40 40]);
+level = graythresh(ref_im_hi);
+ref_im_hi(ref_im_hi<level)=0;
+%PeakMov_sub_Struc=colorSTA.*mat2gray(Result.ref_im-100)*3;
+PeakMov_sub_Struc=colorSTA.*mat2gray(ref_im_hi)*5.*cellMask;
+figure(161); clf;
+writeMov4d(fullfile(fpath{f},['LocalSubthreshold_frame550000']), ...
+flipud(permute(PeakMov_sub_Struc,[2 1 3 4])),[t_sub],10,1,cax_sub,[]);
 

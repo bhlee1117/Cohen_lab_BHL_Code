@@ -1,5 +1,9 @@
 function red_x=dim_reduce(x)
- covMat = x'*x;  % PCA within each region
+if size(x,1)<size(x,2)
+x=x';
+end
+x=x-mean(x,1);
+covMat = x'*x;  % PCA within each region
     [V, D] = eig(covMat);
     D = diag(D); 
     D = D(end:-1:1);

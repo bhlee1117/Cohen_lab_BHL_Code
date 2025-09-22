@@ -18,7 +18,7 @@ function p_values = Violin_wPoints(X, faceColor)
 
 % --- Convert matrix to cell array if needed ---
 if isnumeric(X)
-    X = num2cell(X', 1);
+    X = num2cell(X, 1);
 elseif iscell(X)
     if ~all(cellfun(@isnumeric, X))
         error('All elements in cell array X must be numeric vectors.');
