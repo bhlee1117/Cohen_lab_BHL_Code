@@ -3,7 +3,7 @@ clear
 clc;
 cd '/Users/bhlee1117/Documents/GitHub/Cohen_lab_BHL_Code/Analysis_master_codes';
 [~, ~, raw] = xlsread(['/Volumes/cohen_lab/Lab/Labmembers/Byung Hun Lee/Data/' ...
-    'Prism_OptopatchData_Arrangement.xlsx'], 'Sheet1', 'C5:R196');
+    'Prism_OptopatchData_Arrangement.xlsx'], 'Sheet1', 'C5:R205');
 
 save_to='/Volumes/BHL18TB_D2/Arranged_Data/Prism_OptopatchResult';
 fpath=raw(:,1);
@@ -16,11 +16,39 @@ TimeSegFrame=cell2mat(cellfun(@(x) (str2num(num2str(x))),raw(:,11),'UniformOutpu
 PixelSize=cell2mat(cellfun(@(x) (str2num(num2str(x))),raw(:,12),'UniformOutput',false));
 [~, unqInd] = unique([Mouse NeuronInd] ,'row');
 set(0,'DefaultFigureWindowStyle','docked')
+foi=[124 111 195:200];
+% %% Set clicky ROIs
+% for f=foi(3:end)
+% load(fullfile(fpath{f},'output_data.mat'))
+% load(fullfile(fpath{f},'mcTrace01.mat'))
+% Blue=Device_Data{1, 2}.buffered_tasks(1, 1).channels(1, 2).data;
+% CamCounter=Device_Data{1, 2}.Counter_Inputs(1, 1).data;
+% CamTrigger=find(CamCounter(2:end)-CamCounter(1:end-1));
+% Blue=Blue(CamTrigger);
+% [blueDMDimg, bluePatt, blueCenter]=get_blueDMDPatt(Device_Data,'stack');
+% sz=double(Device_Data{1, 3}.ROI([2 4]));
+% DMDtrigger = Device_Data{1, 2}.buffered_tasks(1, 2).channels(1, 3).data;
+% DMDtrigger = DMDtrigger(CamTrigger);
+% DMDtrigger = [0 (diff(DMDtrigger) > 0)];
+% DMDbluetrace=(Blue>0).*(cumsum(DMDtrigger)+1);
+% DMDbluetrace(Blue==0)=0;
+% mov_mc=double(readBinMov_times(fullfile(fpath{f},'mc_ShutterReg01.bin'),sz(2),sz(1),[1:1000]));
+% 
+% figure(10); clf;
+% show_footprnt_contour(blueDMDimg,mean(mov_mc,3))
+% 
+% figure(11); clf;
+% Result.clicky_ROI=clicky(mov_mc);
+% save(fullfile(fpath{f},'OP_Result.mat'),"Result",'-v7.3')
+% end
 %%
-foi=[124 144];
-f=1;
-load(fullfile(fpath{foi(f)},'output_data.mat'))
-load(fullfile(fpath{foi(f)},'mcTrace01.mat'))
+nTau=[50 150];
+for f=foi(1:end)
+    f
+    clear mov_res mov_mc mov_res_filt dirtMov_dilate
+load(fullfile(fpath{f},'output_data.mat'))
+load(fullfile(fpath{f},'mcTrace01.mat'))
+load(fullfile(fpath{f},'OP_Result.mat'))
 Blue=Device_Data{1, 2}.buffered_tasks(1, 1).channels(1, 2).data;
 CamCounter=Device_Data{1, 2}.Counter_Inputs(1, 1).data;
 CamTrigger=find(CamCounter(2:end)-CamCounter(1:end-1));
@@ -33,14 +61,16 @@ DMDtrigger = [0 (diff(DMDtrigger) > 0)];
 DMDbluetrace=(Blue>0).*(cumsum(DMDtrigger)+1);
 DMDbluetrace(Blue==0)=0;
 
-mov_mc=double(readBinMov(fullfile(fpath{foi(f)},'mc_ShutterReg01.bin'),sz(2),sz(1)));
-avgImg=mean(mov_mc,3);
-nTime=size(mov_mc,3);
+mov_mc=double(readBinMov_times(fullfile(fpath{f},'mc_ShutterReg01.bin'),sz(2),sz(1),[1:length(CamTrigger)]));
+dirtMov_dilate = double(readBinMov_times(fullfile(fpath{f},'dirt_mov.bin'),sz(2),sz(1),[1:length(CamTrigger)]));
+avgImg=mean(mov_mc,3); nTime=size(mov_mc,3);
 
 [~, t_fit]=get_blueoffTrace([1:nTime],Blue>0,20,20);
 t_fit=find(t_fit);
 meanF = squeeze(mean(mov_mc,[1 2]));
 bleaching_fit=expfitDM_2(t_fit',meanF(t_fit),[1:nTime]',[10000]);
+mcTrace.xymean=mcTrace.xymean(1:size(mov_mc,3),:);
+Result.ref_im=avgImg;
 
 bkg = zeros(1, size(mov_mc,3));
 bkg(1,:) = bleaching_fit;  % linear term
@@ -50,1381 +80,135 @@ mov_res = SeeResiduals(mov_res,mcTrace.xymean.^2);
 mov_res = SeeResiduals(mov_res,mcTrace.xymean(:,1).*mcTrace.xymean(:,end));
 mov_res = SeeResiduals(mov_res,bkg,1);
 
-[clicky_ROI, clicky_tr]=clicky(mov_res,avgImg);
+mov_res_filt=mov_res;
+mov_res_filt(dirtMov_dilate>0)=NaN;
 
+Result.Blue=Blue; Result.DMDbluetrace=DMDbluetrace;
+figure(10); clf;
+show_footprnt_contour(blueDMDimg,mean(mov_mc,3))
 
+figure(11); clf;
+Result.blueDMDimg=blueDMDimg;
+[Result.clicky_tr]=apply_clicky(Result.clicky_ROI,mov_res_filt);
+Result.clicky_tr_raw=apply_clicky(Result.clicky_ROI,mov_mc);
+Result.clicky_tr=Result.clicky_tr';
+Result.clicky_tr_raw=Result.clicky_tr_raw';
 
+DMDBlueSTAmat=[]; STAmov=[];
+clicky_tr_filt=movmean(Result.clicky_tr,10,2);
+% clicky_tr_filt=get_bandstop(clicky_tr_filt,1000,[50 75]);
+% clicky_tr_filt=get_bandstop(clicky_tr_filt,1000,[9 11]);
+% clicky_tr_filt(8500:9000)=NaN;
+for b=1:max(DMDbluetrace)
+[~, DMDBlueSTAmat{b}]=get_STA(clicky_tr_filt,[0 diff(DMDbluetrace==b)==1],nTau(1),nTau(2));
+[STAmov{b}]=get_STA(tovec(mov_res_filt),[0 diff(DMDbluetrace==b)==1],nTau(1),nTau(2));
+STAmov{b}=reshape(STAmov{b},sz(2),sz(1),[]);
+DMDBlueSTAmat{b}=squeeze(DMDBlueSTAmat{b});
+end
+DMDBlueSTA=-cell2mat(cellfun(@(x) mean(x,1,'omitnan'),DMDBlueSTAmat,'UniformOutput',false)');
+DMDBlueSTA=DMDBlueSTA-median(DMDBlueSTA(:,end-100:end),2);
+Result.STAmov=STAmov;
+Result.DMDBlueSTAmat=DMDBlueSTAmat;
+Result.DMDBlueSTA=DMDBlueSTA;
 
-
-
-
-
-
-
-
-
-
+save(fullfile(fpath{f},'OP_Result.mat'),"Result",'-v7.3')
+disp(['Result save to ' fullfile(fpath{f},'OP_Result.mat')])
+end
 
 %% Concatenate data
-
-f_local=[94 96 97 98 99 102 104:111 123 124 144 145 151:156 164 165 172:175 185 186 190 191 192];
-%f_local=[191];
-Labels={[1 2],[3],[4 5]};
-% Stimulation, Mouse #, Neuron #, Voltage trace, blue trace, spike trace, DMD image, DMD ROI, avgImg, structure, filepath
-g=1;
-nTau=[-30:50];
-LocalStimResult=[];
-for f=f_local
-    f
-    load([fpath{f} '/OP_Result.mat'])
-    load(fullfile(fpath{f},"output_data.mat"))
-    DMDbluetrace=(Result.Blue>0).*(cumsum(Result.DMDtrigger)+1);
-    DMDbluetrace(Result.Blue==0)=0;
-    DMDseq=mod(cumsum(Result.DMDtrigger)+1,size(Result.blueDMDimg,3))+(mod(cumsum(Result.DMDtrigger)+1,size(Result.blueDMDimg,3))==0)*size(Result.blueDMDimg,3);
-    [F0PCA Nused]=get_F0PCA(get_subthreshold(Result.tracesSplit,Result.spike(1,:),7,17));
-    if Nused==1
-        [F0PCA Nused]=get_F0PCA(get_subthreshold(Result.tracesSplit,Result.spike(1,:),7,17),5);
-    end
-    normTr=Result.tracesSplit./F0PCA;
-    for b=1:size(Result.blueDMDimg,3)
-        frame2read=find(DMDseq==b);
-        if length(frame2read)>1000
-        if isfield(Result,'dirtTraceSplit')
-            normTr(Result.dirtTraceSplit>0)=NaN;
-        end
-        LocalStimResult{g}.fileInd=f;
-        LocalStimResult{g}.frame2read=frame2read;
-        LocalStimResult{g}.DMDpatternN=b;
-        LocalStimResult{g}.filepath=fpath{f};
-        LocalStimResult{g}.Mouse=Mouse(f);
-        LocalStimResult{g}.NeuronInd=NeuronInd(f);
-        LocalStimResult{g}.blueTrace=Result.Blue(frame2read);
-        LocalStimResult{g}.blueDMDimg=Result.blueDMDimg(:,:,b);
-        if iscell(Result.bluePatt)
-            LocalStimResult{g}.bluePatt=cell2mat(Result.bluePatt(b));
-        else
-            LocalStimResult{g}.bluePatt=Result.bluePatt;
-        end
-        LocalStimResult{g}.VoltageTrace=normTr(:,frame2read);
-        LocalStimResult{g}.spike=Result.spike(:,frame2read);
-        LocalStimResult{g}.dist_order=Result.dist_order;
-        LocalStimResult{g}.ref_im=Result.ref_im;
-        LocalStimResult{g}.roilabel=Result.roilabel;
-        if isfield(Result,'Structure')
-            LocalStimResult{g}.Structure=Result.Structure;
-        else
-            LocalStimResult{g}.Structure=Result.Mask;
-        end
-        LocalStimResult{g}.interDendDist=Result.interDendDistSplit.*PixelSize(f);
-        LocalStimResult{g}.DMDimg=Result.blueDMDimg(:,:,b);
-        LocalStimResult{g}.ftprnt=Result.ftprntSplit;
-        Dmat=distance_mat(Result.blueDMDcoord(b,:),get_coord(Result.ftprntSplit));
-        [minD, LocalStimResult{g}.stimInd]=min(Dmat);
-        if isnan(minD);
-            LocalStimResult{g}.stimInd=NaN;
-        end
-
-        LocalStimResult{g}.MaskSeq=[];
-        for l=1:length(Labels) % dendrite label: [1:5]=[Basal, Soma, Oblique, Trunk, Distal]
-
-            [d, m]=max(LocalStimResult{g}.interDendDist(LocalStimResult{g}.stimInd,:).*ismember(Result.roilabel,Labels{l}));
-            if d==0
-                LocalStimResult{g}.MaskSeq{l}=[];
-            else
-                Mask_pth=max(LocalStimResult{g}.ftprnt,[],3)>0;
-                StartPt = get_coord(LocalStimResult{g}.ftprnt(:,:,LocalStimResult{g}.stimInd));
-                endPt = get_coord(LocalStimResult{g}.ftprnt(:,:,m));
-                [~, pth] = geodesic_distance(Mask_pth, StartPt, endPt);
-                LocalStimResult{g}.MaskSeq{l} = line2masksequence(pth, LocalStimResult{g}.ftprnt>0, StartPt);
-            end
-        end
-
-        blueOnSet=find((LocalStimResult{g}.blueTrace(2:end)-LocalStimResult{g}.blueTrace(1:end-1))>0);
-        [~, spMat sp_time]=get_STA(LocalStimResult{g}.spike(1,:),blueOnSet,-nTau(1),nTau(end));
-        Nsp=squeeze(sum(spMat,3,'omitnan'));
-        [~, trMat]=get_STA(LocalStimResult{g}.VoltageTrace,blueOnSet,-nTau(1),nTau(end));
-        STAtr=squeeze(mean(trMat(:,Nsp==0,:),2,'omitnan'));
-        sp_time=sp_time(Nsp==0);
-        LocalStimResult{g}.triggerPoint=sp_time;
-        LocalStimResult{g}.N_avg=length(find(Nsp==0));
-        STAtr=STAtr-median(STAtr(:,1:15),2,'omitnan');
-        if sum(Nsp==0)==0
-            LocalStimResult{g}.STAtr=NaN;
-        else
-            LocalStimResult{g}.STAtr=STAtr;
-        end
-
-        if ~isempty(frame2read)
-            g=g+1;
-        else
-            LocalStimResult(g)=[];
-        end
-        end
-    end
-end
-%% 
-% % %% Stimulation triggered movie (option)
-% % nTau=[-30:80]; Time2avg=[10:20];
-% % bound=6;
-% % for Mov2See=[97:105]%[69:length(LocalStimResult)]
-% %     try
-% %         f=LocalStimResult{Mov2See}.fileInd; frlength=length(LocalStimResult{Mov2See}.frame2read);
-% %         load([fpath{f} '/OP_Result.mat'])
-% %         load(fullfile(fpath{f},"output_data.mat"))
-% % 
-% %         frm_end=max(Device_Data{1, 2}.Counter_Inputs(1, 1).data);
-% %         f_seg=[[1:TimeSegFrame(f):frm_end] frm_end+1];
-% %         readFrame_all=[1000:min([11000 frm_end])];
-% % 
-% %         mov_mc=readBinMov_BHL_multiple(fpath{f},3,LocalStimResult{Mov2See}.frame2read,TimeSegFrame(f));
-% %         mov_all=readBinMov_BHL_multiple(fpath{f},3,readFrame_all,TimeSegFrame(f));
-% %         sz=size(mov_mc);
-% %         mov_mc=toimg(get_bandstop(tovec(mov_mc),1000,[54 57]),sz(1),sz(2));
-% %         mov_all=toimg(get_bandstop(tovec(mov_all),1000,[54 57]),sz(1),sz(2));
-% %         motionTrace=movmean(Result.mc,5,1);
-% %         motionTrace=motionTrace(LocalStimResult{Mov2See}.frame2read,:);
-% %         motionTraceall=movmean(Result.mc(readFrame_all,:),5,1);
-% % 
-% %         mov_res= mov_mc-mean(mov_mc,3);
-% %         bkg = zeros(1, size(mov_mc,3));
-% %         mean_F=squeeze(mean(mov_mc(bound:end-bound,bound:end-bound,:),[1 2]));
-% %         [~, blueOff]=get_blueoffTrace(mean_F,[Result.Blue(LocalStimResult{Mov2See}.frame2read)],70);
-% %         [y_fit]=expfitDM_2(find(blueOff)',mean_F(find(blueOff)),[1:frlength]',1000);
-% % 
-% %         bkg(1,:)=y_fit;
-% %         mov_res = SeeResiduals(mov_res,motionTrace);
-% %         mov_res = SeeResiduals(mov_res,motionTrace.^2);
-% %         mov_res = SeeResiduals(mov_res,motionTrace(:,1).*motionTrace(:,end));
-% %         mov_res= SeeResiduals(mov_res,bkg,1);
-% % 
-% %         % mov_all regression
-% %         mov_resall= mov_all-mean(mov_all,3);
-% %         bkg_all = zeros(1, size(mov_all,3));
-% %         mean_Fall=squeeze(mean(mov_all(bound:end-bound,bound:end-bound,:),[1 2]));
-% %         [~, blueOffall]=get_blueoffTrace(mean_Fall,[Result.Blue(readFrame_all)],70);
-% %         [y_fitall]=expfitDM_2(find(blueOffall)',mean_Fall(find(blueOffall)),[1:size(mov_all,3)]',[1000]);
-% %         isDirt=sum(Result.dirtTrace(:,readFrame_all)>0,1)>0;
-% % 
-% %         bkg_all(1,:)=y_fitall;
-% %         mov_resall = SeeResiduals(mov_resall,motionTraceall);
-% %         mov_resall = SeeResiduals(mov_resall,motionTraceall.^2);
-% %         mov_resall = SeeResiduals(mov_resall,motionTraceall(:,1).*motionTraceall(:,end));
-% %         mov_resall= SeeResiduals(mov_resall,bkg_all,1);
-% %         F0img=get_F0img(mov_resall,find(blueOffall));
-% %         %F0img=mean(mov_mc,3)-100;
-% %         %F0img= F0img.*(max(Result.bvMask,[],3)==0);
-% % 
-% %         % calculate correlation image
-% %         [~, StimFrame]=get_blueoffTrace(mean_Fall,[Result.Blue(readFrame_all)==0],10);
-% %         oddmask=checkerboard(1, sz(1)/2, sz(2)/2) > 0.5;
-% %         mov_res_odd=(mov_resall-mean(mov_resall,3)).*oddmask./F0img;
-% %         mov_res_even=(mov_resall-mean(mov_resall,3)).*(1-oddmask)./F0img;
-% %         StimROI_Vtrace_odd=tovec(mov_res_odd)'*tovec(LocalStimResult{Mov2See}.blueDMDimg>0);
-% %         StimROI_Vtrace_even=tovec(mov_res_even)'*tovec(LocalStimResult{Mov2See}.blueDMDimg>0);
-% %         corrImg = sum(cat(3,toimg(get_corrMat(tovec(mov_res_odd),StimROI_Vtrace_even',find(blueOffall>0 & isDirt==0)),sz(1),sz(2)),...
-% %             toimg(get_corrMat(tovec(mov_res_even),StimROI_Vtrace_odd',find(blueOffall>0 & isDirt==0)),sz(1),sz(2))),3,'omitnan');
-% %         corrImgStim = sum(cat(3,toimg(get_corrMat(tovec(mov_res_odd),StimROI_Vtrace_even',StimFrame),sz(1),sz(2)),...
-% %             toimg(get_corrMat(tovec(mov_res_even),StimROI_Vtrace_odd',StimFrame),sz(1),sz(2))),3,'omitnan');
-% % 
-% %         % corrImg = sum(cat(3,toimg(tovec(mov_res_odd(:,:,find(blueOff>0)))*StimROI_Vtrace_even(find(blueOff>0),1),sz(1),sz(2)),...
-% %         %                    toimg(tovec(mov_res_even(:,:,find(blueOff>0)))*StimROI_Vtrace_odd( find(blueOff>0),1),sz(1),sz(2))),3,'omitnan');
-% %         % corrImgStim = sum(cat(3,toimg(tovec(mov_res_odd(:,:,StimFrame))*StimROI_Vtrace_even(StimFrame,1),sz(1),sz(2)),...
-% %         %                         toimg(tovec(mov_res_even(:,:,StimFrame))*StimROI_Vtrace_odd(StimFrame,1),sz(1),sz(2))),3,'omitnan');
-% % 
-% %         cax_corr=[prctile(corrImg(:),5) prctile(corrImg(:),98)];
-% %         cax_corrStim=[prctile(corrImgStim(:),5) prctile(corrImgStim(:),98)];
-% %         colorCorr=grs2rgb(tovec(imgaussfilt(corrImg,1)),colormap(turbo),cax_corr(1),cax_corr(2));
-% %         colorCorr=reshape(colorCorr,sz(1),sz(2),1,[]);
-% %         colorCorr=permute(colorCorr,[1 2 4 3]);
-% %         colorCorrStim=grs2rgb(tovec(imgaussfilt(corrImgStim,1)),colormap(turbo),cax_corrStim(1),cax_corrStim(2));
-% %         colorCorrStim=reshape(colorCorrStim,sz(1),sz(2),1,[]);
-% %         colorCorrStim=permute(colorCorrStim,[1 2 4 3]);
-% %         if isfield(Result,'Structure')
-% %             Corrimg_sub_Struc=colorCorr.*mat2gray(Result.Structure)*3;
-% %             CorrimgStim_sub_Struc=colorCorrStim.*mat2gray(Result.Structure)*3;
-% %         else
-% %             Corrimg_sub_Struc=colorCorr.*mat2gray(Result.ref_im-100)*4;
-% %             CorrimgStim_sub_Struc=colorCorrStim.*mat2gray(Result.ref_im-100)*4;
-% %         end
-% %         LocalStimResult{Mov2See}.Corrimg=corrImg;
-% %         LocalStimResult{Mov2See}.CorrimgStim=corrImgStim;
-% %         LocalStimResult{Mov2See}.CorrTr=tovec(cat(3,LocalStimResult{Mov2See}.Corrimg,LocalStimResult{Mov2See}.CorrimgStim))'*double(tovec(LocalStimResult{Mov2See}.ftprnt)>0);
-% % 
-% %         % calculate STA image
-% %         STAmov=get_STA(tovec(mov_res),ind2vec(frlength,LocalStimResult{Mov2See}.triggerPoint,1),-nTau(1),nTau(end));
-% %         STAmov=-toimg(STAmov,size(mov_res,1),size(mov_res,2));
-% %         STAmov=STAmov-mean(STAmov(:,:,1:15),3);
-% %         STAmov_norm=STAmov./F0img;
-% %         STAmov_norm=imgaussfilt(STAmov_norm,1);
-% %         STAmov_norm=movmedian(STAmov_norm,15,3);
-% %         STAmov_norm=pcafilt(STAmov_norm,10);
-% % 
-% %         save(fullfile(fpath{f},['STAmov_norm_' num2str(Mov2See)]),'STAmov_norm','-v7.3')
-% % 
-% %         cax_sub=[prctile(STAmov_norm(:),5) prctile(STAmov_norm(:),97)];
-% %         colorSTA=grs2rgb(tovec(STAmov_norm),colormap(turbo),prctile(STAmov_norm(:),5),prctile(STAmov_norm(:),97));
-% %         colorSTA=reshape(colorSTA,sz(1),sz(2),length(nTau),[]);
-% %         colorSTA=permute(colorSTA,[1 2 4 3]);
-% %         if isfield(Result,'Structure')
-% %             STAimg_sub_Struc=colorSTA.*mat2gray(Result.Structure)*3;
-% %         else
-% %             STAimg_sub_Struc=colorSTA.*mat2gray(Result.ref_im-100)*4;
-% %         end
-% %         LocalStimResult{Mov2See}.STAimg=mean(STAimg_sub_Struc(:,:,:,find(ismember(nTau,Time2avg))),4);
-% % 
-% %         if ~isempty(LocalStimResult{Mov2See}.bluePatt)
-% %             bluePattboundary=LocalStimResult{Mov2See}.bluePatt(:,[1 2]);
-% %         else
-% %             bluePattboundary=[];
-% %         end
-% %         figure(161); clf;
-% %         writeMov4d(fullfile(fpath{f},['STAmovie_' num2str(Mov2See)]),STAimg_sub_Struc,nTau,10,1,cax_sub,bluePattboundary)
-% % 
-% %         figure(160); clf;
-% %         nexttile([1 1]);
-% %         imshow2(LocalStimResult{Mov2See}.STAimg,[]); hold all
-% %         if ~isempty(bluePattboundary)
-% %             plot(bluePattboundary(:,1),bluePattboundary(:,2),'color',[0 0.6 1],'linewidth',1.5)
-% %         end
-% %         title([num2str(Mov2See) ,', STA'])
-% %         nexttile([1 1]);
-% %         imshow2(CorrimgStim_sub_Struc,[]); hold all
-% %         if ~isempty(bluePattboundary)
-% %             plot(bluePattboundary(:,1),bluePattboundary(:,2),'color',[0 0.6 1],'linewidth',1.5)
-% %         end
-% %         title([num2str(Mov2See) ,', CorrImgStim'])
-% %         nexttile([1 1]);
-% %         imshow2(Corrimg_sub_Struc,[]); hold all
-% %         if ~isempty(bluePattboundary)
-% %             plot(bluePattboundary(:,1),bluePattboundary(:,2),'color',[0 0.6 1],'linewidth',1.5)
-% %         end
-% %         title([num2str(Mov2See) ,', CorrImg'])
-% %         saveas(gcf, fullfile(fpath{f},['STA_CorrFootprint' num2str(Mov2See) '.fig']));
-% %         saveas(gcf, fullfile(fpath{f},['STA_CorrFootprint' num2str(Mov2See) '.png']));
-% %         %colorbar;
-% %         saveto='/Volumes/cohen_lab/Lab/Labmembers/Byung Hun Lee/Data/Statistics_Optopatch_Prism';
-% %         save([saveto '/LocalStimulationResult.mat'],'LocalStimResult','-v7.3');
-% %     catch
-% %         disp(['missing file, #' num2str(f) ', g: ' num2str(Mov2See)])
-% %     end
-% % end
-% 
-% %% Stim. TA kymo
-% MouseID=cellfun(@(x) x.Mouse,LocalStimResult);
-% NeuronID=cellfun(@(x) x.NeuronInd,LocalStimResult);
-% [~, unqInd] = unique([MouseID' NeuronID'] ,'row');
-% 
-%% Representative local stimulation, Figure2
-figure(150); clf; tiledlayout(2,2,'padding','tight');
-%show_ind=[1:4 6 7 10 12:15 17:19 21:34 40:43 56 60:64 84 86 87 85 88 89 99:106];
-%show_ind=[1:length(LocalStimResult)];
-nTau_new=[-30:80];
-show_ind=[95];
-Show_Row=[1 2 3 5 8 10];
-bandstop_freq=[45 150];
-cmap_decay=hot(round(length(Show_Row)*1.5));
-for i=show_ind
-    load([LocalStimResult{i}.filepath '/OP_Result.mat'])
-    swcpoints=Result.SWC;
-    nROI=size(LocalStimResult{show_ind}.VoltageTrace,1);
-    swcpoints(1,3)=50; swcpoints(:,3)=swcpoints(:,3)+5;
-    [interDist dsort]=sort(LocalStimResult{i}.interDendDist(LocalStimResult{i}.stimInd,:));
-    VoltageTr=LocalStimResult{i}.VoltageTrace;
-    VoltageTr=get_bandstop(LocalStimResult{i}.VoltageTrace,1000,bandstop_freq);
-    VoltageTr=movmean(VoltageTr,3,2);
-    %VoltageTr=pcafilterTrace(VoltageTr,[27 35 36]);
-    [STAtr StimTrmat]=get_STA(VoltageTr,LocalStimResult{i}.triggerPoint,-nTau_new(1),nTau_new(end));
-    
-    if length(LocalStimResult{i}.STAtr(:))>1
-        ShowSTAtr=STAtr-median(STAtr(:,10:25),2);
-        ShowSTAtr=pcafilterTrace(ShowSTAtr,[1:15]);
-        StimTrmat_sem=squeeze(std(StimTrmat(dsort,:,:),0,2,'omitnan')./sqrt(size(StimTrmat,2)));
-        bluecent=get_coord(LocalStimResult{show_ind}.blueDMDimg);
-        distoffset=distance_BH(bluecent,get_coord(LocalStimResult{show_ind}.ftprnt(:,:,dsort(Show_Row(1)))))*1.17;
-        ax2=nexttile([2 1]);
-        showScaleScatter([1:nROI], swcpoints, LocalStimResult{show_ind}.ftprnt, repmat([0.5 .5 .5],256,1)); hold all;
-        plot(LocalStimResult{show_ind}.bluePatt(:,2),LocalStimResult{show_ind}.bluePatt(:,1),'color',[0 0.6 1])
-        for fp=1:length(Show_Row)
-           bd=bwboundaries(LocalStimResult{show_ind}.ftprnt(:,:,dsort(Show_Row(fp))));
-           plot(bd{1}(:,1),bd{1}(:,2),'color',cmap_decay(fp,:),'linewidth',2);
-        end
-        drawScaleBar(100/1.17,'vertical')
-        view([180 -90])
-        
-        ax3=nexttile(2,[2 1]);
-        ShowSTAs=ShowSTAtr(dsort,:);
-        for r=1:length(Show_Row)
-            errorbar_shade(nTau_new,ShowSTAs(Show_Row(r),:),StimTrmat_sem(Show_Row(r),:),cmap_decay(r,:)); hold all
-            %plot(nTau_new,ShowSTAs(Show_Row(r),:),'color',cmap_decay(r,:),'linewidth',1.5); hold all
-        end
-        % l=plot(nTau_new,ShowSTAs(Show_Row,:)','linewidth',2);
-        % arrayfun(@(l,c) set(l,'Color',c{:}),l,num2cell(cmap_decay(1:length(Show_Row),:),2))
-        xlabel('Time'); ylabel('Row'); box off; axis tight
-        xlabel('Time (ms)'); ylabel('Z score');
-    end
-    distoffset+interDist(Show_Row)
-end
-
-% 
-% 
-% MouseID=cellfun(@(x) x.Mouse,LocalStimResult(show_ind));
-% NeuronID=cellfun(@(x) x.NeuronInd,LocalStimResult(show_ind));
-% [~, unqIndN] = unique([MouseID' NeuronID'] ,'row');
-% [~, unqIndM] = unique([MouseID]);
-% 
-% %%
-% saveto='/Volumes/cohen_lab/Lab/Labmembers/Byung Hun Lee/Data/Statistics_Optopatch_Prism';
-% save([saveto '/LocalStimulationResult.mat'],'LocalStimResult','-v7.3');
-% disp([['Result is saved at: ' saveto '/LocalStimulationResult.mat']])
-
-%% Load data
-saveto='/Volumes/cohen_lab/Lab/Labmembers/Byung Hun Lee/Data/Statistics_Optopatch_Prism';
-load([saveto '/LocalStimulationResult.mat']);
-
-%% show length constant over time
-figure(163); clf;
-Mov2See=102; frame2avg=5;
-STAtr=movmean(LocalStimResult{Mov2See}.STAtr,5,2);
-tseg=[0:frame2avg:size(STAtr,2)];
-
-pathROI{1}=[37 38 36 3 39 41 40 43 42 45 44 47 46];
-pathROI{2}=[37 38 36 1 4 5 7 6 8 30 29 33 32 31];
-
-figure(165); clf; tiledlayout(2,4);
-Lc=[]; ax1=[]; ax2=[];
-Lc(1,:)=tseg(1:end-1)+frame2avg/2+nTau(1);
-for p=1:2
-    STAtr_show=[]; STAtr_fit=[];
-    d=LocalStimResult{Mov2See}.interDendDist(LocalStimResult{Mov2See}.stimInd,pathROI{p});
-    pth=get_coord(LocalStimResult{Mov2See}.ftprnt(:,:,pathROI{p}));
-    ax2=[ax2 nexttile([1 1])];
-    imshow2(LocalStimResult{Mov2See}.Structure,[]); hold all
-    plot(pth(:,1),pth(:,2),'r');
-    plot(LocalStimResult{Mov2See}.bluePatt(:,1),LocalStimResult{Mov2See}.bluePatt(:,2),'color',[0 0.6 1])
-    title(['Path ' num2str(p)])
-    for t=1:length(tseg)-1
-        STAtr_show(:,t)=mean(STAtr(pathROI{p},tseg(t)+1:tseg(t+1)),2);
-        [STAtr_fit(:,t), params, R2] = fitExpDecay(d', STAtr_show(:,t), [0:max(d)]);
-        Lc(p+1,t)=[params(2)];
-    end
-
-    ax1=[ax1 nexttile([1 1])];
-    [Tgrid,Dgrid] = meshgrid(Lc(1,:),d);
-    surf(Tgrid,Dgrid,STAtr_show); colormap(turbo);
-    shading flat
-    zlabel('\DeltaF/F')
-    xlabel('Time (ms)')
-    ylabel('Distance from stimulation ROI')
-    title(['STA along red line'])
-
-    ax1=[ax1 nexttile([1 1])];
-    [Tgridfit,Dgridfit] = meshgrid(Lc(1,:),[0:max(d)]);
-    surf(Tgridfit,Dgridfit,STAtr_fit); colormap(turbo);
-    shading flat
-    zlabel('\DeltaF/F')
-    xlabel('Time (ms)')
-    ylabel('Distance from stimulation ROI')
-    title(['Exp. fitted'])
-end
-arrayfun(@(x) colormap(x,'gray'),ax2)
-h = linkprop([ax1], {'CameraPosition','CameraTarget','CameraUpVector','CameraViewAngle'});
-
-nexttile([1 1])
-plot(Lc(1,:),Lc(2:3,:))
-xlabel('Time (ms)'); ylabel('L_c (\mum)');
-legend({'Path 1','Path 2'})
-xlim([5 50]);
-
-%% Length constant on different path
-
-frame2avg=20:30;
-PathSTAmat=[]; PathSTAmat_fit=[]; Lc=[]; g=1;
-PathCorrmat=[]; PathCorrmat_fit=[]; Lcorr=[];
-STADistmat=[]; CorrDistmat=[];
-Lstaall=NaN(length(LocalStimResult),5); Lcorrall=NaN(length(LocalStimResult),5);
-Nmat=[];
-for Mov2See=[1:length(LocalStimResult)]
-
-    ftcoord=get_coord(LocalStimResult{Mov2See}.ftprnt);
-    coord1D = projectTrunkaxis(ftcoord);
-    STAtr=movmean(LocalStimResult{Mov2See}.STAtr,5,2);
-    Corrtr=[tovec(LocalStimResult{Mov2See}.Corrimg)'*tovec(LocalStimResult{Mov2See}.ftprnt);
-            tovec(LocalStimResult{Mov2See}.CorrimgStim)'*tovec(LocalStimResult{Mov2See}.ftprnt)]';
-    Corrtr=Corrtr./sum(tovec(LocalStimResult{Mov2See}.ftprnt))';
-    si=LocalStimResult{Mov2See}.stimInd;
-    StimLabel=LocalStimResult{Mov2See}.roilabel(si);
-    StimLabel=find(cellfun(@(x) sum(ismember(x,StimLabel))>0,Labels));
-    
-    if ~isnan(STAtr)
-    dendaxisall=LocalStimResult{Mov2See}.interDendDist(si,:);
-    dendaxisall1d=(coord1D)';
-
-    STAtr_mean=zscore(mean(STAtr(:,frame2avg-nTau(1)),2));
-    %STAtr_mean=mean(STAtr(:,frame2avg-nTau(1)),2,'omitnan');
-    STADistmat{Mov2See}=[dendaxisall' STAtr_mean dendaxisall1d'];
-    CorrDistmat{Mov2See}=[dendaxisall' Corrtr dendaxisall1d'];
-    pct = sum(STADistmat{Mov2See}(:,2) < STADistmat{Mov2See}(si,2)) / numel(STADistmat{Mov2See}(:,2));
-    pct2 = sum(CorrDistmat{Mov2See}(:,2) < CorrDistmat{Mov2See}(si,2)) / numel(CorrDistmat{Mov2See}(:,2));
-
-    [~, Psta, Rsta] = fitExpDecay(dendaxisall', STAtr_mean, [0:max(dendaxisall)]);
-    [~, Pcorr, Rc] = fitExpDecay(dendaxisall', Corrtr(:,1), [0:max(dendaxisall)]);
-
-    Lstaall(Mov2See,:)=[Psta(2) pct Rsta max(dendaxisall) StimLabel]; %Length, percential, R2, distance, Stimulation Region
-    Lcorrall(Mov2See,:)=[Pcorr(2) pct2 Rc max(dendaxisall) StimLabel];
-    end
-
-    for l=1:length(Labels)
-        MaskSequence=LocalStimResult{Mov2See}.MaskSeq{l};
-        if ~isempty(MaskSequence) & sum(isnan(LocalStimResult{Mov2See}.STAtr(:)))==0
-            dendaxis=LocalStimResult{Mov2See}.interDendDist(si,MaskSequence);
-            STAtr_mean=zscore(mean(STAtr(:,frame2avg-nTau(1)),2));
-            %STAtr_mean=mean(STAtr(:,frame2avg-nTau(1)),2,'omitnan');
-            PathSTAmat{g}=[dendaxis' STAtr_mean(MaskSequence)];
-            PathCorrmat{g}=[dendaxis' Corrtr(MaskSequence,:)];
-            [STAtr_fit, params, R2] = fitExpDecay(dendaxis', STAtr_mean(MaskSequence), [0:max(dendaxis)]);
-            [Corr_fit, params_corr, Rcorr] = fitExpDecay(dendaxis', Corrtr(MaskSequence,1), [0:max(dendaxis)]);
-            [CorrStim_fit, params_corrStim, Rcorrs] = fitExpDecay(dendaxis', Corrtr(MaskSequence,2), [0:max(dendaxis)]);
-            PathSTAmat_fit{g}=[[0:max(dendaxis)]' STAtr_fit'];
-            PathCorrmat_fit{g}=[[0:max(dendaxis)]' Corr_fit' CorrStim_fit'];
-            %pct = sum(PathSTAmat{g}(:,2) < PathSTAmat{g}(1,2)) / numel(PathSTAmat{g}(:,2));
-            pct = sum(PathCorrmat{g}(:,2) < PathCorrmat{g}(1,2)) / numel(PathCorrmat{g}(:,2));
-            pct2 = sum(PathCorrmat{g}(:,3) < PathCorrmat{g}(1,3)) / numel(PathCorrmat{g}(:,3));
-            Lc(g,:)=[Mov2See StimLabel l params(2) PathSTAmat{g}(1,2) R2 max(dendaxis)]; %Stim StimROI EndROI length constant percentile R^2 path length
-            Lcorr(g,:)=[Mov2See StimLabel l params_corr(2) params_corrStim(2) pct pct2 Rcorr Rcorrs max(dendaxis)];
-            g=g+1;
-        end
-    end
-end
-
-figure(166); clf; tiledlayout(3,3);
-cmap=hsv(4); ax2=[]; gsROI=1;
-for sROI=[1:length(Labels)]
-    for eROI=[1:length(Labels)]
-        path2show=find(Lc(:,2)==sROI & Lc(:,3)==eROI & Lc(:,5)>0.5 & Lc(:,6)>0.4 & Lc(:,7)>80 & Lc(:,4)>20);
-        data2show=PathSTAmat(path2show);
-        data2show=cellfun(@(x) [x(:,1) x(:,2)/x(1,2)],data2show,'UniformOutput',false);
-        ax2=[ax2 nexttile(3*(gsROI-1)+eROI,[1 1])];
-        hold all;
-        cellfun(@(x) plot(x(:,1),x(:,2),'color',[0.7 0.7 0.7]),data2show)
-        [M S x_bin N]=binning_data(data2show,[-15:30:500]);
-        if ~isempty(N)
-            errorbar_shade(x_bin,M,S./sqrt(sum(cellfun(@sum,N),2))',cmap(sROI,:))
-            ylim([-0.5 1.5]);
-        end
-        xlabel('Distance from stimulation ROI (\mum)')
-        ylabel('Normalized \DeltaF/F')
-    end
-    gsROI=gsROI+1;
-end
-linkaxes(ax2)
-
-figure(167); clf;  tiledlayout(3,3);
-cmap=hsv(4); ax1=[]; gsROI=1;
-for sROI=[1:length(Labels)]
-    for eROI=[1:length(Labels)]
-        path2show=find(Lc(:,2)==sROI & Lc(:,3)==eROI & Lc(:,5)>0.5 & Lc(:,6)>0.4 & Lc(:,7)>80 & Lc(:,4)>20);
-        ax1=[ax1 nexttile(3*(gsROI-1)+eROI,[1 1])];
-        Boxplot_wPoints2(Lc(path2show,4),cmap(sROI,:));
-        set(gca,'XTick',1,'XTickLabel',{[]})
-        ylabel('Length const (\mum)')
-    end
-    gsROI=gsROI+1;
-end
-xlim([0.5 1.5])
-linkaxes(ax1)
-
-figure(168); clf; tiledlayout(3,3);
-cmap=hsv(4); ax2=[]; gsROI=1;
-for sROI=[1:length(Labels)]
-    for eROI=[1:length(Labels)]
-        path2show=find(Lcorr(:,2)==sROI & Lcorr(:,3)==eROI & Lcorr(:,6)>0.5);
-        data2show=PathCorrmat(path2show);
-        data2show=cellfun(@(x) [x(:,[1 3])],data2show,'UniformOutput',false);
-        ax2=[ax2 nexttile(3*(gsROI-1)+eROI,[1 1])];
-        hold all;
-        cellfun(@(x) plot(x(:,1),x(:,2),'color',[0.7 0.7 0.7]),data2show)
-        [M S x_bin N]=binning_data(data2show,[-15:30:500]);
-        if ~isempty(N)
-            errorbar_shade(x_bin,M,S./sqrt(sum(cellfun(@sum,N),2))',cmap(sROI,:))
-            ylim([0 0.2]);
-        end
-        xlabel('Distance from stimulation ROI (\mum)')
-        ylabel('Mean correlation')
-    end
-    gsROI=gsROI+1;
-end
-linkaxes(ax2)
-
-figure(169); clf;  tiledlayout(3,3);
-cmap=hsv(4); ax1=[]; gsROI=1;
-for sROI=[1:length(Labels)]
-    for eROI=[1:length(Labels)]
-        path2show=find(Lc(:,2)==sROI & Lc(:,3)==eROI & Lc(:,5)>0.5 & Lc(:,6)>0.4 & Lc(:,7)>80 & Lc(:,4)>20);
-        ax1=[ax1 nexttile(3*(gsROI-1)+eROI,[1 1])];
-        Boxplot_wPoints2(Lcorr(path2show,5),cmap(sROI,:));
-        set(gca,'XTick',1,'XTickLabel',{[]})
-        ylabel('Correlation length (\mum)')
-    end
-    gsROI=gsROI+1;
-end
-xlim([0.5 1.5])
-linkaxes(ax1)
-%%
-figure(170); clf;  tiledlayout(1,5);
-cmap=hsv(4); ax1=[]; gsROI=1; dendaxisbin=[-500:30:500];
-%path2show=find(Lstaall(:,2)>0.5 & Lstaall(:,3)>0.4 & ismember(Lstaall(:,5),[1])); %Length, percential, R2, distance, Stimulation Region
-path2show=find(Lstaall(:,2)>0.5 & Lstaall(:,3)>0.4);
-%path2show=find(Lstaall(:,2)>0.5);
-% path2show=find(Lc(:,5)>0.5 & Lc(:,6)>0.4 & Lc(:,7)>80 & Lc(:,4)>20);
-% path2show=unique(Lc(path2show,1));
-%path2show=[22];
-
-data2show=STADistmat(path2show); data2show1d=STADistmat(path2show);
-[deltax, dsort]=cellfun(@(x) sort(x(:,1)),data2show,'UniformOutput',false);
-[~, dsort1d]=cellfun(@(x) sort(x(:,3)),data2show1d,'UniformOutput',false);
-data2show=cellfun(@(x,y) [x(y,1) x(y,2)/x(x(:,1)==0,2)],data2show,dsort,'UniformOutput',false);
-data2show1d=cellfun(@(x,y) [(x(y,3)) x(y,2)/x(x(:,1)==0,2)],data2show1d,dsort1d,'UniformOutput',false);
-data2showC=CorrDistmat(path2show); data2showC1d=CorrDistmat(path2show);
-data2showC=cellfun(@(x,y) [x(y,[1 2])],data2showC,dsort,'UniformOutput',false);
-data2showC1d=cellfun(@(x,y) [(x(y,4)) x(y,2)],data2showC1d,dsort1d,'UniformOutput',false);
-
-nexttile([1 1]);
-hold all;
-cellfun(@(x) plot(x(:,1),x(:,2),'color',[0.7 0.7 0.7]),data2show)
-[M S x_bin N]=binning_data(data2show,dendaxisbin);
-if ~isempty(N)
-    errorbar_shade(x_bin,M,S./sqrt(sum(cellfun(@sum,N),2))',cmap(1,:))
-    %errorbar_shade(x_bin,M,S,cmap(1,:))
-    ylim([-0.5 1.5]);
-end
-xlabel('Distance from stimulation ROI (\mum)')
-ylabel('Normalized \DeltaF/F')
-
-nexttile([1 1]);
-hold all;
-cellfun(@(x) plot(x(:,1),x(:,2),'color',[0.7 0.7 0.7]),data2show1d)
-[M S x_bin N]=binning_data(data2show1d,dendaxisbin);
-if ~isempty(N)
-    errorbar_shade(x_bin,M,S./sqrt(sum(cellfun(@sum,N),2))',cmap(1,:))
-    %errorbar_shade(x_bin,M,S,cmap(1,:))
-    ylim([-0.5 1.5]);
-end
-xlabel('Distance from stimulation ROI (\mum)')
-ylabel('Normalized \DeltaF/F')
-
-nexttile([1 1]);
-hold all;
-[M S x_bin N]=binning_data(data2showC,dendaxisbin);
-cellfun(@(x) plot(x(:,1),x(:,2),'color',[0.7 0.7 0.7]),data2showC)
-if ~isempty(N)
-    errorbar_shade(x_bin,M,S./sqrt(sum(cellfun(@sum,N),2))',cmap(2,:))
-    %errorbar_shade(x_bin,M,S,cmap(2,:))
-    ylim([0 0.1]);
-end
-xlabel('Distance from stimulation ROI (\mum)')
-ylabel('Mean correlation')
-
-nexttile([1 1]);
-hold all;
-[M S x_bin N]=binning_data(data2showC1d,dendaxisbin);
-cellfun(@(x) plot(x(:,1),x(:,2),'color',[0.7 0.7 0.7]),data2showC1d)
-if ~isempty(N)
-    errorbar_shade(x_bin,M,S./sqrt(sum(cellfun(@sum,N),2))',cmap(2,:))
-    %errorbar_shade(x_bin,M,S,cmap(2,:))
-    ylim([0 0.1]);
-end
-xlabel('Distance from stimulation ROI (\mum)')
-ylabel('Mean correlation')
-
-nexttile([1 1]);
-p=Boxplot_wPoints2([Lstaall(path2show,1), Lcorrall(path2show,1)],cmap([1 2],:));
-set(gca,'XTick',[1 2],'XTickLabel',{'STA','Correlation'})
-ylabel('Decay length (\mum)')
-drawPValueLines(p,200,'TextYOffset',100,'StepHeight',0)
-ylim([0 2000])
-set(gca,'yscale','log')
-
-%% STA vs correlation length
-
-path2show=find(Lc(:,5)>0.5 & Lc(:,6)>0.4 & Lc(:,7)>80 & Lc(:,4)>20);
-cellfun(@(x) x.fileInd,LocalStimResult(Lc(path2show,1)))
-
-
-%%
-f_local=[102 145];
-
-nTau=[-30:50];
-i=185; bound=6;
-load([fpath{i} '/OP_Result.mat'])
-blueCoord=get_coord(Result.blueDMDimg);
-ftprntCoord=get_coord(Result.ftprnt);
-D2=distance_BH(blueCoord,ftprntCoord);
-
-load(fullfile(fpath{i}, "output_data.mat"))
-CamCounter = Device_Data{1, 2}.Counter_Inputs(1, 1).data;
-CamTrigger = find(diff(CamCounter));
-try
-    DMDtrigger = Device_Data{1, 2}.buffered_tasks(1, 2).channels(1, 3).data;
-    DMDtrigger = DMDtrigger(CamTrigger);
-    Result.DMDtrigger = [0 (diff(DMDtrigger) > 0)];
-catch
-    % If DMDtrigger field is missing, use ones
-    disp('There is only one DMD pattern')
-    Result.DMDtrigger = zeros(1, length(CamTrigger));
-end
-
-DMDbluetrace=(Result.Blue>0).*(cumsum(Result.DMDtrigger)+1);
-DMDbluetrace(Result.Blue==0)=0;
-VoltageTr=Result.normTraces./Result.F0_PCA;
-
-STAtr=[]; N_avg=[];
-figure(400); clf;
-for b=1:max(DMDbluetrace)
-    [nROI nTime]=size(Result.normTraces);
-    PattBlue=double(DMDbluetrace==b);
-    onsetTime=find((PattBlue(2:end)-PattBlue(1:end-1))==1)+1;
-    PattBlueOnset=ind2vec(length(DMDbluetrace),onsetTime,1);
-    [~, spMat]=get_STA(Result.spike(1,:),PattBlueOnset,-nTau(1),nTau(end));
-    [minD, stimInd]=min(D2(b,:));
-    if isnan(minD);
-        stimInd=NaN;
-        [dendSort]=Result.dist_order;
-    else
-        [~, dendSort]=sort(Result.interDendDist(stimInd,:),'ascend');
-    end
-    Nsp=squeeze(sum(spMat,3));
-    [~, trMat]=get_STA(VoltageTr,PattBlueOnset,-nTau(1),nTau(end));
-    STAtr(:,:,b)=squeeze(mean(trMat(:,Nsp==0,:),2,'omitnan'));
-    N_avg(b)=length(find(Nsp==0));
-    STAtr(:,:,b)=STAtr(:,:,b)-median(STAtr(:,1:15,b),2,'omitnan');
-    nexttile([1 1])
-    imagesc(nTau,[1:nROI],STAtr(dendSort,:,b)); hold all
-    scatter(-10,stimInd,30,[1 0 0],'filled','Marker','>')
-end
-colormap(turbo);
-
-
-%% Get F0PCA image
-bound=7; i=72;
-SameCellInd=find(Mouse==Mouse(i) & NeuronInd==NeuronInd(i));
-mov_res_small=[];
-for j=SameCellInd'
-    j
-    load([fpath{j} '/OP_Result.mat'])
-
-    mov_mc=readBinMov_BHL(fpath{j},3);
-    mean_F=squeeze(mean(mov_mc(bound:end-bound,bound:end-bound,:),[1 2]));
-    [~, blueOff]=get_blueoffTrace(mean_F,[Result.Blue],70);
-    [y_fit]=expfitDM_2(find(blueOff)',mean_F(find(blueOff)),[1:size(mov_mc,3)]',1000);
-
-    mov_res= mov_mc-mean(mov_mc,3);
-    mov_res = SeeResiduals(mov_res,y_fit);
-    mov_res = SeeResiduals(mov_res,Result.mc(:,:));
-    mov_res = SeeResiduals(mov_res,Result.mc(:,:).^2);
-    mov_res = SeeResiduals(mov_res,Result.mc(:,1).*Result.mc(:,end));
-
-    if isfield(Result,'dirtTrace')
-        validFrm=find(sum(isnan(Result.dirtTrace),1)==0);
-    else
-        validFrm=[1:size(mov_res,3)];
-    end
-    mov_res=movmean(mov_res,15,3);
-    mov_res=mov_res(:,:,validFrm);
-    mov_res_small=cat(3,mov_res_small,imresize(mov_res,1/4));
-end
-
-[V D]=get_eigvector(tovec(mov_res_small),10);
-F0img=sqrt(sum((V.^2).*D(1:10)',2));
-F0img=toimg(F0img,size(mov_res_small,1),size(mov_res_small,2));
-F0img=imresize(F0img,4);
-
-for j=SameCellInd'
-    load([fpath{j} '/OP_Result.mat'])
-    Result.F0PCAimg=F0img;
-    save([fpath{j} '/OP_Result.mat'],'Result','-v7.3')
-end
-
-
-%% Load the data
-
-i=102; bound=6;
-load([fpath{i} '/OP_Result.mat'])
-cd(fpath{i});
-load(fullfile(fpath{i},"output_data.mat"))
-sz=double(Device_Data{1, 3}.ROI([2 4]));
-
-Result.Blue=Device_Data{1, 2}.buffered_tasks(1, 1).channels(1, 2).data;
-CamCounter=Device_Data{1, 2}.Counter_Inputs(1, 1).data;
-CamTrigger=find(CamCounter(2:end)-CamCounter(1:end-1));
-DMDtrigger=Device_Data{1, 2}.buffered_tasks(1, 2).channels(1, 3).data;
-DMDtrigger=DMDtrigger(CamTrigger);
-Result.DMDtrigger=[0 (DMDtrigger(2:end)-DMDtrigger(1:end-1))>0];
-Result.Blue=Result.Blue(CamTrigger);
-[Result.blueDMDimg Result.bluePatt]=get_blueDMDPatt(Device_Data,'stack');
-
-DMDbluetrace=(Result.Blue>0).*cumsum(Result.DMDtrigger)+1;
-DMDbluetrace(Result.Blue==0)=0;
-
-mov_mc=readBinMov_BHL(fpath{i},3);
-load(fullfile(fpath{i},'mcTrace01.mat'))
-mean_F=squeeze(mean(mov_mc(bound:end-bound,bound:end-bound,:),[1 2]));
-[~, blueOff]=get_blueoffTrace(mean_F,[Result.Blue],70);
-[y_fit]=expfitDM_2(find(blueOff)',mean_F(find(blueOff)),[1:size(mov_mc,3)]',1000);
-
-mov_res= mov_mc-mean(mov_mc,3);
-mov_res = SeeResiduals(mov_res,y_fit);
-mov_res = SeeResiduals(mov_res,mcTrace.xymean(:,:));
-mov_res = SeeResiduals(mov_res,mcTrace.xymean(:,:).^2);
-mov_res = SeeResiduals(mov_res,mcTrace.xymean(:,1).*mcTrace.xymean(:,end));
-
-%dirtMov_dilate = tracking_dirt(mov_res,0.3);
-% %%
-% [u,s,v] = svds(tovec(mov_res(:,:,1:5000)-mean(mov_res(:,:,1:5000),3)),20);
-% reshape_u=reshape(u,sz(2),sz(1),[]);
-% bvMask=[];
-% [~, bvMask]=get_ROI(max(abs(reshape_u),[],3),bvMask);
-%
-% Result.bvMask=bvMask;
-%Result.traces_bvMask=(tovec(mov_res.*double(max(Result.bvMask,[],3)==0))'*tovec(Result.ftprnt))';
-% Result.dirtTrace=(tovec(dirtMov_dilate)'*tovec(Result.ftprnt))';
-%% Get STAs
-i=102; bound=6; nTau=[-30:50];
-load([fpath{i} '/OP_Result.mat'])
-
-%SomTr=Result.traces_bvMask(1,:);
-%SomTr=SomTr/get_threshold(SomTr,1);
-%Result.spike(1,:)=find_spike_bh(SomTr,5,3);
-VoltageTr=Result.normTraces;
-VoltageTr(Result.dirtTrace>0)=NaN;
-%Result.F0_PCA=get_F0PCA(VoltageTr,3);
-VoltageTr=movmean(VoltageTr./Result.F0_PCA,3,2,'omitnan');
-%VoltageTr=pcafilterTrace(VoltageTr,[1:15]);
-
-NaNFrm=find(sum(Result.dirtTrace,1)>0);
-% mov_res_filt=-mov_res.*dou;
-% mov_res_filt(:,:,NaNFrm)=NaN;
-% mov_vec_sub=imresize(mov_res_filt(:,:,setdiff([1:size(mov_res,3)],NaNFrm)),1/4);
-% [V eigVal eigTrace]=get_eigvector(tovec(mov_vec_sub),10);
-%
-% mov2dfilt = eigTrace*V';
-% mov2dfilt = reshape(mov2dfilt', size(mov_vec_sub,1), size(mov_vec_sub,2), []);
-% mov2dfilt = mov2dfilt + mean(mov_vec_sub,3);
-% mov2dfilt=imresize(mov2dfilt,4);
-% mov_vec=zeros(size(mov2dfilt,1).*size(mov2dfilt,2),size(mov_res,3));
-% mov_vec(:,setdiff([1:size(mov_res,3)],NaNFrm))=tovec(mov2dfilt);
-
-mov_vec=tovec(-mov_res);
-mov_vec(:,NaNFrm)=NaN;
-
-STAmov=[]; STAtr=[]; N_avg=[];
-for b=1:max(DMDbluetrace)
-    PattBlue=double(DMDbluetrace==b);
-    onsetTime=find((PattBlue(2:end)-PattBlue(1:end-1))==1)+1;
-    PattBlueOnset=ind2vec(length(DMDbluetrace),onsetTime,1);
-    [~, spMat]=get_STA(Result.spike(1,:),PattBlueOnset,-nTau(1),nTau(end));
-    Nsp=squeeze(sum(spMat,3));
-    [~, m]=get_STA(mov_vec,PattBlueOnset,-nTau(1),nTau(end));
-    STAmov(:,:,:,b)=toimg(squeeze(mean(m(:,Nsp==0,:),2,'omitnan')),sz(2),sz(1));
-    [~, trMat]=get_STA(VoltageTr,PattBlueOnset,-nTau(1),nTau(end));
-    STAtr(:,:,b)=squeeze(mean(trMat(:,Nsp==0,:),2,'omitnan'));
-    N_avg(b)=length(find(Nsp==0));
-end
-
-STAmov=STAmov./Result.F0PCAimg;
-STAmov=STAmov-median(STAmov(:,:,1:15,:),3,'omitnan');
-STAtr=STAtr-median(STAtr(:,1:15,:),2,'omitnan');
-
-
-%%
-b_show=[1 2 5 7 8];
-avg_frame=[40:50]; cax_sub=[-0.001 0.007]; bin_tick=40;
-avg_frame_trace=[50:60];
-
-STAmov_filt=zeros(size(STAmov));
-for b=b_show
-    STAmov_filt(:,:,:,b)=pcafilt(imaveragefilt(STAmov(:,:,:,b),30),3);
-end
-
-STAimg_sub=squeeze(mean(STAmov_filt(:,:,avg_frame,:),3,'omitnan'));
-mask=max(Result.ftprnt>0,[],3);
-
-colorSTA=grs2rgb(tovec(STAimg_sub),colormap('turbo'),cax_sub(1),cax_sub(2));
-colorSTA=reshape(colorSTA,size(STAmov,1),size(STAmov,2),10,[]);
-colorSTA=permute(colorSTA,[1 2 4 3]);
-STAimg_sub_Struc=colorSTA.*mat2gray(Result.ref_im-100)*4;
-
-blueCoord=get_coord(Result.blueDMDimg);
-ftprntCoord=get_coord(Result.ftprnt);
-D=distance_BH(blueCoord,ftprntCoord);
-D2=distance_BH(blueCoord,ftprntCoord(Result.dist_order,:));
-
-figure(13); clf; tiledlayout(length(b_show),2);
-Dsign=ones(1,size(Result.interDendDist,2));
-Dsign(Result.dist_order(1:find(Result.dist_order==1)-1))=-1;
-dendaxis=Result.interDendDist(1,:).*Dsign;
-dendaxis=dendaxis*PixelSize(i);
-dendaxis=dendaxis(Result.dist_order);
-
-for b=b_show
-    nexttile([1 1])
-    Show_kymo=pcafilterTrace(STAtr(Result.dist_order,:,b),[1:10]);
-    imagesc(nTau,[1:length(dendaxis)],Show_kymo,cax_sub); hold all
-    %[binnedZ binX binY]=show3Dbinning({[[NaN; dendaxis'] [nTau; Show_kymo]]}, nTau(1:3:end), [min(dendaxis):39:max((dendaxis))], 'image'); hold all
-    %pcolor(binX',binY',binnedZ');
-    cb=colorbar;
-    xlabel('Peri-stimulation time (ms)')
-    cb.Label.String='\DeltaF/F';
-    shading interp
-    set(gca,'YDir','reverse')
-
-    [~, roi_stim]=min(D2(b,:));
-    %plot(2,dendaxis(roi_stim),'>','MarkerFaceColor',[1 0 0]);
-    plot(2,(roi_stim),'>','MarkerFaceColor',[1 0 0]);
-    set(gca,'YTick',[1 find(Result.dist_order==1) length(dendaxis)],'YTickLabel',num2str([min(dendaxis) 0 max((dendaxis))]',3))
-
-    nexttile([1 1])
-    imshow2(STAimg_sub_Struc(:,:,:,b),[]); hold all
-
-    hold all
-    plot(Result.bluePatt{b}{1}(:,2),Result.bluePatt{b}{1}(:,1),'color',[0 0.6 1],'LineWidth',1.5)
-    title(['Number of stimulation averaged: ', num2str(N_avg(b))])
-end
-colormap(turbo);
-
-figure(16); clf;
-[~, arg]=min(D(b_show,:),[],2);
-dff_dist=squeeze(mean(STAtr(:,avg_frame_trace,b_show),2,'omitnan'));
-l=plot(Result.interDendDist(arg,:)'*PixelSize(i),dff_dist,'.','markersize',25);
-arrayfun(@(l,c) set(l,'Color',c{:}),l,num2cell(gen_colormap([1 0.5 0; 0 0.5 1],length(b_show)),2));
-
-g=1; dat=[];
-for b=b_show
-    dat{g}=[Result.interDendDist(:,arg(g))*PixelSize(i) dff_dist(:,g)];
+GridBlueResult=[];
+g=1; tic;
+for f=foi
+    load(fullfile(fpath{f},'OP_Result.mat'))
+    GridBlueResult{g}=Result;
+    GridBlueResult{g}.PixelSize=PixelSize(f);
     g=g+1;
 end
-[M S B N]=binning_data(dat,[-bin_tick:bin_tick*2:400+bin_tick]);
-N=sum(cell2mat(cellfun(@double,N,'UniformOutput',false)'),1);
-hold all;
-errorbar(B',M',S'/sqrt(N'),'color',[0 0 0],'LineWidth',2);
-
-exp_model = @(params, x) params(3) + params(1) * exp(params(2) * x);
-initial_guess = [max(M) - min(M), -1 / (max(B) - min(B))  , min(M)];
-
-options = optimoptions('lsqcurvefit', 'FunctionTolerance', 1e-6, 'OptimalityTolerance', 1e-6, 'MaxIterations', 10000);
-params_fit = lsqcurvefit(exp_model, initial_guess, B, M, [], [], options);
-
-% Compute fitted values
-y_fit = exp_model(params_fit, B);
-
-% Compute R^2
-SS_res = sum((M - y_fit).^2);  % Residual sum of squares
-SS_tot = sum((M - mean(M)).^2);  % Total sum of squares
-R_squared = 1 - (SS_res / SS_tot);
-
-% Compute Length Scale (1/|b|)
-length_scale = 1 / abs(params_fit(2));
-
-title(['Fit func. : a*exp(bx)+c , 1/|b| = ' num2str(length_scale,3) ' \mum, R^2 = ' num2str(R_squared,3)])
-colormap(gen_colormap([1 0.5 0; 0 0.5 1]));
-cb=colorbar;
-cb.Label.String='Basal to apical';
-cb.Ticks=[];
-xlabel('Pairwise distance from stimulated ROI (\mum)')
-ylabel('\DeltaF/F')
-%% Get F0PCA image % Cell145
-bound=7; i=145;
-SameCellInd=find(Mouse==Mouse(i) & NeuronInd==NeuronInd(i));
-mov_res_small=[];
-for j=[145]%SameCellInd'
-    j
-    load([fpath{j} '/OP_Result.mat'])
-
-    mov_mc=readBinMov_BHL(fpath{j},3);
-    mean_F=squeeze(mean(mov_mc(bound:end-bound,bound:end-bound,:),[1 2]));
-    [~, blueOff]=get_blueoffTrace(mean_F,[Result.Blue],70);
-    [y_fit]=expfitDM_2(find(blueOff)',mean_F(find(blueOff)),[1:size(mov_mc,3)]',1000);
-
-    mov_res= mov_mc-mean(mov_mc,3);
-    mov_res = SeeResiduals(mov_res,y_fit);
-    mov_res = SeeResiduals(mov_res,Result.mc(:,:));
-    mov_res = SeeResiduals(mov_res,Result.mc(:,:).^2);
-    mov_res = SeeResiduals(mov_res,Result.mc(:,1).*Result.mc(:,end));
-
-    dirtMov_dilate = tracking_dirt(mov_res,0.3);
-    Result.dirtTrace=(tovec(dirtMov_dilate)'*tovec(Result.ftprnt))';
-    save([fpath{j} '/OP_Result.mat'],'Result','-v7.3')
-
-    validFrm=find(sum(isnan(Result.dirtTrace),1)==0);
-    mov_res=movmean(mov_res,15,3);
-    mov_res=mov_res(:,:,validFrm);
-    mov_res_small=cat(3,mov_res_small,imresize(mov_res,1/4));
-end
-
-[V D]=get_eigvector(tovec(mov_res_small),10);
-F0img=sqrt(sum((V.^2).*D(1:10)',2));
-F0img=toimg(F0img,size(mov_res_small,1),size(mov_res_small,2));
-F0img=imresize(F0img,4);
-
-Result.F0PCAimg=F0img;
-
-for j=SameCellInd'
-    load([fpath{j} '/OP_Result.mat'])
-    Result.F0PCAimg=F0img;
-    save([fpath{j} '/OP_Result.mat'],'Result','-v7.3')
-end
-
-
-%% Load the data
-
-i=145; bound=6;
-load([fpath{i} '/OP_Result.mat'])
-cd(fpath{i});
-load(fullfile(fpath{i},"output_data.mat"))
-sz=double(Device_Data{1, 3}.ROI([2 4]));
-
-Result.Blue=Device_Data{1, 2}.buffered_tasks(1, 1).channels(1, 2).data;
-CamCounter=Device_Data{1, 2}.Counter_Inputs(1, 1).data;
-CamTrigger=find(CamCounter(2:end)-CamCounter(1:end-1));
-DMDtrigger=Device_Data{1, 2}.buffered_tasks(1, 2).channels(1, 3).data;
-DMDtrigger=DMDtrigger(CamTrigger);
-Result.DMDtrigger=[0 (DMDtrigger(2:end)-DMDtrigger(1:end-1))>0];
-Result.Blue=Result.Blue(CamTrigger);
-[Result.blueDMDimg Result.bluePatt]=get_blueDMDPatt(Device_Data,'stack');
-
-DMDbluetrace=(Result.Blue>0).*cumsum(Result.DMDtrigger)+1;
-DMDbluetrace(Result.Blue==0)=0;
-
-mov_mc=readBinMov_BHL(fpath{i},3);
-load(fullfile(fpath{i},'mcTrace01.mat'))
-mean_F=squeeze(mean(mov_mc(bound:end-bound,bound:end-bound,:),[1 2]));
-[~, blueOff]=get_blueoffTrace(mean_F,[Result.Blue],70);
-[y_fit]=expfitDM_2(find(blueOff)',mean_F(find(blueOff)),[1:size(mov_mc,3)]',1000);
-
-mov_res= mov_mc-mean(mov_mc,3);
-mov_res = SeeResiduals(mov_res,y_fit);
-mov_res = SeeResiduals(mov_res,mcTrace.xymean(:,:));
-mov_res = SeeResiduals(mov_res,mcTrace.xymean(:,:).^2);
-mov_res = SeeResiduals(mov_res,mcTrace.xymean(:,1).*mcTrace.xymean(:,end));
-
-dirtMov_dilate = tracking_dirt(mov_res,0.3);
-% %%
-% [u,s,v] = svds(tovec(mov_res(:,:,1:5000)-mean(mov_res(:,:,1:5000),3)),20);
-% reshape_u=reshape(u,sz(2),sz(1),[]);
-% bvMask=[];
-% [~, bvMask]=get_ROI(max(abs(reshape_u),[],3),bvMask);
-%
-% Result.bvMask=bvMask;
-Result.normTraces=-Result.traces_bvMask./get_threshold(-Result.traces_bvMask,1);
-Result.spike=find_spike_bh(Result.normTraces,5,3);
-Result.traces_bvMask=(tovec(mov_res.*double(max(Result.bvMask,[],3)==0))'*tovec(Result.ftprnt))';
-Result.dirtTrace=(tovec(dirtMov_dilate)'*tovec(Result.ftprnt))';
-
-save([fpath{i} '/OP_Result.mat'],'Result','-v7.3')
-%% Get STAs
-i=145; bound=6; nTau=[-30:50];
-load([fpath{i} '/OP_Result.mat'])
-
-%SomTr=Result.traces_bvMask(1,:);
-%SomTr=SomTr/get_threshold(SomTr,1);
-%Result.spike(1,:)=find_spike_bh(SomTr,5,3);
-VoltageTr=Result.normTraces;
-VoltageTr(Result.dirtTrace>0)=NaN;
-%Result.F0_PCA=get_F0PCA(VoltageTr,3);
-VoltageTr=VoltageTr./Result.F0_PCA;
-
-NaNFrm=find(sum(Result.dirtTrace,1)>0);
-% mov_res_filt=-mov_res.*dou;
-% mov_res_filt(:,:,NaNFrm)=NaN;
-% mov_vec_sub=imresize(mov_res_filt(:,:,setdiff([1:size(mov_res,3)],NaNFrm)),1/4);
-% [V eigVal eigTrace]=get_eigvector(tovec(mov_vec_sub),10);
-%
-% mov2dfilt = eigTrace*V';
-% mov2dfilt = reshape(mov2dfilt', size(mov_vec_sub,1), size(mov_vec_sub,2), []);
-% mov2dfilt = mov2dfilt + mean(mov_vec_sub,3);
-% mov2dfilt=imresize(mov2dfilt,4);
-% mov_vec=zeros(size(mov2dfilt,1).*size(mov2dfilt,2),size(mov_res,3));
-% mov_vec(:,setdiff([1:size(mov_res,3)],NaNFrm))=tovec(mov2dfilt);
-
-mov_vec=tovec(-mov_res);
-mov_vec(:,NaNFrm)=NaN;
-
-STAmov=[]; STAtr=[]; N_avg=[];
-for b=1:max(DMDbluetrace)
-    PattBlue=double(DMDbluetrace==b);
-    onsetTime=find((PattBlue(2:end)-PattBlue(1:end-1))==1)+1;
-    PattBlueOnset=ind2vec(length(DMDbluetrace),onsetTime,1);
-    [~, spMat]=get_STA(Result.spike(1,:),PattBlueOnset,-nTau(1),nTau(end));
-    Nsp=squeeze(sum(spMat,3));
-    [~, m]=get_STA(mov_vec,PattBlueOnset,-nTau(1),nTau(end));
-    STAmov(:,:,:,b)=toimg(squeeze(mean(m(:,Nsp==0,:),2,'omitnan')),sz(2),sz(1));
-    [~, trMat]=get_STA(VoltageTr,PattBlueOnset,-nTau(1),nTau(end));
-    STAtr(:,:,b)=squeeze(mean(trMat(:,Nsp==0,:),2,'omitnan'));
-    N_avg(b)=length(find(Nsp==0));
-end
-
-STAmov=STAmov./Result.F0PCAimg;
-STAmov=STAmov-median(STAmov(:,:,10:30,:),3,'omitnan');
-STAtr=STAtr-median(STAtr(:,10:30,:),2,'omitnan');
+toc;
 %%
-b_show=[1:8];
-avg_frame=[40:45]; cax_sub=[-0.001 0.007];
-figure(11); clf;
-
-STAmov_filt=zeros(size(STAmov));
-for b=b_show
-    STAmov_filt(:,:,:,b)=pcafilt(imaveragefilt(STAmov(:,:,:,b),10),3);
-end
-
-STAimg_sub=squeeze(mean(STAmov_filt(:,:,avg_frame,:),3,'omitnan'));
-mask=max(Result.ftprnt>0,[],3);
-
-colorSTA=grs2rgb(tovec(STAimg_sub),colormap('hot'),cax_sub(1),cax_sub(2));
-colorSTA=reshape(colorSTA,size(STAmov,1),size(STAmov,2),max(DMDbluetrace),[]);
-colorSTA=permute(colorSTA,[1 2 4 3]);
-STAimg_sub_Struc=colorSTA.*mat2gray(Result.ref_im-100).*double(max(Result.ftprnt,[],3)>0).*double(max(Result.bvMask,[],3)==0)*3;
-
-blueCoord=get_coord(Result.blueDMDimg);
-ftprntCoord=get_coord(Result.ftprnt(:,:,Result.dist_order));
-D=distance_BH(blueCoord,ftprntCoord);
-
-figure(13); clf; tiledlayout(length(b_show),2);
-Dsign=ones(1,size(Result.interDendDist,2));
-Dsign(Result.dist_order(1:find(Result.dist_order==1)-1))=-1;
-dendaxis=Result.interDendDist(1,:).*Dsign;
-dendaxis=dendaxis*PixelSize(i);
-dendaxis=dendaxis(Result.dist_order);
-
-STAtr=STAtr(Result.dist_order,:,:);
-l=plot(nTau,movmean(squeeze(mean(STAtr([15 21],:,:),1,'omitnan')),10,1,'omitnan'));
-arrayfun(@(l,c) set(l,'Color',c{:}),l,num2cell(turbo(max(DMDbluetrace)),2));
-
-figure(14); clf; tiledlayout(4,2);
-bvBoundary=bwboundaries(max(Result.bvMask,[],3)>0);
-for b=b_show
+figure(19); clf;
+for g=1:length(GridBlueResult)
     nexttile([1 1]);
-    imshow2(STAimg_sub_Struc(:,:,:,b),cax_sub); hold all
-    plot(Result.bluePatt{b}{1}(:,2),Result.bluePatt{b}{1}(:,1),'color',[0 0.6 1],'linewidth',1.5)
-    for bv=1:length(bvBoundary)
-        plot(bvBoundary{bv}(:,2),bvBoundary{bv}(:,1),'r')
+    imagesc(GridBlueResult{g}.DMDBlueSTA)
+    title(g)
+end
+%%
+ time2show=[10:30];
+ DecayDat=[]; OrangeDat=[];
+for ind2show=[1:6 8]
+clickyROI_center=mean(GridBlueResult{ind2show}.clicky_ROI{1}(1:end-1,:),1);
+blueDMDpattcenter=get_coord(GridBlueResult{ind2show}.blueDMDimg);
+distMat=distance_mat(blueDMDpattcenter,clickyROI_center).*GridBlueResult{ind2show}.PixelSize;
+[~, c]=min(distMat); %distMat(1:c-1)=-distMat(1:c-1); 
+ref_im=(GridBlueResult{ind2show}.ref_im-100)-medfilt2(GridBlueResult{ind2show}.ref_im-100,[80 80]);
+[OrangeProfile kymoROI]=polyLineKymo_lineInput(ref_im,5,30,blueDMDpattcenter);
+kymoROI_center=cell2mat(cellfun(@(x) mean(x(1:end-1,:),1),kymoROI,'UniformOutput',false)');
+distMat_orange=distance_mat(kymoROI_center,clickyROI_center).*GridBlueResult{ind2show}.PixelSize;
+%[~, c]=min(distMat_orange); distMat_orange(1:c-1)=-distMat_orange(1:c-1);
+OrangeProfile=rescale(OrangeProfile);
+dVpolyLine=mean(GridBlueResult{ind2show}.DMDBlueSTA(:,nTau(1)+time2show),2);
+[maxdV, m]=max(dVpolyLine);
+if c ~= m
+    shift=c-m;
+    if shift>0
+    distMat=distMat(1+shift:end);
+    dVpolyLine=dVpolyLine(1:end-shift);
+    else
+    distMat=distMat(1:end+shift);
+    dVpolyLine=dVpolyLine(1-shift:end);    
     end
 end
-colormap(hot);
-colorbar;
-
-%% Get F0PCA image % Cell145
-bound=7; i=145;
-SameCellInd=find(Mouse==Mouse(i) & NeuronInd==NeuronInd(i));
-mov_res_small=[];
-for j=[145]%SameCellInd'
-    j
-    load([fpath{j} '/OP_Result.mat'])
-
-    mov_mc=readBinMov_BHL(fpath{j},3);
-    mean_F=squeeze(mean(mov_mc(bound:end-bound,bound:end-bound,:),[1 2]));
-    [~, blueOff]=get_blueoffTrace(mean_F,[Result.Blue],70);
-    [y_fit]=expfitDM_2(find(blueOff)',mean_F(find(blueOff)),[1:size(mov_mc,3)]',1000);
-
-    mov_res= mov_mc-mean(mov_mc,3);
-    mov_res = SeeResiduals(mov_res,y_fit);
-    mov_res = SeeResiduals(mov_res,Result.mc(:,:));
-    mov_res = SeeResiduals(mov_res,Result.mc(:,:).^2);
-    mov_res = SeeResiduals(mov_res,Result.mc(:,1).*Result.mc(:,end));
-
-    dirtMov_dilate = tracking_dirt(mov_res,0.3);
-    Result.dirtTrace=(tovec(dirtMov_dilate)'*tovec(Result.ftprnt))';
-    save([fpath{j} '/OP_Result.mat'],'Result','-v7.3')
-
-    validFrm=find(sum(isnan(Result.dirtTrace),1)==0);
-    mov_res=movmean(mov_res,15,3);
-    mov_res=mov_res(:,:,validFrm);
-    mov_res_small=cat(3,mov_res_small,imresize(mov_res,1/4));
+dVpolyLine=dVpolyLine./maxdV;
+distMat=distMat(1:length(dVpolyLine)); 
+distMat=distMat-min(distMat);
+distMat_orange=distMat_orange-min(distMat_orange);
+GridBlueResult{ind2show}.DMDBlueSTA=GridBlueResult{ind2show}.DMDBlueSTA-median(GridBlueResult{ind2show}.DMDBlueSTA(:,1:40),2);
+DecayDat=[DecayDat; {[distMat dVpolyLine]}];
+OrangeDat=[OrangeDat; {[distMat_orange OrangeProfile']}];
 end
 
-[V D]=get_eigvector(tovec(mov_res_small),10);
-F0img=sqrt(sum((V.^2).*D(1:10)',2));
-F0img=toimg(F0img,size(mov_res_small,1),size(mov_res_small,2));
-F0img=imresize(F0img,4);
-
-Result.F0PCAimg=F0img;
-
-for j=SameCellInd'
-    load([fpath{j} '/OP_Result.mat'])
-    Result.F0PCAimg=F0img;
-    save([fpath{j} '/OP_Result.mat'],'Result','-v7.3')
+show_rep=5;
+figure(21); clf; tiledlayout(4,2);
+cmap_blue=winter(size(GridBlueResult{show_rep}.blueDMDimg,3));
+blueDMDpattcenter=get_coord(GridBlueResult{show_rep}.blueDMDimg);
+nexttile([1 2])
+imshow2(GridBlueResult{show_rep}.ref_im,[]); hold all
+plot(blueDMDpattcenter(:,1),blueDMDpattcenter(:,2),'r');
+nexttile([1 2])
+imshow2(GridBlueResult{show_rep}.ref_im,[]); hold all
+plot(GridBlueResult{show_rep}.clicky_ROI{1}(:,1),GridBlueResult{show_rep}.clicky_ROI{1}(:,2),'r');
+drawScaleBar(100/GridBlueResult{show_rep}.PixelSize,'Horizontal')
+nexttile([1 2])
+imshow2(GridBlueResult{show_rep}.ref_im,[]); hold all
+for b=1:size(GridBlueResult{show_rep}.DMDBlueSTA,1)
+    bd=bwboundaries(GridBlueResult{show_rep}.blueDMDimg(:,:,b)>0);
+plot(bd{1}(:,2),bd{1}(:,1),'color',cmap_blue(b,:),'LineWidth',1.5)
 end
-
-
-%% Load the data
-
-i=145; bound=6;
-load([fpath{i} '/OP_Result.mat'])
-cd(fpath{i});
-load(fullfile(fpath{i},"output_data.mat"))
-sz=double(Device_Data{1, 3}.ROI([2 4]));
-
-Result.Blue=Device_Data{1, 2}.buffered_tasks(1, 1).channels(1, 2).data;
-CamCounter=Device_Data{1, 2}.Counter_Inputs(1, 1).data;
-CamTrigger=find(CamCounter(2:end)-CamCounter(1:end-1));
-DMDtrigger=Device_Data{1, 2}.buffered_tasks(1, 2).channels(1, 3).data;
-DMDtrigger=DMDtrigger(CamTrigger);
-Result.DMDtrigger=[0 (DMDtrigger(2:end)-DMDtrigger(1:end-1))>0];
-Result.Blue=Result.Blue(CamTrigger);
-[Result.blueDMDimg Result.bluePatt]=get_blueDMDPatt(Device_Data,'stack');
-
-DMDbluetrace=(Result.Blue>0).*cumsum(Result.DMDtrigger)+1;
-DMDbluetrace(Result.Blue==0)=0;
-
-mov_mc=readBinMov_BHL(fpath{i},3);
-load(fullfile(fpath{i},'mcTrace01.mat'))
-mean_F=squeeze(mean(mov_mc(bound:end-bound,bound:end-bound,:),[1 2]));
-[~, blueOff]=get_blueoffTrace(mean_F,[Result.Blue],70);
-[y_fit]=expfitDM_2(find(blueOff)',mean_F(find(blueOff)),[1:size(mov_mc,3)]',1000);
-
-mov_res= mov_mc-mean(mov_mc,3);
-mov_res = SeeResiduals(mov_res,y_fit);
-mov_res = SeeResiduals(mov_res,mcTrace.xymean(:,:));
-mov_res = SeeResiduals(mov_res,mcTrace.xymean(:,:).^2);
-mov_res = SeeResiduals(mov_res,mcTrace.xymean(:,1).*mcTrace.xymean(:,end));
-
-dirtMov_dilate = tracking_dirt(mov_res,0.3);
-% %%
-% [u,s,v] = svds(tovec(mov_res(:,:,1:5000)-mean(mov_res(:,:,1:5000),3)),20);
-% reshape_u=reshape(u,sz(2),sz(1),[]);
-% bvMask=[];
-% [~, bvMask]=get_ROI(max(abs(reshape_u),[],3),bvMask);
-%
-% Result.bvMask=bvMask;
-Result.normTraces=-Result.traces_bvMask./get_threshold(-Result.traces_bvMask,1);
-Result.spike=find_spike_bh(Result.normTraces,5,3);
-Result.traces_bvMask=(tovec(mov_res.*double(max(Result.bvMask,[],3)==0))'*tovec(Result.ftprnt))';
-Result.dirtTrace=(tovec(dirtMov_dilate)'*tovec(Result.ftprnt))';
-
-save([fpath{i} '/OP_Result.mat'],'Result','-v7.3')
-%% Get STAs
-i=145; bound=6; nTau=[-30:50];
-load([fpath{i} '/OP_Result.mat'])
-
-%SomTr=Result.traces_bvMask(1,:);
-%SomTr=SomTr/get_threshold(SomTr,1);
-%Result.spike(1,:)=find_spike_bh(SomTr,5,3);
-VoltageTr=Result.normTraces;
-VoltageTr(Result.dirtTrace>0)=NaN;
-%Result.F0_PCA=get_F0PCA(VoltageTr,3);
-VoltageTr=VoltageTr./Result.F0_PCA;
-
-NaNFrm=find(sum(Result.dirtTrace,1)>0);
-% mov_res_filt=-mov_res.*dou;
-% mov_res_filt(:,:,NaNFrm)=NaN;
-% mov_vec_sub=imresize(mov_res_filt(:,:,setdiff([1:size(mov_res,3)],NaNFrm)),1/4);
-% [V eigVal eigTrace]=get_eigvector(tovec(mov_vec_sub),10);
-%
-% mov2dfilt = eigTrace*V';
-% mov2dfilt = reshape(mov2dfilt', size(mov_vec_sub,1), size(mov_vec_sub,2), []);
-% mov2dfilt = mov2dfilt + mean(mov_vec_sub,3);
-% mov2dfilt=imresize(mov2dfilt,4);
-% mov_vec=zeros(size(mov2dfilt,1).*size(mov2dfilt,2),size(mov_res,3));
-% mov_vec(:,setdiff([1:size(mov_res,3)],NaNFrm))=tovec(mov2dfilt);
-
-mov_vec=tovec(-mov_res);
-mov_vec(:,NaNFrm)=NaN;
-
-STAmov=[]; STAtr=[]; N_avg=[];
-for b=1:max(DMDbluetrace)
-    PattBlue=double(DMDbluetrace==b);
-    onsetTime=find((PattBlue(2:end)-PattBlue(1:end-1))==1)+1;
-    PattBlueOnset=ind2vec(length(DMDbluetrace),onsetTime,1);
-    [~, spMat]=get_STA(Result.spike(1,:),PattBlueOnset,-nTau(1),nTau(end));
-    Nsp=squeeze(sum(spMat,3));
-    [~, m]=get_STA(mov_vec,PattBlueOnset,-nTau(1),nTau(end));
-    STAmov(:,:,:,b)=toimg(squeeze(mean(m(:,Nsp==0,:),2,'omitnan')),sz(2),sz(1));
-    [~, trMat]=get_STA(VoltageTr,PattBlueOnset,-nTau(1),nTau(end));
-    STAtr(:,:,b)=squeeze(mean(trMat(:,Nsp==0,:),2,'omitnan'));
-    N_avg(b)=length(find(Nsp==0));
+nexttile([1 1]);
+DMDBlueSTD=cell2mat(cellfun(@(x) std(x,0,1,'omitnan')./sqrt(size(x,1)),GridBlueResult{show_rep}.DMDBlueSTAmat,'UniformOutput',false)');
+l=[];
+for b=1:size(DMDBlueSTD,1)
+l(b)=errorbar_shade([-nTau(1):nTau(2)],GridBlueResult{show_rep}.DMDBlueSTA(b,:),DMDBlueSTD(b,:),cmap_blue(b,:)); hold all;
+%plot([-nTau(1):nTau(2)],GridBlueResult{show_rep}.DMDBlueSTA(b,:),'color',cmap_blue(b,:)); hold all;
 end
+box off;
+xlabel('Time (ms)');
+ylabel('\DeltaF'); 
+legend(l,num2str(DecayDat{show_rep}(:,1),2))
 
-STAmov=STAmov./Result.F0PCAimg;
-STAmov=STAmov-median(STAmov(:,:,10:30,:),3,'omitnan');
-STAtr=STAtr-median(STAtr(:,10:30,:),2,'omitnan');
-%%
-b_show=[1:8];
-avg_frame=[40:45]; cax_sub=[-0.001 0.007];
-figure(11); clf;
-
-STAmov_filt=zeros(size(STAmov));
-for b=b_show
-    STAmov_filt(:,:,:,b)=pcafilt(imaveragefilt(STAmov(:,:,:,b),10),3);
+nexttile([1 1]);
+exp_decayconst=[];
+for g=1:length(DecayDat)
+    plot(DecayDat{g}(:,1),DecayDat{g}(:,2),'color',[0.7 0.7 0.7]); hold all
+     [~, params, R2] = fitExpDecay_1param(DecayDat{g}(:,1), DecayDat{g}(:,2), [0:50]);
+exp_decayconst(g,:)=[params(1) R2];
 end
-
-STAimg_sub=squeeze(mean(STAmov_filt(:,:,avg_frame,:),3,'omitnan'));
-mask=max(Result.ftprnt>0,[],3);
-
-colorSTA=grs2rgb(tovec(STAimg_sub),colormap('hot'),cax_sub(1),cax_sub(2));
-colorSTA=reshape(colorSTA,size(STAmov,1),size(STAmov,2),max(DMDbluetrace),[]);
-colorSTA=permute(colorSTA,[1 2 4 3]);
-STAimg_sub_Struc=colorSTA.*mat2gray(Result.ref_im-100).*double(max(Result.ftprnt,[],3)>0).*double(max(Result.bvMask,[],3)==0)*3;
-
-blueCoord=get_coord(Result.blueDMDimg);
-ftprntCoord=get_coord(Result.ftprnt(:,:,Result.dist_order));
-D=distance_BH(blueCoord,ftprntCoord);
-
-figure(13); clf; tiledlayout(length(b_show),2);
-Dsign=ones(1,size(Result.interDendDist,2));
-Dsign(Result.dist_order(1:find(Result.dist_order==1)-1))=-1;
-dendaxis=Result.interDendDist(1,:).*Dsign;
-dendaxis=dendaxis*PixelSize(i);
-dendaxis=dendaxis(Result.dist_order);
-
-STAtr=STAtr(Result.dist_order,:,:);
-l=plot(nTau,movmean(squeeze(mean(STAtr([15 21],:,:),1,'omitnan')),10,1,'omitnan'));
-arrayfun(@(l,c) set(l,'Color',c{:}),l,num2cell(turbo(max(DMDbluetrace)),2));
-
-figure(14); clf; tiledlayout(4,2);
-bvBoundary=bwboundaries(max(Result.bvMask,[],3)>0);
-for b=b_show
-    nexttile([1 1]);
-    imshow2(STAimg_sub_Struc(:,:,:,b),cax_sub); hold all
-    plot(Result.bluePatt{b}{1}(:,2),Result.bluePatt{b}{1}(:,1),'color',[0 0.6 1],'linewidth',1.5)
-    for bv=1:length(bvBoundary)
-        plot(bvBoundary{bv}(:,2),bvBoundary{bv}(:,1),'r')
-    end
-end
-colormap(hot);
-colorbar;
-
-
-%% Load the data
-
-i=152; bound=6;
-load([fpath{i} '/OP_Result.mat'])
-cd(fpath{i});
-load(fullfile(fpath{i},"output_data.mat"))
-sz=double(Device_Data{1, 3}.ROI([2 4]));
-
-Result.Blue=Device_Data{1, 2}.buffered_tasks(1, 1).channels(1, 2).data;
-CamCounter=Device_Data{1, 2}.Counter_Inputs(1, 1).data;
-CamTrigger=find(CamCounter(2:end)-CamCounter(1:end-1));
-DMDtrigger=Device_Data{1, 2}.buffered_tasks(1, 2).channels(1, 3).data;
-DMDtrigger=DMDtrigger(CamTrigger);
-Result.DMDtrigger=[0 (DMDtrigger(2:end)-DMDtrigger(1:end-1))>0];
-Result.Blue=Result.Blue(CamTrigger);
-[Result.blueDMDimg Result.bluePatt]=get_blueDMDPatt(Device_Data,'stack');
-
-DMDbluetrace=(Result.Blue>0).*cumsum(Result.DMDtrigger)+1;
-DMDbluetrace(Result.Blue==0)=0;
-
-mov_mc=readBinMov_BHL(fpath{i},3);
-load(fullfile(fpath{i},'mcTrace01.mat'))
-mean_F=squeeze(mean(mov_mc(bound:end-bound,bound:end-bound,:),[1 2]));
-[~, blueOff]=get_blueoffTrace(mean_F,[Result.Blue],70);
-[y_fit]=expfitDM_2(find(blueOff)',mean_F(find(blueOff)),[1:size(mov_mc,3)]',1000);
-
-mov_res= mov_mc-mean(mov_mc,3);
-mov_res = SeeResiduals(mov_res,y_fit);
-mov_res = SeeResiduals(mov_res,mcTrace.xymean(:,:));
-mov_res = SeeResiduals(mov_res,mcTrace.xymean(:,:).^2);
-mov_res = SeeResiduals(mov_res,mcTrace.xymean(:,1).*mcTrace.xymean(:,end));
-
-dirtMov_dilate = tracking_dirt(mov_res,0.3);
-% %%
-% [u,s,v] = svds(tovec(mov_res(:,:,1:5000)-mean(mov_res(:,:,1:5000),3)),20);
-% reshape_u=reshape(u,sz(2),sz(1),[]);
-% bvMask=[];
-% [~, bvMask]=get_ROI(max(abs(reshape_u),[],3),bvMask);
-%
-% Result.bvMask=bvMask;
-Result.normTraces=-Result.traces_bvMask./get_threshold(-Result.traces_bvMask,1);
-Result.spike=find_spike_bh(Result.normTraces,5,3);
-Result.traces_bvMask=(tovec(mov_res.*double(max(Result.bvMask,[],3)==0))'*tovec(Result.ftprnt))';
-Result.dirtTrace=(tovec(dirtMov_dilate)'*tovec(Result.ftprnt))';
-
-save([fpath{i} '/OP_Result.mat'],'Result','-v7.3')
-%% Get STAs
-i=145; bound=6; nTau=[-30:50];
-load([fpath{i} '/OP_Result.mat'])
-
-%SomTr=Result.traces_bvMask(1,:);
-%SomTr=SomTr/get_threshold(SomTr,1);
-%Result.spike(1,:)=find_spike_bh(SomTr,5,3);
-VoltageTr=Result.normTraces;
-VoltageTr(Result.dirtTrace>0)=NaN;
-%Result.F0_PCA=get_F0PCA(VoltageTr,3);
-VoltageTr=VoltageTr./Result.F0_PCA;
-
-NaNFrm=find(sum(Result.dirtTrace,1)>0);
-% mov_res_filt=-mov_res.*dou;
-% mov_res_filt(:,:,NaNFrm)=NaN;
-% mov_vec_sub=imresize(mov_res_filt(:,:,setdiff([1:size(mov_res,3)],NaNFrm)),1/4);
-% [V eigVal eigTrace]=get_eigvector(tovec(mov_vec_sub),10);
-%
-% mov2dfilt = eigTrace*V';
-% mov2dfilt = reshape(mov2dfilt', size(mov_vec_sub,1), size(mov_vec_sub,2), []);
-% mov2dfilt = mov2dfilt + mean(mov_vec_sub,3);
-% mov2dfilt=imresize(mov2dfilt,4);
-% mov_vec=zeros(size(mov2dfilt,1).*size(mov2dfilt,2),size(mov_res,3));
-% mov_vec(:,setdiff([1:size(mov_res,3)],NaNFrm))=tovec(mov2dfilt);
-
-mov_vec=tovec(-mov_res);
-mov_vec(:,NaNFrm)=NaN;
-
-STAmov=[]; STAtr=[]; N_avg=[];
-for b=1:max(DMDbluetrace)
-    PattBlue=double(DMDbluetrace==b);
-    onsetTime=find((PattBlue(2:end)-PattBlue(1:end-1))==1)+1;
-    PattBlueOnset=ind2vec(length(DMDbluetrace),onsetTime,1);
-    [~, spMat]=get_STA(Result.spike(1,:),PattBlueOnset,-nTau(1),nTau(end));
-    Nsp=squeeze(sum(spMat,3));
-    [~, m]=get_STA(mov_vec,PattBlueOnset,-nTau(1),nTau(end));
-    STAmov(:,:,:,b)=toimg(squeeze(mean(m(:,Nsp==0,:),2,'omitnan')),sz(2),sz(1));
-    [~, trMat]=get_STA(VoltageTr,PattBlueOnset,-nTau(1),nTau(end));
-    STAtr(:,:,b)=squeeze(mean(trMat(:,Nsp==0,:),2,'omitnan'));
-    N_avg(b)=length(find(Nsp==0));
-end
-
-STAmov=STAmov./Result.F0PCAimg;
-STAmov=STAmov-median(STAmov(:,:,10:30,:),3,'omitnan');
-STAtr=STAtr-median(STAtr(:,10:30,:),2,'omitnan');
-%%
-b_show=[1:8];
-avg_frame=[40:45]; cax_sub=[-0.001 0.007];
-figure(11); clf;
-
-STAmov_filt=zeros(size(STAmov));
-for b=b_show
-    STAmov_filt(:,:,:,b)=pcafilt(imaveragefilt(STAmov(:,:,:,b),10),3);
-end
-
-STAimg_sub=squeeze(mean(STAmov_filt(:,:,avg_frame,:),3,'omitnan'));
-mask=max(Result.ftprnt>0,[],3);
-
-colorSTA=grs2rgb(tovec(STAimg_sub),colormap('hot'),cax_sub(1),cax_sub(2));
-colorSTA=reshape(colorSTA,size(STAmov,1),size(STAmov,2),max(DMDbluetrace),[]);
-colorSTA=permute(colorSTA,[1 2 4 3]);
-STAimg_sub_Struc=colorSTA.*mat2gray(Result.ref_im-100).*double(max(Result.ftprnt,[],3)>0).*double(max(Result.bvMask,[],3)==0)*3;
-
-blueCoord=get_coord(Result.blueDMDimg);
-ftprntCoord=get_coord(Result.ftprnt(:,:,Result.dist_order));
-D=distance_BH(blueCoord,ftprntCoord);
-
-figure(13); clf; tiledlayout(length(b_show),2);
-Dsign=ones(1,size(Result.interDendDist,2));
-Dsign(Result.dist_order(1:find(Result.dist_order==1)-1))=-1;
-dendaxis=Result.interDendDist(1,:).*Dsign;
-dendaxis=dendaxis*PixelSize(i);
-dendaxis=dendaxis(Result.dist_order);
-
-STAtr=STAtr(Result.dist_order,:,:);
-l=plot(nTau,movmean(squeeze(mean(STAtr([15 21],:,:),1,'omitnan')),10,1,'omitnan'));
-arrayfun(@(l,c) set(l,'Color',c{:}),l,num2cell(turbo(max(DMDbluetrace)),2));
-
-figure(14); clf; tiledlayout(4,2);
-bvBoundary=bwboundaries(max(Result.bvMask,[],3)>0);
-for b=b_show
-    nexttile([1 1]);
-    imshow2(STAimg_sub_Struc(:,:,:,b),cax_sub); hold all
-    plot(Result.bluePatt{b}{1}(:,2),Result.bluePatt{b}{1}(:,1),'color',[0 0.6 1],'linewidth',1.5)
-    for bv=1:length(bvBoundary)
-        plot(bvBoundary{bv}(:,2),bvBoundary{bv}(:,1),'r')
-    end
-end
-colormap(hot);
-colorbar;
+hold all
+[M S Xc N]=binning_data(DecayDat,[0:3:40]);
+errorbar(Xc,M,S./sqrt(sum(cellfun(@sum,N),2))','r','linewidth',1.5);
+xlim([0 30]); ylim([0 1]);
+box off;
+xlabel('Stimulation distance from ROI (\mum)');
+ylabel('Normalized \DeltaF');
+% plot(DecayDat{show_rep}(:,1),DecayDat{show_rep}(:,2)); hold all
+% plot(OrangeDat{show_rep}(:,1),OrangeDat{show_rep}(:,2),'r')

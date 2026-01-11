@@ -20,7 +20,7 @@ function scatter_density(x, y, mksz, cmap, rnge, facealpha)
     end
     
     if nargin <6 || isempty(facealpha)
-        facealpha=0.5;
+        facealpha=0.8;
     end
     assert(isvector(x) && isvector(y) && numel(x) == numel(y), ...
         'x and y must be equal-length vectors.');

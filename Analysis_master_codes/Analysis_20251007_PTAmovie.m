@@ -1,0 +1,218 @@
+clear
+clc;
+[~, ~, raw] = xlsread(['/Volumes/cohen_lab/Lab/Labmembers' ...
+    '/Byung Hun Lee/Data/PrismPCdata_Arrangement.xlsx'], 'Sheet1', 'C5:Z31');
+
+ref_ROI=cellfun(@(x) (str2num(num2str(x))),raw(:,9),'UniformOutput',false);
+
+oblique_ROI=cellfun(@(x) (str2num(num2str(x))),raw(:,10),'UniformOutput',false);
+PeriSoma_ROI=cellfun(@(x) (str2num(num2str(x))),raw(:,11),'UniformOutput',false);
+basal_ROI=cellfun(@(x) (str2num(num2str(x))),raw(:,12),'UniformOutput',false);
+apical_ROI=cellfun(@(x) (str2num(num2str(x))),raw(:,13),'UniformOutput',false);
+distal_ROI=cellfun(@(x) (str2num(num2str(x))),raw(:,14),'UniformOutput',false);
+
+fpath=raw(:,1)';
+StructureData=raw(:,8);
+BadROI=cellfun(@(x) (str2num(num2str(x))),raw(:,17),'UniformOutput',false);
+EndFrame=cell2mat(raw(:,15));
+ifmotionReject=cell2mat(raw(:,16));
+ifdirtRemov=cell2mat(raw(:,18));
+Pixelsize=cell2mat(raw(:,6));
+save_figto='/Volumes/BHL_WD18TB/PP72_PlaceCellResults';
+place_bin=150; time_segment=15000; overlap=200;
+alignedMovFN = {'STA_Mat_SS','STA_Mat_CS','STA_Mat_dSP'};
+bound=6;
+title_str={'Basal','Apical','Peri-Soma'};
+PlaceFieldList=cellfun(@(x) (str2num(num2str(x))),raw(:,21),'UniformOutput',false);
+PlaceFieldBin=cellfun(@(x) (str2num(num2str(x))),raw(:,22),'UniformOutput',false);
+set(0,'DefaultFigureWindowStyle','docked')
+%foi=[1 4 5 6 8 10 11 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27];
+foi=[1 4 5 6 8 10 11 15 16 17 18 19 20 21 22 23 24 25 26 27];
+%foi=23;
+cd('/Volumes/cohen_lab/Lab/Labmembers/Byung Hun Lee/Data/20240807/201405BHLm141_N1_VR_LowStim/')
+
+%%
+f=23;
+
+nTauPeak=[150 150];
+load([fpath{f} '/output_data.mat'])
+load(fullfile(fpath{f},'PC_Result.mat'),'Result');
+sz=double(Device_Data{1, 3}.ROI([2 4]));
+Mov_PeakTA=double(readBinMov([fpath{f} '/PeakTriggered_movie.bin'],sz(2)*sz(1),301));
+Mov_PeakTA=Mov_PeakTA-mean(Mov_PeakTA,2);
+
+%%
+mov_mc=[];
+mov_mc=cat(3,mov_mc,double(readBinMov([fpath{f} '/mc_ShutterReg' num2str(1,'%02d') '.bin'],sz(2),sz(1))));
+load([fpath{f} '/mcTrace' num2str(1,'%02d') '.mat']);
+mc=mcTrace.xymean;
+t_fit=[1:size(mov_mc,3)];
+[bleaching_fit] = expfitDM_2(t_fit',squeeze(mean(mov_mc,[1 2])),t_fit',[100000 10000]);
+
+mov_res= mov_mc-median(mov_mc,3);
+mov_res = SeeResiduals(mov_res,mc);
+mov_res = SeeResiduals(mov_res,mc.^2);
+mov_res = SeeResiduals(mov_res,mc(:,1).*mc(:,end));
+mov_res = SeeResiduals(mov_res,bleaching_fit,1);
+mov_res=tovec(mov_res);
+%F0img=get_F0img(toimg(mov_res,sz(2),sz(1)));
+mov_res_sub=movmedian(mov_res,20,2);
+F0img=get_F0img_PCA(imresize(toimg(mov_res_sub,sz(2),sz(1)),0.7),[3000:8000]);
+F0img2=get_F0img(imresize(toimg(mov_res_sub,sz(2),sz(1)),0.7),[3000:8000]);
+
+%%  
+[xx,yy] = meshgrid(1:sz(1),1:sz(2));
+mask = false(sz(2),sz(1));
+r=Result.SWC(:,3)+3;
+r(1)=12;
+for i = 1:size(Result.SWC,1)
+    mask = mask | ((xx - Result.SWC(i,1)).^2 + (yy - Result.SWC(i,2)).^2 <= r(i)^2);
+end
+strImg=Result.ref_im-100;%./imgaussfilt(Result.ref_im,50);
+strImgMasked=strImg;
+strImgMasked(mask==1 | max(Result.ftprnt>0.5,[],3)>0)=NaN;
+strImgbkg = medfilt2nan(strImgMasked, ones(1,2)*10);
+[~, idx]=bwdist(~isnan(strImgbkg));
+strImgbkg(isnan(strImgbkg)) = strImgbkg(idx(isnan(strImgbkg)));  % assign nearest values
+strImgbkg = imgaussfiltnan(strImgbkg, 3);
+
+F0imgMasked=F0img;
+F0imgMasked(mask==1 | max(Result.ftprnt>0.5,[],3)>0)=NaN;
+F0imgbkg = medfilt2nan(F0imgMasked, ones(1,2)*10);
+[~, idx]=bwdist(~isnan(F0imgbkg));
+F0imgbkg(isnan(F0imgbkg)) = F0imgbkg(idx(isnan(F0imgbkg)));  % assign nearest values
+F0imgbkg = imgaussfiltnan(F0imgbkg, 3);
+
+figure; clf; ax1=[];
+ax1=[ax1 nexttile([1 1])];
+imshow2(Result.ref_im,[])
+ax1=[ax1 nexttile([1 1])];
+imshow2(strImgbkg,[])
+ax1=[ax1 nexttile([1 1])];
+strImg=strImg-strImgbkg;
+imshow2(strImg,[])
+%imagesc(strImg./strImgbkg); colormap(turbo);
+
+DR=[prctile(strImg(mask==0),70),prctile(strImg(mask==1),99)];
+strImg_bin=grs2rgb(strImg,colormap('gray'),DR(1),DR(2));
+strImg_bin=strImg_bin(:,:,1);
+strImg_bin(strImg_bin<0.02)=0;
+ax1=[ax1 nexttile([1 1])];
+imshow2(strImg_bin,[])
+linkaxes(ax1)
+%%
+figure(15); clf; tiledlayout(2,2); 
+nexttile([1 1]);
+F0img_crop=F0img(5:end-5,5:end-5);
+imshow2(F0img_crop,[]); title('Subthreshold s.d.')
+nexttile([1 1]);
+strImg_crop=strImg(5:end-5,5:end-5);
+imshow2(strImg_crop,[0 2000]); title('Background subtracted F_0');
+nexttile([1 1]);
+%imshow2(strImg_bin(5:end-5,5:end-5)>0.03,[]); title('Mask')
+imshow2(strImg_crop./F0img_crop,[-10 150]); title('F0/s.d.');
+nexttile([1 1]);
+scatter_density(tovec(strImg_crop(strImg_bin(5:end-5,5:end-5)>0.03)),tovec(F0img_crop(strImg_bin(5:end-5,5:end-5)>0.03)),10,[],[0 0.0001])
+xlabel('Subthreshold s.d.'); ylabel('F_0'); title('Pixels in mask');
+
+%%
+noi=setdiff(1:size(Result.ftprnt,3),BadROI{f});
+Dist_order{f}=Result.BrancDist_order;
+noi_dist{f}=ismember(Dist_order{f},noi);
+Ftprnt_order=Result.ftprnt(:,:,Dist_order{f}(noi_dist{f}));
+
+dFF_range=[-1.8 1.8];
+ROI2show=[3 37];
+dFF_movie=[]; dFF_tmp=[]; colored_dFFmov=[]; g=1;
+cmap=gen_colormap([0 0.2 1; 0 0 0; 1 0 0],256);
+t2show=[1:301];
+for n=ROI2show
+    dFF_movie{g}=toimg(Mov_PeakTA(:,:,n),sz(2),sz(1));
+    dFF_movie{g}=imgaussfilt(dFF_movie{g},1);
+    dFF_movie{g}=movmean(dFF_movie{g},5,3);
+
+    for t=t2show;
+        dFF_tmp{g}=dFF_movie{g}(:,:,t);
+        dFF_tmp{g}(max(Result.bvMask,[],3)>0)=NaN;
+        dFF_tmp{g}=medfilt2nan(dFF_tmp{g},[8 8]);
+        dFF_movie{g}(:,:,t) = imgaussfiltnan(dFF_tmp{g}, 2).*strImg_bin(:,:,1);
+    end
+
+    colored_dFFmov{g}=[];
+    for t=t2show
+        colored_dFFmov{g}(:,:,:,t) = grs2rgb(double(dFF_movie{g}(:,:,t)), cmap ,dFF_range(1),dFF_range(2)).*strImg_bin(:,:,1);
+        colored_dFFmov{g}(:,:,:,t) = grs2rgb(double(strImg), colormap("gray"),1,3)/1.5 + colored_dFFmov{g}(:,:,:,t)*6;
+        %colored_dFFmov(:,:,:,t) = colored_dFFmov(:,:,:,t).*mat2gray(strImg);
+    end
+    g=g+1;
+end
+% Generate movie;
+    figure(20); clf;
+    v = VideoWriter(fullfile(fpath{f},['PTAmovie_' num2str(ROI2show)]),'MPEG-4');
+    %v = VideoWriter([fpath2read '/SNAPT_movie'],'Uncompressed AVI');
+    v.FrameRate = 25;  %can adjust this, 5 - 10 works well for me
+    v.Quality= 100;
+    open(v);
+
+    for j = t2show
+        clf;
+        set(gca,'units','pixels','position',[200 0 1000 800])
+        ax1=[]; tiledlayout(length(ROI2show),1,'padding','compact');
+        for g=1:length(ROI2show)
+            ax1=[ax1 nexttile([1 1])];
+        imshow2(colored_dFFmov{g}(:,:,:,j),[0 1]);
+        pbaspect([size(double(colored_dFFmov{g}(:,:,:,j)),2) size(double(colored_dFFmov{g}(:,:,:,j)),1) 1]),colormap(gray)
+        ftprntboundary=bwboundaries(Ftprnt_order(:,:,ROI2show(g))); hold all
+        ftprntboundary_center=mean(ftprntboundary{1});
+        scatter(ftprntboundary_center(2),ftprntboundary_center(1)+15,50,[1 0 0],'filled','^');
+        colormap(gen_colormap([0 0.2 1; 1 1 1; 1 0 0],256))
+        cb=colorbar;
+        cb.Ticks=[0 1]; cb.TickLabels=dFF_range;
+        end
+        drawScaleBar(100/1.17,'horizontal','color',[1 1 1],'Linewidth',3);
+        text(50,150,'100 \mum','color','w','Fontsize',17);
+        set_fontsize(13);
+        axis off
+        nexttile(1,[1 1]);
+        text(7,12,[num2str((j)-150) ' ms'], 'FontSize', 20, 'color', [0.99 0.99 0.99])% the value 1. is to adjust timing by eyes
+        pause(0.1)
+        set(gcf,'color','w')    % Sets background to white
+        frame = getframe(gcf);
+        writeVideo(v,frame);
+        pause(0.1);
+    end;
+    close(v);
+
+%%  
+[xx,yy] = meshgrid(1:sz(1),1:sz(2));
+mask = false(sz(2),sz(1));
+r=Result.SWC(:,3)+3;
+r(1)=10;
+for i = 1:size(Result.SWC,1)
+    mask = mask | ((xx - Result.SWC(i,1)).^2 + (yy - Result.SWC(i,2)).^2 <= r(i)^2);
+end
+strImg=Result.ref_im-100;%./imgaussfilt(Result.ref_im,50);
+strImgMasked=strImg;
+strImgMasked(mask==1 | max(Result.ftprnt>0.5,[],3)>0)=NaN;
+strImgbkg = medfilt2nan(strImgMasked, ones(1,2)*35);
+[~, idx]=bwdist(~isnan(strImgbkg));
+strImgbkg(isnan(strImgbkg)) = strImgbkg(idx(isnan(strImgbkg)));  % assign nearest values
+strImgbkg = imgaussfiltnan(strImgbkg, 5);
+
+figure; clf; ax1=[];
+ax1=[ax1 nexttile([1 1])];
+imshow2(Result.ref_im,[])
+ax1=[ax1 nexttile([1 1])];
+imshow2(strImgbkg,[])
+ax1=[ax1 nexttile([1 1])];
+imshow2(strImg./strImgbkg,[])
+%imagesc(strImg./strImgbkg); colormap(turbo);
+strImg=strImg./strImgbkg;
+DR=[prctile(strImg(mask==0),70),prctile(strImg(mask==1),95)];
+strImg_bin=grs2rgb(strImg,colormap('gray'),DR(1),DR(2));
+strImg_bin=strImg_bin(:,:,1);
+strImg_bin(strImg_bin<0.05)=0;
+ax1=[ax1 nexttile([1 1])];
+imshow2(strImg_bin,[])
+linkaxes(ax1)
+

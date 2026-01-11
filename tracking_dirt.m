@@ -17,7 +17,7 @@ valid_ptl=traveldist>50 & traveltime>70;
 filteredPtl=detectedPtl(valid_ptl);
 dirtMov=zeros(size(mov_res));
 
-ref_im=abs(sqrt(mean(mov_res(:,:,2:round(sz/3)).*mov_res(:,:,1:round(sz/3)-1),3)));
+ref_im=abs(sqrt(mean(mov_res(:,:,2:round(sz(3)/3)).*mov_res(:,:,1:round(sz(3)/3)-1),3)));
 
 figure(222); clf; filteredPtl_exp=[];
 imshow2(ref_im,[]); hold all

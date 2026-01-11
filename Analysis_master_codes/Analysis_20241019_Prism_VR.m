@@ -77,7 +77,7 @@ end
 
 %% Get footprint
 
-for f=[18]%:length(fpath)
+for f=[20]%:length(fpath)
     disp(fpath{f}); Result=[];
     DAQ_rate=0.000005;
     load([fpath{f} '/output_data.mat'])
@@ -93,7 +93,7 @@ for f=[18]%:length(fpath)
     bvMask=[];
     [~, Result.bvMask]=get_ROI(max(abs(reshape_u),[],3),bvMask);
 
-    load(fullfile(fpath{f},'mcTrace15.mat'));
+    load(fullfile(fpath{f},'mcTrace04.mat'));
     frm_end=max(Device_Data{1, 2}.Counter_Inputs(1, 1).data);
     Result.Blue=Device_Data{1, 2}.buffered_tasks(1, 1).channels(1, 2).data;
     Result.Reward=Device_Data{1, 2}.buffered_tasks(1, 3).channels.data;
@@ -102,7 +102,7 @@ for f=[18]%:length(fpath)
 
     Result.Blue=Result.Blue(CamTrigger); Result.Reward=Result.Reward(CamTrigger);
     frm_rate=double((CamTrigger(2)-CamTrigger(1))*DAQ_rate);
-    mov_mc=double(readBinMov([fpath{f} '/mc_ShutterReg' num2str(15,'%02d') '.bin'],sz(2),sz(1)));
+    mov_mc=double(readBinMov([fpath{f} '/mc_ShutterReg' num2str(04,'%02d') '.bin'],sz(2),sz(1)));
     Result.ref_im=mean(mov_mc,3);
     [clickyROI, original_trace]=clicky(mov_mc);
 
@@ -156,15 +156,16 @@ for f=[18]%:length(fpath)
     mov_res_reg=mov_res;
     mov_res_reg=SeeResiduals(mov_res_reg,icsTrace.intens(5,:));
     mov_filt=imgaussfilt3(mov_res_reg.*double(max(Result.bvMask,[],3)==0).*double(max(Result.excludeROI,[],3)==0),[1.5 1.5 0.1]);
-    mov_filt=mov_filt(:,:,1:5000);
+    mov_filt=mov_filt(:,:,10000:12000);
     movVec=tovec(mov_filt);
     Npoly=size(Result.ROIpoly,1);
     ftprnt = zeros(size(mov_filt,1)*size(mov_filt,2),Npoly);
     clear mask
+
     figure(4);
     for p=1:Npoly %each ROIs
         clf; ax2=[];
-        tiledlayout(n_comp/2+2,2)
+        tiledlayout(4,3,'TileSpacing','compact');
         mask(:,:,p) = poly2mask(Result.ROIpoly{p}(:,1), Result.ROIpoly{p}(:,2), sz(2), sz(1));
         pixelList=find(tovec(squeeze(mask(:,:,p))));
         subMov = movVec(pixelList,:);
@@ -176,19 +177,20 @@ for f=[18]%:length(fpath)
         vSign = sign(max(V) - max(-V));  % make the largest value always positive
         V = V.*vSign;
         eigTrace=subMov'*V;
-        nexttile([2 2])
+        nexttile([2 3])
         plot(rescale2(eigTrace(:,1:n_comp),1)+[1:n_comp])
 
         %[icsTrace, ~, sepmat]=sorted_ica(eigTrace(:,1:n_comp),n_comp);
         %plot(rescale2(icsTrace,1)+[1:size(icsTrace,2)])
         %V_ics=V(:,1:n_comp)*sepmat';
         for n=1:n_comp
-            eigImg=NaN(size(mov_filt,1)*size(mov_filt,2),1);
+            eigImg=zeros(size(mov_filt,1)*size(mov_filt,2),3);
             ax2=[ax2 nexttile([1 1])];
-            eigImg(pixelList,1)=V(:,n);
+            eigvector_colored=grs2rgb(V(:,n),gen_colormap([0 0.2 1; 0 0 0; 1 0 0],256),prctile(V(:),5),prctile(V(:),99));
+            eigImg(pixelList,:)=squeeze(eigvector_colored);
             eigImg=toimg(eigImg,size(mov_filt,1),size(mov_filt,2));
-            imshow2(im_merge(cat(3,Result.ref_im,eigImg),[1 1 1;1 0 0]),[])
-            title([num2str(n) ', Fraction: ' num2str(D(n)/sum(D),2)])
+            imshow2(repmat(mat2gray(Result.ref_im),1,1,3)*1.2+eigImg,[])
+            title(['PC #' num2str(n) ',' newline 'Fraction of variance: ' num2str(D(n)/sum(D)*100,2) '%'])
         end
         linkaxes(ax2,'xy')
         n_take = input('#components to take: ', 's');

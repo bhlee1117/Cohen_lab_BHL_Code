@@ -2,14 +2,14 @@ clear
 clc;
 cd '/Volumes/BHL18TB_D2/Arranged_Data/Prism_OptopatchResult';
 [~, ~, raw] = xlsread(['/Volumes/cohen_lab/Lab/Labmembers/Byung Hun Lee/Data/' ...
-    'Prism_OptopatchData_Arrangement.xlsx'], 'Sheet1', 'B5:N164');
+    'Prism_OptopatchData_Arrangement.xlsx'], 'Sheet1', 'B5:L154');
 
 save_to='/Volumes/BHL18TB_D2/Arranged_Data/Prism_OptopatchResult';
-fpath=raw(:,1);
-Mouse=cell2mat(raw(:,2));
-NeuronInd=cell2mat(raw(:,5));
-CamType=raw(:,3);
-StructureData=raw(:,10);
+fpath=raw(:,2);
+Mouse=cell2mat(raw(:,3));
+NeuronInd=cell2mat(raw(:,6));
+CamType=raw(:,4);
+StructureData=raw(:,11);
 
 %% blood vessel masking
 [u,s,v] = svds(tovec(mov_res),20);
@@ -19,7 +19,7 @@ Result.bvMask=[];
 
 %% Low stim
 for i=146
-    load([fpath{i} '/Result.mat'])
+    load([fpath{i} '/OP_Result.mat'])
     load(fullfile(fpath{i},"output_data.mat"))
     sz=double(Device_Data{1, 3}.ROI([2 4]));
     mov_mc=double(readBinMov([fpath{i} '/mc_ShutterReg01.bin'],sz(2),sz(1)));

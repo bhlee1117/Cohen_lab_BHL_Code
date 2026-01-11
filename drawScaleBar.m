@@ -1,12 +1,12 @@
 function h = drawScaleBar(barLength, direction, varargin)
 % drawScaleBar - Draws a simple scale bar on the current axes.
-%
+
 % h = drawScaleBar(barLength, direction)
-%
+% 
 % Inputs:
 %   barLength : Length of the bar in data units (e.g., pixels)
 %   direction : 'horizontal' or 'vertical'
-%
+% 
 % Optional name-value pairs:
 %   'Position' : [x, y] starting coordinate (default: bottom-left inset)
 %   'Color'    : Line color (default: 'k')
@@ -24,22 +24,23 @@ ax = gca;
 xlim_ = xlim(ax);
 ylim_ = ylim(ax);
 
-% Default position: 5% inset from bottom-left
+% Default position: 5% inset from bottom-right
 if isempty(opts.Position)
-    x0 = xlim_(1) + 0.1 * range(xlim_);
-    y0 = ylim_(1) + 0.1 * range(ylim_);
+    %x0 = xlim_(1) + 0.75 * range(xlim_);
+    x1 = xlim_(1) + 0.95 * range(xlim_);
+    y0 = ylim_(1) + 0.9 * range(ylim_);
 else
-    x0 = opts.Position(1);
+    x1 = opts.Position(1);
     y0 = opts.Position(2);
 end
 
 % Define endpoint
 switch lower(direction)
     case 'horizontal'
-        x1 = x0 + barLength;
+        x0 = x1-barLength;
         y1 = y0;
     case 'vertical'
-        x1 = x0;
+        x0 = x1;
         y1 = y0 + barLength;
     otherwise
         error('Direction must be ''horizontal'' or ''vertical''.');

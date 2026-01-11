@@ -14,8 +14,8 @@ dF=STAmovVec(:,maxfrm);
 F0_weight=F0.*(tovec(ftprnt(:,:,n)));
 dF_weight=dF.*(tovec(ftprnt(:,:,n)));
 
-px2=px(find(F0(px)>prctile(F0(px),30)));
-px2_weight=px(find(F0_weight(px)>prctile(F0_weight(px),30) & F0_weight(px)<prctile(F0_weight(px),98)));
+px2=px(find(F0(px)>prctile(F0(px),30) & F0(px)<prctile(F0(px),95)));
+px2_weight=px(find(F0_weight(px)>prctile(F0_weight(px),40) & F0_weight(px)<prctile(F0_weight(px),80)));
 
 nexttile([1 1])
 %plot(F0(px),dF(px),'.'); hold all
@@ -35,7 +35,7 @@ SS_res = sum((dF_weight(px2_weight) - y_fit_weight).^2);
 SS_tot = sum((dF_weight(px2_weight) - mean(dF(px2_weight))).^2);
 R_squared_weight = 1 - (SS_res / SS_tot);
 
-title(['d(\DeltaF)/dF0 : ' num2str(p_weight(1),2) ', R^2 : ' num2str(R_squared_weight,2)])
+title(['d(\DeltaF)/dF0 : ' num2str(p(1),2) ', R^2 : ' num2str(R_squared,2)])
 Fslope(n)=p(1);
 Fslope_weight(n)=p_weight(1);
 Rsq(n)=R_squared;

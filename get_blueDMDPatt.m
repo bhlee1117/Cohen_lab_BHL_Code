@@ -1,4 +1,4 @@
-function [blueDMDimg, bluePatt, blueCenter]=get_blueDMDPatt(Device_Data,mode)
+function [blueDMDimg, bluePatt, blueCenter, revertedImage]=get_blueDMDPatt(Device_Data,mode)
 
 % [blueDMDimg, bluePatt, blueCenter]=get_blueDMDPatt(Device_Data,mode)
 % Description: Generates transformed blue DMD (Digital Micromirror Device) patterns and their centroids 

@@ -1,0 +1,212 @@
+clear
+clc;
+cd '/Volumes/cohen_lab/Lab/Labmembers/Byung Hun Lee/Data/Statistics_Optopatch_Prism';
+[~, ~, raw] = xlsread(['/Volumes/cohen_lab/Lab/Labmembers/Byung Hun Lee/Data/' ...
+    'Prism_OptopatchData_Arrangement.xlsx'], 'Sheet1', 'C5:Q192');
+
+save_dir='/Volumes/cohen_lab/Lab/Labmembers/Byung Hun Lee/Figures/invivoPrism/FigureOptopatch';
+fpath=raw(:,1);
+Mouse=cell2mat(raw(:,2));
+NeuronInd=cell2mat(raw(:,5));
+CamType=raw(:,3);
+StructureData=raw(:,10);
+StimROI=raw(:,6);
+StimWfn=raw(:,7);
+isGoodCell=cell2mat(raw(:,11));
+PixelSize=cell2mat(cellfun(@(x) (str2num(num2str(x))),raw(:,12),'UniformOutput',false));
+refROI=cellfun(@(x) (str2num(num2str(x))),raw(:,14),'UniformOutput',false);
+maintrunkROI=cellfun(@(x) (str2num(num2str(x))),raw(:,15),'UniformOutput',false);
+TimeSegFrame=cell2mat(cellfun(@(x) (str2num(num2str(x))),raw(:,11),'UniformOutput',false));
+place_bin=150; time_segment=15000; overlap=200;
+alignedMovFN = {'STA_Mat_SS','STA_Mat_CS','STA_Mat_dSP'};
+bound=6;
+title_str={'Basal','Apical','Peri-Soma'};
+[~, unqInd] = unique([Mouse NeuronInd] ,'row');
+set(0,'DefaultFigureWindowStyle','docked')
+foi=find(contains(raw(:,6),'Soma') & (contains(raw(:,7),'Short Pulse')))';
+
+%% Stimulation subthreshold figure;
+bound=6;
+STAmovie=[]; g=1; BlueonSpike=[]; BlueBoundary=[];
+UsedFile=[];
+for i=[foi(3:end)]
+    load(fullfile(fpath{i},'OP_Result.mat'))
+    [nROI nTime]=size(Result.normTraces);
+    if isfield(Result,'spike') & abs(length(Result.Blue)-nTime)<2
+        mov=readBinMov_BHL(fpath{i});
+        mov_res= mov-mean(mov,3);
+        [~, t_fit]=get_blueoffTrace([1:nTime],Result.Blue(1:nTime)>0,20,20);
+        t_fit=find(t_fit);
+        meanF = squeeze(mean(mov,[1 2]));
+        bleaching_fit=expfitDM_2(t_fit',meanF(t_fit),[1:nTime]',[10000]);
+
+        bkg = zeros(1, size(mov,3));
+        bkg(1,:) = bleaching_fit;  % linear term
+
+        mov_res = SeeResiduals(mov_res,Result.mc);
+        mov_res = SeeResiduals(mov_res,Result.mc.^2);
+        mov_res = SeeResiduals(mov_res,Result.mc(:,1).*Result.mc(:,end));
+        mov_res= SeeResiduals(mov_res,bkg,1);
+
+        bwBlue=bwlabel(Result.Blue);
+        spvec=Result.spike;
+        [~, normTrMat spind]=get_STA(Result.normTraces(1,:),Result.spike(1,:),1,1);
+        [~, shift]=max(normTrMat,[],3);
+        spTime=spind+shift-2;
+        spvec_shifted=ind2vec(size(Result.normTraces,2),spTime,1);
+
+        BlueonSpike=[];
+        bwBlue(1:50)=0; bwBlue(end-50:end)=0;
+        for b=1:max(bwBlue)
+            sptime_tmp=find(spvec_shifted(1,find(bwBlue==b,1)+[0:50])>0,1);
+            BlueonSpike=[BlueonSpike sptime_tmp+find(bwBlue==b,1)-1];
+        end
+
+        statmp = get_STA(tovec(mov_res),ind2vec(size(mov_res,3),BlueonSpike,1),50,50);
+        STAmovie{g}=toimg(statmp,size(mov_res,1),size(mov_res,2));
+
+        BlueBoundary{g}=(Result.blueDMDimg);
+        UsedFile(g,:)=[i PixelSize(i)];
+        g=g+1;
+    end
+end
+save(fullfile('/Volumes/cohen_lab/Lab/Papers/2025 Voltron Optopatch prism dendrites in vivo/FigureS3_ScatteringMeasurement','STAmovs.mat'),"STAmovie",'UsedFile','-v7.3')
+%%
+PolyKymos=[]; kymoROI=[];
+for g=1:length(STAmovie)
+[kymos kymoROI{g}]=polyLineKymo3(STAmovie{g},5,20);
+kymoCoord=cell2mat(cellfun(@(x) mean(x(1:end-1,:)),kymoROI{g},'UniformOutput',false)');
+kymos_max=max(-kymos(51:53,:),[],1);
+[kymopeak, m]=max(kymos_max);
+dist_line=distance_mat(kymoCoord,kymoCoord(m,:))*UsedFile(g,2);
+PolyKymos{g}=[dist_line kymos_max'/kymopeak];
+end
+save(fullfile('/Volumes/cohen_lab/Lab/Papers/2025 Voltron Optopatch prism dendrites in vivo/FigureS3_ScatteringMeasurement','PolyKymo.mat'),"PolyKymos",'kymoROI','-v7.3')
+%%
+load(fullfile('/Volumes/cohen_lab/Lab/Papers/2025 Voltron Optopatch prism dendrites in vivo/FigureS3_ScatteringMeasurement','PolyKymo.mat'))
+load(fullfile('/Volumes/cohen_lab/Lab/Papers/2025 Voltron Optopatch prism dendrites in vivo/FigureS3_ScatteringMeasurement','STAmovs.mat'))
+figure(23); clf; tiledlayout(2,2);
+rep_show=[8]; load(fullfile(fpath{UsedFile(rep_show,1)},'OP_Result.mat'));
+nexttile(1,[1, 1])
+imshow2(Result.ref_im-100,[100 3000]); colorbar;
+drawScaleBar(100/UsedFile(rep_show,2),'horizontal');
+
+nexttile(2,[1, 1])
+imshow2(max(-STAmovie{rep_show}(:,:,51:53),[],3),[0 150]); colorbar; hold all;
+kymoCoord=cell2mat(cellfun(@(x) mean(x(1:end-1,:)),kymoROI{rep_show},'UniformOutput',false)');
+plot(kymoCoord(:,1),kymoCoord(:,2),'r','LineWidth',1.5);
+
+nexttile(3,[1, 1])
+for showKymo=rep_show
+    d=PolyKymos{showKymo}(:,1);
+    d(1:find(d==0))=-d(1:find(d==0));
+plot(d,PolyKymos{showKymo}(:,2),'color',[1 0 0]); hold all
+end
+xlim([-20 20]);  ylim([0 1]); 
+ylabel('Normlaized \DeltaF'); xlabel('Displacement (\mum)'); box off;
+
+nexttile(4,[1, 1])
+omitnaf=[12 15 16]; exp_decayconst=[]; g=1;
+for showKymo=setdiff([1:length(STAmovie)],omitnaf)
+plot(PolyKymos{showKymo}(:,1),PolyKymos{showKymo}(:,2),'color',[0.7 0.7 0.7]); hold all
+[~, params, R2] = fitExpDecay_1param(PolyKymos{showKymo}(:,1), PolyKymos{showKymo}(:,2), [0:50]);
+exp_decayconst(g,:)=[params(1) R2];
+g=g+1;
+end
+[M S Xc N]=binning_data(PolyKymos(setdiff([1:length(STAmovie)],omitnaf)),[-40:3:40]);
+errorbar(Xc,M,S./sqrt(sum(cellfun(@sum,N),2))','r');
+xlim([0 40]);  ylim([0 1]); 
+ylabel('Normlaized \DeltaF'); xlabel('Distance (\mum)'); box off;
+ set_fontsize(12);
+%%
+
+
+
+
+
+
+
+STAmov_norm=-STAmovie./F0img;
+STAmov_norm=STAmov_norm-mean(STAmov_norm(:,:,[1:15],:),3);
+
+Rfixed = imref2d([size(Result.ref_im,1) size(Result.ref_im,2)]);
+inverseTform = invert(Result.tform);
+%revertedStruct = imwarp(Result.Structure, inverseTform,'OutputView',Rfixed);
+revertedStruct= Result.Structure;
+revertedStruct(revertedStruct==0)=prctile(revertedStruct(:),30);
+revertedStruct=mat2gray(revertedStruct);
+
+STAmovie_normStr=[];
+crop_roi=[94 6  300  159];
+STAmov_norm_crop=STAmov_norm(crop_roi(2):crop_roi(2)+crop_roi(4),crop_roi(1):crop_roi(1)+crop_roi(3),:,:);
+revertedStruct_crop=revertedStruct(crop_roi(2):crop_roi(2)+crop_roi(4),crop_roi(1):crop_roi(1)+crop_roi(3));
+cax_sub=[0.004 0.01];
+cax_sp=[0.004 0.025];
+STAmov_norm_crop_filt=[];
+for spclass_ind=1:2
+    %STAmovie_norm{spclass_ind}=imgaussfilt3(STAnorm_sub./F_refImg,[1.5 1.5 0.1]);%.*SkelDend(bound:end-bound,bound:end-bound);
+    STAmov_norm_crop_filt{spclass_ind}=imgaussfilt(pcafilt(STAmov_norm_crop(:,:,:,spclass_ind),15),4);
+    colorSTA=grs2rgb(tovec(STAmov_norm_crop_filt{spclass_ind}),colormap('turbo'),cax_sub(1),cax_sub(2));
+    colorSTA=reshape(colorSTA,size(STAmov_norm_crop,1),size(STAmov_norm_crop,2),size(STAmov_norm_crop,3),[]);
+    colorSTA=permute(colorSTA,[1 2 4 3]);
+
+    colorSTA2=grs2rgb(tovec(STAmov_norm_crop_filt{spclass_ind}),colormap('turbo'),cax_sp(1),cax_sp(2));
+    colorSTA2=reshape(colorSTA2,size(STAmov_norm_crop,1),size(STAmov_norm_crop,2),size(STAmov_norm_crop,3),[]);
+    colorSTA2=permute(colorSTA2,[1 2 4 3]);
+
+    STAmovie_normStr{spclass_ind}=colorSTA.*revertedStruct_crop*3;%.*SkelDend(bound:end-bound,bound:end-bound);
+    STAmovie_normStr2{spclass_ind}=colorSTA2.*revertedStruct_crop*3;%.*SkelDend(bound:end-bound,bound:end-bound);
+end
+
+% sptype={'SomStim','ddStim'};
+% cax=[-0.005,0.02];
+% writeMov4d(fullfile(save_dir,['STA_dFFStructgrsrgb_ShortPulse']),[imrotate(STAmovie_normStr{1},90) imrotate(STAmovie_normStr{2},90)],[-50:50],10,1,cax)
+
+figure(21); clf; tiledlayout(2,3)
+t_show=[37:41]; t_show_spike=[51:53]; ax1=[];
+for stimROI=1:2
+    subimage=grs2rgb(mean(STAmov_norm_crop_filt{stimROI}(:,:,t_show),3),colormap(turbo),cax_sub(1),cax_sub(2));
+    subimage=subimage.*revertedStruct_crop*3;
+    spimage=grs2rgb(max(STAmov_norm_crop_filt{stimROI}(:,:,t_show_spike),[],3),colormap(turbo),cax_sp(1),cax_sp(2));
+    spimage=spimage.*revertedStruct_crop*3;
+
+    ax1=[ax1 nexttile([1 1])];
+    imshow2(imrotate([Result.Structure(crop_roi(2):crop_roi(2)+crop_roi(4),crop_roi(1):crop_roi(1)+crop_roi(3))],90),[]); hold all
+    Blbd=bwboundaries(imrotate(BlueBoundary{stimROI}(crop_roi(2):crop_roi(2)+crop_roi(4),crop_roi(1):crop_roi(1)+crop_roi(3)),90));
+    plot(Blbd{1}(:,2),Blbd{1}(:,1),'color',[0 0.6 1])
+    nexttile([1 1]);
+    imshow2(imrotate([subimage],90),[]); hold all
+    cb=colorbar;
+    cb.Ticks=[0 0.5 1];
+    cb.TickLabels=[cax_sub(1) mean(cax_sub) cax_sub(2)];
+    cb.Label.String = '\DeltaF/F';
+
+    nexttile([1 1]);
+    imshow2(imrotate([spimage],90),[]); hold all
+    cb=colorbar;
+    cb.Ticks=[0 0.5 1];
+    cb.TickLabels=[cax_sp(1) mean(cax_sp) cax_sp(2)];
+    cb.Label.String = '\DeltaF/F';
+    %plot(BlueBoundary{1}(:,2),BlueBoundary{1}(:,1),'color',[0 0.5 1])
+end
+colormap(turbo);
+colormap(ax1(1),gray);
+colormap(ax1(2),gray);
+%%
+for n=1:size(OpResult,3)
+    [nonemptyr nonemptyc]=find(cellfun(@(x) ~isempty(x), OpResult(:,:,n)));
+    catTr=[];
+    if ~isempty(nonemptyr)
+    for e=1:length(nonemptyr)
+        normsubTrtmp=get_subthreshold(OpResult{nonemptyr(e),nonemptyc(e),n}.normTraces,OpResult{nonemptyr(e),nonemptyc(e),n}.spike(1,:),7,17);
+        catTr=[catTr normsubTrtmp];
+    end
+    [F0PCA nPC]=get_F0PCA(catTr);
+    if nPC==1
+    [F0PCA nPC]=get_F0PCA(catTr,5);
+    end
+    for e=1:length(nonemptyr)
+       OpResult{nonemptyr(e),nonemptyc(e),n}.F0_PCA=F0PCA;
+    end
+    end
+end

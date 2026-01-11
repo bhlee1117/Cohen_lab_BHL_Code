@@ -1,0 +1,222 @@
+%% Set the path
+clear
+clc;
+cd '/Volumes/cohen_lab/Lab/Labmembers/Xiang Wu/Data/20251228_DendInitiationSpike/';
+[~, ~, raw] = xlsread(['/Volumes/cohen_lab/Lab/Labmembers/Xiang Wu/Data/20251228_DendInitiationSpike/FolderList.xlsx'],...
+    'Sheet1', 'B2:J12');
+
+dffpath=raw(:,1);
+badROIpath=raw(:,2);
+bvMaskpath=raw(:,3);
+v_eventSummarypath=raw(:,4);
+ContourDistpath=raw(:,5);
+aveImgPath=raw(:,6);
+Moviepath=raw(:,7);
+OmitBranch=cellfun(@(x) (str2num(num2str(x))),raw(:,8),'UniformOutput',false);
+dSpikeThres=cellfun(@(x) (str2num(num2str(x))),raw(:,9),'UniformOutput',false);
+% %% branch labeling
+%
+% for f=2
+%     f
+%     d=dir(fullfile(dffpath{f}));
+%     load(fullfile(dffpath{f}))
+%     load(fullfile(aveImgPath{f}), 'ave_im')
+%
+%     fpath_index='BranchLabel';
+%     if ismember(f,[2 5])
+%         v_roi = v_roi_cell2;
+%         fpath_index='BranchLabel_2';
+%     end
+%
+%     v_roimask=[];
+%     for r=1:size(v_roi,2)
+%         v_roimask(:,:,r)=roi2mask(v_roi(r),size(ave_im,1),size(ave_im,2));
+%     end
+% BranchLabel = interactive_ROIlabel(v_roimask,ave_im,'click');
+% save(fullfile(d.folder,[fpath_index '.mat']),'BranchLabel')
+% end
+foi=setdiff([1:length(dffpath)],[2 6 10 11]);
+%%
+%for f=2
+dSpikePropsMat=[]; dendPropsMat=[];
+for f=foi
+    f
+    dSpikePropsMat{f,1}=[];
+    load(fullfile(dffpath{f}));
+    load(fullfile(badROIpath{f}));
+    load(fullfile(bvMaskpath{f}));
+    load(fullfile(v_eventSummarypath{f}));
+    load(fullfile(ContourDistpath{f}));
+    load(fullfile(aveImgPath{f}), 'ave_im');
+    contour_dis_um = contour_dis .* 1.17;
+    % Event dF movie gallery
+    % load(fullfile(Moviepath{f}), 'event_mov_gallary')
+    d=dir(fullfile(dffpath{f}));
+
+    if ismember(f,[2 5]) %if it's cell2
+        load(fullfile(d.folder,['BranchLabel_2.mat']),'BranchLabel');
+        SomSpikeFrame = mean([SS_start_time_cell2, SS_end_time_cell2], 2);
+        v_dff_clean_filt=v_dff_clean_filt_cell2;
+        v_roi = v_roi_cell2;
+        CS_start_time = CS_start_time_cell2;
+        CS_end_time = CS_end_time_cell2;
+        ST_start_time = ST_start_time_cell2;
+        ST_end_time = ST_end_time_cell2;
+    else
+        load(fullfile(d.folder,['BranchLabel.mat']),'BranchLabel');
+        SomSpikeFrame = mean([SS_start_time, SS_end_time], 2)';
+    end
+
+    v_roimask=[];
+    for r=1:size(v_roi,2)
+        v_roimask(:,:,r)=roi2mask(v_roi(r),size(ave_im,1),size(ave_im,2));
+    end
+
+    nTauDelay=[-5:6]; % Short time window to estimate delay.
+    nTauAlign=[20 15];
+   
+    voltage_tr=-v_dff_clean_filt';
+    [nROI nTime]=size(voltage_tr);    
+    SS_STA=get_STA(voltage_tr,SomSpikeFrame,15,15);
+    SS_STA=SS_STA-median(SS_STA(:,1:10),2);
+    SpikeHeight=mean(SS_STA(contour_dis_um<50,16),'omitnan');
+    voltage_tr=voltage_tr./SpikeHeight; %normalized by somatic spike height
+    [~, dsort]=sort(contour_dis_um,'ascend');
+
+    brOI=unique(BranchLabel);
+    brOI(brOI==0 | isnan(brOI))=[];
+    voltage_tr_branch=[];
+    v_roimask_branch=[];
+    for b=brOI
+        nROI_brOI=find(ismember(BranchLabel,b'));
+        if any(~ismember(nROI_brOI,bad_roi)) && ~ismember(b,[OmitBranch{f}])
+            voltage_tr_branch(b,:)=mean(voltage_tr(BranchLabel==b,:),1,'omitnan');
+        else
+            voltage_tr_branch(b,:)=NaN;
+        end
+        v_roimask_branch(:,:,b)=max(v_roimask(:,:,BranchLabel==b),[],3);
+    end
+    nBranch=size(voltage_tr_branch,1);
+
+    voltagetr_highpass=voltage_tr_branch-movmedian(voltage_tr_branch,50,2);
+    dSpikeMat=find_spike_bh(voltagetr_highpass,dSpikeThres{f}(1)-0.2,dSpikeThres{f}(2),5);
+    dSpikeFrame=find(max(dSpikeMat,[],1)>0);
+    nROI_Soma=find(ismember(BranchLabel,1));
+
+    figure(f); clf;
+    for n=1:size(voltage_tr_branch,1)
+        if any(~isnan(voltage_tr_branch(n,:)))
+        plot(voltage_tr_branch(n,:)+n*5); hold all
+        scatter(find(dSpikeMat(n,:)>0),voltage_tr_branch(n,find(dSpikeMat(n,:)>0))+n*5,'r');
+        drawnow;
+        end
+    end
+    set(gca,'YTick',[1:size(voltage_tr_branch,1)]*5,'YTickLabel',[1:size(voltage_tr_branch,1)]); drawnow;
+
+    brOI=unique(BranchLabel(~isnan(BranchLabel)));
+    for sp=dSpikeFrame %Spikes
+        for b=find(dSpikeMat(:,sp)>0)'
+            nROI_brOI=find(ismember(BranchLabel,b'));
+            distfromsoma=mean(contour_dis_um(nROI_brOI));
+
+            nearestbackSoma=SomSpikeFrame(find(SomSpikeFrame>=sp,1));
+            nearestFrontSoma=find(SomSpikeFrame<sp);
+
+            if isempty(find(SomSpikeFrame>sp,1)) | isempty(nearestFrontSoma) %Spike at the first and end of trace
+                % nearestbackSoma=NaN; nearestFrontSoma=NaN;
+                % props2cat=[sp b distfromsoma NaN(1,5)];
+            else
+                nearestFrontSoma=SomSpikeFrame(nearestFrontSoma(end));
+
+                VoltageTrace_periSpike=[mean(voltage_tr(nROI_Soma,nearestFrontSoma + nTauDelay),1,'omitnan'); ...
+                    mean(voltage_tr(nROI_Soma,nearestbackSoma + nTauDelay),1,'omitnan'); ...
+                    voltage_tr_branch(b,sp + nTauDelay)]; %Soma_front, Soma_back, dendrite
+                SpikeTimeInterp = get_delay(VoltageTrace_periSpike, 20, -nTauDelay(1)+[-1 2]) + [nearestFrontSoma nearestbackSoma sp]' + nTauDelay(1)-1;                
+                dt=[sp-nearestFrontSoma, nearestbackSoma-sp];
+                [~, shift]=min(abs(dt));
+                if shift==1;
+                    nearestSomSP=nearestFrontSoma;
+                else
+                    nearestSomSP=nearestbackSoma;
+                end
+
+                dt_interp=[SpikeTimeInterp(3)-SpikeTimeInterp(1) SpikeTimeInterp(2)-SpikeTimeInterp(3)];
+                props2cat=[sp b distfromsoma dt dt_interp nearestSomSP];
+            end
+            
+        end
+    end
+    fieldName={'Spike_frame','Branch_Index','Distance_from_soma','dt_pre_somAP','dt_post_somAP'...
+        'dt_pre_somAP_int','dt_post_somAP_int','Nearest_somAP'};
+    dSpikePropsMat{f,1}=array2table(dSpikePropsMat{f,1},'VariableNames',fieldName);
+
+    [br2show, brind]=unique(dSpikePropsMat{f,1}.Branch_Index);
+    [~, bsort]=sort(dSpikePropsMat{f,1}.Distance_from_soma(brind),'ascend');
+
+    dendPropsMat{f,1}=voltage_tr;
+    [~, dendPropsMat{f,2}]=get_STA(voltage_tr,dSpikePropsMat{f,1}.Nearest_somAP,15,15);
+    dendPropsMat{f,2}=permute(dendPropsMat{f,2},[1 3 2]); dendPropsMat{f,3}=voltage_tr_branch;
+    [~, dendPropsMat{f,4}]=get_STA(voltage_tr_branch,dSpikePropsMat{f,1}.Nearest_somAP,15,15); dendPropsMat{f,4}=permute(dendPropsMat{f,4},[1 3 2]);
+    dendPropsMat{f,5}=v_roimask; dendPropsMat{f,6}=v_roimask_branch;
+    
+    % plot
+    bAPthreshold=@(x) 230*(x+1);
+    dAPCandidates=find(dSpikePropsMat{f,1}.Branch_Index~=1 & dSpikePropsMat{f,1}.dt_post_somAP<3);
+    bAPsCandidates=find(dSpikePropsMat{f,1}.Branch_Index~=1 & dSpikePropsMat{f,1}.dt_pre_somAP<4);
+    catCandidates=[bAPsCandidates;dAPCandidates];
+    dt2show=[dSpikePropsMat{f,1}.dt_pre_somAP_int(bAPsCandidates); -dSpikePropsMat{f,1}.dt_post_somAP_int(dAPCandidates)];
+    dst2show=[dSpikePropsMat{f,1}.Distance_from_soma(catCandidates)];
+    dAPCandidates_threshold=catCandidates(find((dst2show-bAPthreshold(dt2show))>0));
+    DendIntSpFrame=unique(dSpikePropsMat{f,1}.Nearest_somAP(dAPCandidates_threshold));
+
+    [dAPSTA]=get_STA(voltage_tr,DendIntSpFrame',20,20);
+    [dAPSTA_branch]=get_STA(voltage_tr_branch,DendIntSpFrame',20,20);
+    [bAPSTA_branch]=get_STA(voltage_tr_branch,setdiff(SomSpikeFrame,DendIntSpFrame)',20,20);
+    [~, SS_mat]=get_STA(voltage_tr,dSpikePropsMat{f,1}.Spike_frame(catCandidates)',20,20);
+    SS_mat=permute(SS_mat,[1 3 2]);
+
+    [~, SS_mat_branch]=get_STA(voltage_tr_branch,dSpikePropsMat{f,1}.Spike_frame(catCandidates)',20,20);
+    SS_mat_branch=permute(SS_mat_branch,[1 3 2]);
+    dSpikePropsMat{f,2}.SSmat_branch=SS_mat_branch;
+    dSpikePropsMat{f,2}.SSmat=SS_mat;
+
+    figure(200+f); clf;
+    nexttile([1 1])
+    scatter(dt2show,dst2show,20,[0 0 0],'filled'); hold all
+    plot([-1:0.01:2],bAPthreshold([-1:0.01:2]),'r');
+end
+
+fieldName2={'VoltageTr','VoltageSpikeMat','VoltageTr_branch','VoltageBrSpikeMat','vROI','vROI_Branch'};
+dendPropsMat=array2table(dendPropsMat,'VariableNames',fieldName2);
+%% plot
+bAPthreshold=@(x) 150*(x+2);
+dAPCandidates=find(dSpikePropsMat.Branch_Index~=1 & dSpikePropsMat.dt_post_somAP<3);
+bAPsCandidates=find(dSpikePropsMat.Branch_Index~=1 & dSpikePropsMat.dt_pre_somAP<4);
+catCandidates=[bAPsCandidates;dAPCandidates];
+dt2show=[dSpikePropsMat.dt_pre_somAP_int(bAPsCandidates); -dSpikePropsMat.dt_post_somAP_int(dAPCandidates)];
+dst2show=[dSpikePropsMat.Distance_from_soma([bAPsCandidates;dAPCandidates])];
+dAPCandidates_threshold=catCandidates(find((dst2show-bAPthreshold(dt2show))>0));
+DendIntSpFrame=unique(dSpikePropsMat.Nearest_somAP(dAPCandidates_threshold));
+
+[dAPSTA]=get_STA(voltage_tr,DendIntSpFrame',20,20);
+[dAPSTA_branch]=get_STA(voltage_tr_branch,DendIntSpFrame',20,20);
+[bAPSTA_branch]=get_STA(voltage_tr_branch,setdiff(SomSpikeFrame,DendIntSpFrame)',20,20);
+[~, SS_mat]=get_STA(voltage_tr,dSpikePropsMat.Spike_frame(catCandidates)',20,20);
+SS_mat=permute(SS_mat,[1 3 2]);
+
+[~, SS_mat_branch]=get_STA(voltage_tr_branch,dSpikePropsMat.Spike_frame(catCandidates)',20,20);
+SS_mat_branch=permute(SS_mat_branch,[1 3 2]);
+
+figure(21); clf;
+nexttile([1 1])
+scatter(dt2show,dst2show,20,[0 0 0],'filled'); hold all
+plot([-1:0.01:3],bAPthreshold([-1:0.01:3]),'r')
+
+selectiveAmp=squeeze(mean(SS_mat_branch(6:7,20:23,:),[1 2]));
+somaAmp=squeeze(mean(SS_mat_branch(1,20:23,:),[1 2]));
+
+
+
+
+
+

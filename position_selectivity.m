@@ -1,13 +1,13 @@
 function [p_map, z_map] = position_selectivity(V, pos, lap, varargin)
 %POSITION_SELECTIVITY_VOLTAGE Compute position selectivity in raw voltage
 %
-%   [p_map, z_map] = position_selectivity_voltage(V, pos, t, lap, ...)
+%   [p_map, z_map] = position_selectivity_voltage(V, pos, lap, varargin)
 %
 %   Optional name-value pairs:
 %       'nBins'      - Number of spatial bins (default = 150)
 %       'nShuffles'  - Number of circular shuffles (default = 1000)
 %       'Show'       - 'on' (default) or 'off' to toggle figures
-
+% Ex) [ShuffleFR_percentile ShuffleFR_zscore] = position_selectivity(V(1,FrameOfInterest),Pos(5,FrameOfInterest),Lap(8,FrameOfInterest),'nBins',150,'nShuffles',1000,'Show','on');
 % --- Input validation ---
 if nargin < 4
     error('Function requires at least four inputs: V, pos, t, and lap.');
@@ -26,11 +26,13 @@ p = inputParser;
 addParameter(p, 'nBins', 150, @(x) isnumeric(x) && isscalar(x) && x > 1);
 addParameter(p, 'nShuffles', 1000, @(x) isnumeric(x) && isscalar(x) && x >= 0);
 addParameter(p, 'Show', 'on', @(x) ischar(x) || isstring(x));
+addParameter(p, 'Smoothing', 0, @(x) isnumeric(x) && isscalar(x) && x > 1);
 parse(p, varargin{:});
 
 nBins = p.Results.nBins;
 nShuffles = p.Results.nShuffles;
 showFigures = strcmpi(p.Results.Show, 'on');
+smoothingwindow=p.Results.Smoothing;
 
 % --- Interpolation onto uniform timebase ---
 % Fs = 1000; % Hz
@@ -82,6 +84,10 @@ for s = 1:nShuffles
     if mod(s, 10) == 0 || s == nShuffles
         waitbar(s / nShuffles, wb);
     end
+end
+if smoothingwindow>0
+voltageMap_shuffled=ringmovMean(voltageMap_shuffled,smoothingwindow);
+voltageMap_real=ringmovMean(voltageMap_real,smoothingwindow);
 end
 close(wb);
 

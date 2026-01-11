@@ -3,7 +3,7 @@ clear
 clc;
 cd '/Volumes/BHL18TB_D2/Arranged_Data/Prism_OptopatchResult';
 [~, ~, raw] = xlsread(['/Volumes/cohen_lab/Lab/Labmembers/Byung Hun Lee/Data/' ...
-    'Prism_OptopatchData_Arrangement.xlsx'], 'Sheet1', 'C5:P196');
+    'Prism_OptopatchData_Arrangement.xlsx'], 'Sheet1', 'C5:P250');
 
 save_to='/Volumes/BHL18TB_D2/Arranged_Data/Prism_OptopatchResult';
 
@@ -37,12 +37,12 @@ end
 
 %% MC
 
-for i=[72]
+for i=[124]
     i
     load(fullfile(fpath{i},"output_data.mat"))
 
     ref_time=[6000:7000];
-    time_segment=20000;
+    time_segment=25000;
 
     frm_end=max(Device_Data{1, 2}.Counter_Inputs(1, 1).data);
     f_seg=[[1:time_segment:frm_end] frm_end+1];
@@ -51,6 +51,7 @@ for i=[72]
     CamTrig2=find(CamTrig(2:end)-CamTrig(1:end-1)>0);
     Frm_rate=(CamTrig2(2)-CamTrig2(1))/CamDAQ_rate;
 
+    disp(['N frames: ' num2str(max(CamTrig))]);
     switch char(CamType(i))
         case 'flash'
             sz=double(Device_Data{1, 4}.ROI([2 4]));
@@ -69,14 +70,15 @@ for i=[72]
     for j=1:length(f_seg)-1
 
         mov=double(readBinMov_times([fpath{i} '/frames1.bin'],sz(2),sz(1),[f_seg(j):f_seg(j+1)]));
-        switch char(CamType(i))
-            case 'flash'
-                mov=rollingShutter_correction(mov,1/Frm_rate,'flash');
-            case 'fusion'
-                mov=rollingShutter_correction(mov,1/Frm_rate,'fusion');
-        end
+        % switch char(CamType(i))
+        %     case 'flash'
+        %         mov=rollingShutter_correction(mov,1/Frm_rate,'flash');
+        %     case 'fusion'
+        %         mov=rollingShutter_correction(mov,1/Frm_rate,'fusion');
+        % end
 
-        mov=vm(mov(:,:,2:end));
+        %mov=vm(mov(:,:,2:end));
+        mov=vm(mov);
 
         [mov_mc,xyField]=optical_flow_motion_correction_LBH(mov,mov_ref,'normcorre');
 
@@ -98,6 +100,55 @@ for i=[72]
     title(fpath{i},'Interpreter',  'none')
     saveas(gca,[char(fpath{i}) '/' 'MC_result.fig'])
 end
+
+%% Dirt movie
+bound = 6;
+for i=[193:200]
+    i
+    load(fullfile(fpath{i},"output_data.mat"))
+    switch char(CamType(i))
+        case 'flash'
+            sz=double(Device_Data{1, 4}.ROI([2 4]));
+        case 'fusion'
+            sz=double(Device_Data{1, 3}.ROI([2 4]));
+    end
+    frm_end=max(Device_Data{1, 2}.Counter_Inputs(1, 1).data);
+    f_seg=[[1:time_segment:frm_end] frm_end+1];
+    readFrame=diff(f_seg);
+    totalNbin=ceil(frm_end/time_segment);
+    Blue=Device_Data{1, 2}.buffered_tasks(1, 1).channels(1, 2).data;
+    CamCounter=Device_Data{1, 2}.Counter_Inputs(1, 1).data;
+    CamTrigger=find(CamCounter(2:end)-CamCounter(1:end-1));
+    Blue=Blue(CamTrigger);
+
+    for j=1:totalNbin
+
+        load([fpath{i} '/mcTrace' num2str(j,'%02d') '.mat']);
+        motionTrace=movmean(mcTrace.xymean,5,1);
+        motionTrace=motionTrace(1:frm_end,:);
+        mov_mc=double(readBinMov_times([fpath{i} '/mc_ShutterReg' num2str(j,'%02d') '.bin'],sz(2),sz(1),[f_seg(j):f_seg(j+1)-1]));
+
+        mov_res= mov_mc-mean(mov_mc,3);
+        bkg = zeros(1, size(mov_mc,3));
+        mean_F=squeeze(mean(mov_mc(bound:end-bound,bound:end-bound,:),[1 2]));
+        [~, blueOff]=get_blueoffTrace(mean_F,[Blue(f_seg(j):f_seg(j+1)-1)],70);
+        [y_fit]=expfitDM_2(find(blueOff)',mean_F(find(blueOff)),[1:size(mov_mc,3)]',1000);
+        bkg(1,:)=y_fit;
+        mov_res = SeeResiduals(mov_res,motionTrace);
+        mov_res = SeeResiduals(mov_res,motionTrace.^2);
+        mov_res = SeeResiduals(mov_res,motionTrace(:,1).*motionTrace(:,end));
+        mov_res= SeeResiduals(mov_res,bkg,1);
+        %Result.F0img=get_F0img(mov_res);
+
+        dirtMov_dilate = tracking_dirt(mov_res,0.3);
+        se = strel('line', 11, 0); 
+        dirtMov_dilate = imdilate(dirtMov_dilate>0, se);
+        dirtMov_dilate=vm(dirtMov_dilate);
+        dirtMov_dilate.transpose.savebin([fpath{i} '/dirt_mov.bin'])
+
+    end    
+end
+
 
 %% ROI setting
 file2analyze=[7,58,63,68,93,94,96,103,104,105,106,107,108,109,110,112,113,114,115,116,117,118,119,120,121,122,123,124,151,152,153,154,155,156,157,158];
@@ -275,7 +326,7 @@ end
 %% Signal extraction from multiple movie files, in streaming mode
 bound = 6;
 %[97 98 99 102 104:111 123 124 144 145 151:158 164 165 172:175 185 186 190 191 192]
-for f=[84]
+for f=[86]
    
     time_segment=TimeSegFrame(f);
     load([fpath{f} '/OP_Result.mat'])
@@ -360,18 +411,26 @@ j
         mov_mc_vec=tovec(mov_mc(bound:end-bound,bound:end-bound,:));
         mov_mc_vec=(mov_mc_vec-mean(mov_mc_vec,1))./std(mov_mc_vec,0,1);
         bkg = zeros(1, size(mov_mc,3));
-        mean_F=squeeze(mean(mov_mc(bound:end-bound,bound:end-bound,:),[1 2]));
+        mean_F=squeeze(tovec(mov_mc)'*tovec(max(Result.ftprnt>0,[],3)));
         [~, blueOff]=get_blueoffTrace(mean_F,[Result.Blue(f_seg(j):f_seg(j+1)-1)],70);
         [y_fit]=expfitDM_2(find(blueOff)',mean_F(find(blueOff)),[1:size(mov_mc,3)]',1000);
         bkg(1,:)=y_fit;
-%        excludeTr=tovec(mov_res)'*tovec(Result.excludeROI);
-        mov_res= mov_mc-mean(mov_mc,3);
+        %        excludeTr=tovec(mov_res)'*tovec(Result.excludeROI);
+        bv_trace=tovec(mov_mc)'*tovec(Result.bvMask);
+        V_trace=tovec(mov_mc)'*tovec(Result.ftprnt);
+        bv_trace=SeeResiduals(permute(bv_trace,[2 3 1]),V_trace);
+        bv_trace=squeeze(bv_trace)';
+
+        mov_mc2=mov_mc./reshape(bkg,1,1,[]);
+        mov_res= mov_mc2-mean(mov_mc2,3);
         mov_res = SeeResiduals(mov_res,motionTrace);
         mov_res = SeeResiduals(mov_res,motionTrace.^2);
         mov_res = SeeResiduals(mov_res,motionTrace(:,1).*motionTrace(:,end));
-        mov_res= SeeResiduals(mov_res,bkg,1);
+        %mov_res= SeeResiduals(mov_res,bkg,1);
+        mov_res= SeeResiduals(mov_res,bv_trace,1);
+        
         %mov_res= SeeResiduals(mov_res,excludeTr,1);
-        mov_res=mov_res.*double(max(Result.bvMask,[],3)==0);
+        %mov_res=mov_res.*double(max(Result.bvMask,[],3)==0);
         %mov_res_filt=pcafilt(mov_res,25);
         
         Result.traces=[Result.traces, -(tovec(mov_res)'*tovec(Result.ftprnt))'];
@@ -448,11 +507,11 @@ end
 
 Struct_valid=find(1-cell2mat(cellfun(@(x) sum(isnan(x)), StructureData, 'UniformOutput', false)));
 
-for i=unqInd([8])'
+for i=unqInd([26])'
     load(fullfile(fpath{i},'OP_Result.mat'))
     StructureStack=mat2gray(double(tiffreadVolume(StructureData{i})));
     StructureStack(StructureStack==0)=median(StructureStack(:));
-    StructureStack=StructureStack(:,:,41:200);
+    %StructureStack=StructureStack(:,:,30:70);
     % %StructureStack_med=medfilt2_mov(StructureStack,[15 15]);
      illumination_field=imgaussfilt(max(StructureStack,[],3),50);
      StructureStack=StructureStack./illumination_field;
@@ -463,7 +522,7 @@ for i=unqInd([8])'
     StructureStack_filt=mat2gray(StructureStack);
     StructureStack_bin=[]; level=[];
     level = graythresh(StructureStack_filt);
-    StructureStack_bin=StructureStack_filt>level*2;
+    StructureStack_bin=StructureStack_filt>level*2.5;
     moviefixsc(StructureStack_bin)
 
     se = strel('sphere', 1);
@@ -504,8 +563,8 @@ for i=unqInd([8])'
         figure(j); clf;
         load(fullfile(fpath{j},'OP_Result.mat'))
 
-        %[~, regTform]=imReg_faster(avgImg,Result.ref_im);
-        [~, regTform] = interactiveImageRegistration(avgImg,Result.ref_im);
+        [~, regTform]=imReg_faster(avgImg,Result.ref_im);
+        %[~, regTform] = interactiveImageRegistration(avgImg,Result.ref_im);
         Rfixed = imref2d(size(Result.ref_im));
 
         Result.tform=affine2d(tformReg.T*regTform.T);

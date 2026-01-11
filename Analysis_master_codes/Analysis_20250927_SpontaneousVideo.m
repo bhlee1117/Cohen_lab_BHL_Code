@@ -1,0 +1,207 @@
+clear
+clc;
+[~, ~, raw] = xlsread(['/Volumes/cohen_lab/Lab/Labmembers' ...
+    '/Byung Hun Lee/Data/PrismPCdata_Arrangement.xlsx'], 'Sheet1', 'C5:Z31');
+
+ref_ROI=cellfun(@(x) (str2num(num2str(x))),raw(:,9),'UniformOutput',false);
+
+oblique_ROI=cellfun(@(x) (str2num(num2str(x))),raw(:,10),'UniformOutput',false);
+PeriSoma_ROI=cellfun(@(x) (str2num(num2str(x))),raw(:,11),'UniformOutput',false);
+basal_ROI=cellfun(@(x) (str2num(num2str(x))),raw(:,12),'UniformOutput',false);
+apical_ROI=cellfun(@(x) (str2num(num2str(x))),raw(:,13),'UniformOutput',false);
+distal_ROI=cellfun(@(x) (str2num(num2str(x))),raw(:,14),'UniformOutput',false);
+
+fpath=raw(:,1)';
+StructureData=raw(:,8);
+BadROI=cellfun(@(x) (str2num(num2str(x))),raw(:,17),'UniformOutput',false);
+EndFrame=cell2mat(raw(:,15));
+ifmotionReject=cell2mat(raw(:,16));
+ifdirtRemov=cell2mat(raw(:,18));
+Pixelsize=cell2mat(raw(:,6));
+save_figto='/Volumes/BHL_WD18TB/PP72_PlaceCellResults';
+place_bin=150; time_segment=15000; overlap=200;
+alignedMovFN = {'STA_Mat_SS','STA_Mat_CS','STA_Mat_dSP'};
+bound=6;
+title_str={'Basal','Apical','Peri-Soma'};
+PlaceFieldList=cellfun(@(x) (str2num(num2str(x))),raw(:,21),'UniformOutput',false);
+PlaceFieldBin=cellfun(@(x) (str2num(num2str(x))),raw(:,22),'UniformOutput',false);
+set(0,'DefaultFigureWindowStyle','docked')
+%foi=[1 4 5 6 8 10 11 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27];
+foi=[1 4 5 6 8 10 11 15 16 17 18 19 20 21 22 23 24 25 26 27];
+%foi=23;
+cd('/Volumes/cohen_lab/Lab/Labmembers/Byung Hun Lee/Data/20240807/201405BHLm141_N1_VR_LowStim/')
+
+%% Load data
+f=20;
+load(fullfile(fpath{f},'PC_Result.mat'));
+load('mcTrace_seg.mat')
+load('output_data.mat')
+sz=double(Device_Data{1, 3}.ROI([2 4]));
+
+mov_mc=double(readBinMov('mov_mc_segment.bin',sz(2),sz(1)));
+bv_trace=tovec(mov_mc)'*tovec(Result.bvMask);
+V_trace=tovec(mov_mc)'*tovec(Result.ftprnt);
+bv_trace=SeeResiduals(permute(bv_trace,[2 3 1]),V_trace);
+bv_trace=squeeze(bv_trace)';
+
+mov_res= mov_mc-mean(mov_mc,3);
+mov_res = SeeResiduals(mov_res,mcTrace);
+mov_res = SeeResiduals(mov_res,mcTrace.^2);
+mov_res = SeeResiduals(mov_res,mcTrace(:,1).*mcTrace(:,2));
+mov_res = SeeResiduals(mov_res,bv_trace);
+F0img=get_F0img_PCA(movmean(mov_res,20,3));
+
+[~, mov_res_perispike]=get_STA(tovec(mov_res),Result.spike(1,78000+[0:size(mov_res,3)-1]),3,3);
+mov_res_perispike=reshape(permute(mov_res_perispike,[1 3 2]),sz(2),sz(1),[]);
+mov_res_sub=movmean(mov_res,20,3);
+[u,s,v] = svds(tovec(mov_res_perispike),20);
+reshape_u=reshape(u,sz(2),sz(1),[]);
+figure(22); clf; imshow2_patch(reshape_u);
+[u_sub,s,v] = svds(tovec(mov_res_sub),20);
+reshape_u_sub=reshape(u_sub,sz(2),sz(1),[]);
+figure(23); clf; imshow2_patch(reshape_u_sub);
+pc2use=[1:10];
+[mov_resfilt] = pcafilt_template(mov_res, cat(3,reshape_u(:,:,pc2use),reshape_u_sub(:,:,[4 5])));
+%% Get structure image
+[xx,yy] = meshgrid(1:sz(1),1:sz(2));
+mask = false(sz(2),sz(1));
+r=Result.SWC(:,3)+3;
+r(1)=10;
+for i = 1:size(Result.SWC,1)
+    mask = mask | ((xx - Result.SWC(i,1)).^2 + (yy - Result.SWC(i,2)).^2 <= r(i)^2);
+end
+strImg=Result.ref_im-100;%./imgaussfilt(Result.ref_im,50);
+strImgMasked=strImg;
+strImgMasked(mask==1 | max(Result.ftprnt>0.5,[],3)>0)=NaN;
+strImgbkg = medfilt2nan(strImgMasked, ones(1,2)*35);
+[~, idx]=bwdist(~isnan(strImgbkg));
+strImgbkg(isnan(strImgbkg)) = strImgbkg(idx(isnan(strImgbkg)));  % assign nearest values
+strImgbkg = imgaussfiltnan(strImgbkg, 5);
+
+figure; clf; ax1=[];
+ax1=[ax1 nexttile([1 1])];
+imshow2(Result.ref_im,[])
+ax1=[ax1 nexttile([1 1])];
+imshow2(strImgbkg,[])
+ax1=[ax1 nexttile([1 1])];
+imshow2(strImg./strImgbkg,[])
+%imagesc(strImg./strImgbkg); colormap(turbo);
+strImg=strImg./strImgbkg;
+DR=[prctile(strImg(mask==0),70),prctile(strImg(mask==1),95)];
+strImg_bin=grs2rgb(strImg,colormap('gray'),DR(1),DR(2));
+strImg_bin=strImg_bin(:,:,1);
+strImg_bin(strImg_bin<0.05)=0;
+ax1=[ax1 nexttile([1 1])];
+imshow2(strImg_bin,[])
+linkaxes(ax1)
+
+%% Truncate move
+t2show=2000:4000;
+mov_res_sub=-mov_resfilt(:,:,t2show);
+%mov_res_sub=movmean(mov_res_sub,10,3);
+dFF_movie=mov_res_sub./F0img;
+dFF_range=[-2 8];
+Realframe=78000+[0:size(mov_res,3)-1];
+Realframe_show=Realframe(t2show);
+
+%% Convert gray to color
+for t=1:size(dFF_movie,3);
+
+    dFF_tmp=dFF_movie(:,:,t);
+    dFF_tmp(max(Result.bvMask,[],3)>0)=NaN;
+    dFF_tmp=medfilt2nan(dFF_tmp,[8 8]);
+    dFF_movie(:,:,t) = imgaussfiltnan(dFF_tmp, 2).*strImg_bin(:,:,1);
+end
+colored_dFFmov=[];
+cmap=gen_colormap([gen_colormap([0 0.2 1; 0 0 0; 1 0 0],5); gen_colormap([1 0 0; 1 1 0],6)],256);
+for t=1:size(dFF_movie,3)
+    colored_dFFmov(:,:,:,t) = grs2rgb(double(dFF_movie(:,:,t)), cmap ,dFF_range(1),dFF_range(2)).*strImg_bin(:,:,1);
+    colored_dFFmov(:,:,:,t) = grs2rgb(double(strImg), colormap("gray")) + colored_dFFmov(:,:,:,t);
+    %colored_dFFmov(:,:,:,t) = colored_dFFmov(:,:,:,t).*mat2gray(strImg);
+end
+
+%% Mouse POV
+load('/Volumes/cohen_lab/Lab/Labmembers/Byung Hun Lee/Updates/2025/20251019_Figs_Movs/VR_POV.mat')
+window=[-200:200]; window2=[-3000:3000];
+VRScreenind=size(voxelData,4)/115;
+VRScreenTr=voxelData(:,:,:,round(Result.VR(5,Realframe_show)*VRScreenind));
+VoltageTr=Result.normTraces./Result.F0_PCA;
+VoltageTr=VoltageTr-movmedian(VoltageTr,20000,2);
+VoltageTr_bound=VoltageTr(:,(Realframe_show(1)+window(1)):(Realframe_show(end)+window(end)));
+VRtr=Result.VR(5,:)*2/115;
+VRTr_bound=VRtr(:,(Realframe_show(1)+window2(1)):(Realframe_show(end)+window2(end)));
+
+VRtrackIm=imread('/Volumes/cohen_lab/Lab/Labmembers/Byung Hun Lee/Updates/2025/20251019_Figs_Movs/Screenshot 2025-10-27 at 3.20.16 PM.png');  % or .jpg
+MouseIm=imrotate(imread('/Volumes/cohen_lab/Lab/Labmembers/Byung Hun Lee/Updates/2025/20251019_Figs_Movs/pngegg (1).png'),90);  % or .jpg
+MouseIm2=imrotate(imread('/Volumes/cohen_lab/Lab/Labmembers/Byung Hun Lee/Updates/2025/20251019_Figs_Movs/pngegg (2).png'),90);  % or .jpg
+MouseIm2_mask=imresize(MouseIm,[size(MouseIm2,1) size(MouseIm2,2)])~=0;
+VRtrackIm=VRtrackIm(:,:,1:3);
+%% Make video
+figure(20); clf; tiledlayout(7,2,'Padding','compact');
+v = VideoWriter(['Raw_voltage_video4'],'MPEG-4');
+%v = VideoWriter([fpath2read '/SNAPT_movie'],'Uncompressed AVI');
+v.FrameRate = 40;  %can adjust this, 5 - 10 works well for me
+v.Quality= 100;
+open(v);
+
+for j = 1:length(t2show)
+    clf;
+    set(gca,'units','pixels','position',[200 0 1000 800])
+    tiledlayout(10,5,'padding','compact');
+    ax1=nexttile([4 5]);
+    imshow2(colored_dFFmov(:,:,:,j),[0 1]);
+    pbaspect([size(double(colored_dFFmov(:,:,:,j)),2) size(double(colored_dFFmov(:,:,:,j)),1) 1]),colormap(gray); hold all;
+    colormap(ax1,gen_colormap([gen_colormap([0 0.2 1; 1 1 1; 1 0 0],5); gen_colormap([1 0 0; 1 1 0],6)],256))
+    drawScaleBar(100/1.17,'horizontal','color',[1 1 1],'Linewidth',3);
+    text(35,150,'100 \mum','color','w','Fontsize',17);
+    title('-$\Delta F$/F', 'Interpreter', 'latex')
+    cb=colorbar;  cb.Label.String='Z score';
+    cb.Ticks=[0 1]; cb.TickLabels=[-2 8];
+    axis off
+    text(7,12,[num2str((j)) ' ms'], 'FontSize', 20, 'color', [0.99 0.99 0.99])% the value 1. is to adjust timing by eyes
+
+    offset=[-220 -40]; resizesz=[55 70]*3;
+    szVRim=size(VRtrackIm);
+    VRtrackIm_tmp=VRtrackIm;
+    MouseImg_big = zeros(szVRim(1), szVRim(2), 3);
+    MouseImgMask_big = zeros(szVRim(1), szVRim(2), 1);
+    MouseImg_rez = imresize(MouseIm2,resizesz);
+    MouseImgMask_rez = imresize(MouseIm2_mask,resizesz);
+
+    startRow= 300+offset(2);
+    startCol = round(szVRim(2)/115*Result.VR(5,Realframe_show(j)))+offset(1);
+    MouseImg_big(startRow:startRow+size(MouseImg_rez,1)-1, startCol:startCol+size(MouseImg_rez,2)-1, :) = MouseImg_rez;
+    MouseImgMask_big(startRow:startRow+size(MouseImg_rez,1)-1, startCol:startCol+size(MouseImg_rez,2)-1, :) = MouseImgMask_rez;
+
+    for c=1:3
+        projimg=MouseImg_big(:,:,c);
+        VRtrackIm_tmp(:,:,c)=maskBinary(VRtrackIm_tmp(:,:,c),MouseImgMask_big,projimg(MouseImgMask_big>0));
+    end
+
+    VRtrackIm_tmp=imresize(VRtrackIm_tmp,size(VRScreenTr,2)/size(VRtrackIm_tmp,2));
+    VR2show=[flipud(VRScreenTr(:,:,:,j))];
+
+    nexttile([2 5]);
+    imshow2(VRtrackIm_tmp(90:220,:,:),[]);
+
+    nexttile([4 2]);
+    imshow2(imresize(VR2show,[600 1200]),[]);
+    title('Mouse point of view');
+    set_fontsize(13);
+
+    nexttile([4 3]);
+    plot(window,VoltageTr_bound(1,-window(1)+j+window),'k','linewidth',1.5); hold all
+    plot([0 0],[-2 7],'r--','LineWidth',2)
+    box off; ylim([-2 7]);
+    xlabel('Time (ms)'); ylabel('Z-score')
+    title('Soma voltage trace')
+
+    set_fontsize(13);
+
+    pause(0.1)
+    set(gcf,'color','w')    % Sets background to white
+    frame = getframe(gcf);
+    writeVideo(v,frame);
+    pause(0.1);
+end;
+close(v);

@@ -2,7 +2,7 @@ clear
 clc;
 cd '/Volumes/BHL18TB_D2/Arranged_Data/Prism_OptopatchResult';
 [~, ~, raw] = xlsread(['/Volumes/cohen_lab/Lab/Labmembers/Byung Hun Lee/Data/' ...
-    'Prism_OptopatchData_Arrangement.xlsx'], 'Sheet1', 'B5:K128');
+    'Prism_OptopatchData_Arrangement.xlsx'], 'Sheet1', 'C5:L128');
 
 save_to='/Volumes/BHL18TB_D2/Arranged_Data/Prism_OptopatchResult';
 fpath=raw(:,1);
@@ -17,7 +17,7 @@ Result.bvMask=[];
 [~, Result.bvMask]=get_ROI(max(abs(reshape_u),[],3),Result.bvMask);
 %% Low stim
 for i=100
-    load([fpath{i} '/Result.mat'])
+    load([fpath{i} '/OP_Result.mat'])
     load(fullfile(fpath{i},"output_data.mat"))
     sz=double(Device_Data{1, 3}.ROI([2 4]));
     mov_mc=double(readBinMov([fpath{i} '/mc_ShutterReg01.bin'],sz(2),sz(1)));

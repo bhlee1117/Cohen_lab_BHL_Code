@@ -19,7 +19,7 @@ ifmotionReject=cell2mat(raw(:,16));
 ifdirtRemov=cell2mat(raw(:,18));
 Pixelsize=cell2mat(raw(:,6));
 NSeesawComponent=cell2mat(raw(:,25));
-save_figto='/Volumes/BHL_WD18TB/PP72_PlaceCellResults';
+save_figto='/Volumes/BHL18TB_D2/PP72_PlaceCellResults';
 place_bin=150; time_segment=15000; overlap=200;
 alignedMovFN = {'STA_Mat_SS','STA_Mat_CS','STA_Mat_dSP'};
 bound=6;
@@ -87,7 +87,7 @@ for f=foi(1:end)
     bAP_STA=bAP_STA-prctile(bAP_STA,20,2);
     SpikeHeight=max(mean(bAP_STA(perisomaROI,:),1),[],2);
 
-    NormalizedTrace=NormalizedTrace/SpikeHeight;
+    NormalizedTrace=NormalizedTrace;%/SpikeHeight;
     NormalizedTrace_dirt{f,1}=NormalizedTrace;
     NormalizedTrace_dirt{f,1}(:,Result.motionReject>0)=NaN;
     NormalizedTrace_ch(f,:)=cellfun(@(x) x./Result.F0_PCA,Result.norm_trace_check,'UniformOutput',false);
@@ -115,7 +115,7 @@ for f=foi(1:end)
     % SI{f}.FRnull=Result.SI_FRnull;
     % SI{f}.FRclassReal=Result.SI_FRClassReal;
     % SI{f}.FRclassNull=Result.SI_FRClassnull;
-    % 
+
     % MI{f}.EigTrPos=Result.MI_EigTrReal;
     % MI{f}.EigTrFR=Result.MI_EigTrFR;
     % MI{f}.EigTrFRdClass=Result.MI_EigTrFRdClass;
@@ -202,10 +202,10 @@ for f=foi(1:end)
     % LapSub{f}=PlaceTrigger_average(Subthreshold{f},150,VRtrack{f},0.002,115); %total trace
     % LapSpclass{f}=PlaceTrigger_average(double(allSpikeClassMat{f}>0),150,VRtrack{f},-0.002,115); %total trace
     % LapSpclassVec{f}=PlaceTrigger_average(double(allSpikeClassVecMat{f}>0),150,VRtrack{f},-0.002,115); %total trace
-
-    subthreshold_silent=Subthreshold{f};
-    subthreshold_silent(:,unique(get_perispikeIndex(allSpikeMat{f}(1,:),[-8:30])))=NaN;
-    %LapSubSilent{f}=PlaceTrigger_average(subthreshold_silent,150,VRtrack{f},0.002,115); %total trace
+    % 
+    % subthreshold_silent=Subthreshold{f};
+    % subthreshold_silent(:,unique(get_perispikeIndex(allSpikeMat{f}(1,:),[-8:30])))=NaN;
+    % LapSubSilent{f}=PlaceTrigger_average(subthreshold_silent,150,VRtrack{f},0.002,115); %total trace
 end
 
 MatSTA=cellfun(@(x) permute(x,[1 3 2]),MatSTA,'UniformOutput',false);
@@ -259,7 +259,7 @@ for f=foi
 end
 %% See-saw and Global power during blue on and off
 
-f=27;
+f=23;
 [nROI nTime]=size(Subthreshold{f});
 [SubV SubD subTrace]=get_eigvector(Subthreshold{f}(:,sum(isnan(Subthreshold{f}),1)==0),nROI);
 subTrace_onFrame=NaN(nROI,nTime);
@@ -336,11 +336,11 @@ title(['Neuron ID# ' num2str(f)])
 end
 
 %% Scatter plot, global-seesaw, B+A/B-A/S
-figure(307); clf;  tiledlayout(4,3); g=1;
-for f=[20 23 25 26]
+figure(307); clf; g=1;
+for f=[foi]
 
 [nROI nTime]=size(Subthreshold{f}); perispike_time=[-2:20]; 
-[SubV SubD subTrace]=get_eigvector(Subthreshold{f}(:,sum(isnan(Subthreshold{f}),1)==0)',nROI);
+[SubV SubD subTrace]=get_eigvector(Subthreshold{f}(:,sum(isnan(Subthreshold{f}),1)==0),nROI);
 subTrace_onFrame=NaN(nROI,nTime);
 subTrace_onFrame(:,sum(isnan(Subthreshold{f}),1)==0)=subTrace';
 
@@ -357,39 +357,37 @@ end
 apicalind=cell2mat(tovec(roisD_order_ind([3 5],:))); %apical = distal dend 
 
 SubBasalApical=[mean(Subthreshold{f}(basalind,:),1,'omitnan'); mean(Subthreshold{f}(apicalind,:),1,'omitnan')];
-
-    ax1=[]; Prespike_t=5;
-nexttile([1 1])
-[hist_subV_GlSS]=scatter_heatmap(subTrace_onFrame(1,Blue_off_frame),subTrace_onFrame(2,Blue_off_frame),50);
-[~, subTraceSSmat]=get_STA(subTrace_onFrame,allSpikeClassMat{f}(1,:).*Blue_off_frame,Prespike_t,-Prespike_t);
-[~, subTraceCSmat]=get_STA(subTrace_onFrame,allSpikeClassMat{f}(2,:).*Blue_off_frame,Prespike_t,-Prespike_t);
-hold all
-scatter(subTraceSSmat(1,:),subTraceSSmat(2,:),10,[1 0 1],'filled');
-scatter(subTraceCSmat(1,:),subTraceCSmat(2,:),10,[0 1 1],'filled');
-xlabel('Global'); ylabel('See-saw'); legend({'SS','CS'})
-
-ax1=[ax1 nexttile([1 1])];
-BAsumdiffTrace=[sum(SubBasalApical,1); diff(SubBasalApical,1,1)];
-[hist_subV_ApBa]=scatter_heatmap(BAsumdiffTrace(1,Blue_off_frame),BAsumdiffTrace(2,Blue_off_frame),50);
-[~, subTraceSSmat]=get_STA(BAsumdiffTrace,allSpikeClassMat{f}(1,:).*Blue_off_frame,Prespike_t,-Prespike_t);
-[~, subTraceCSmat]=get_STA(BAsumdiffTrace,allSpikeClassMat{f}(2,:).*Blue_off_frame,Prespike_t,-Prespike_t);
-hold all
-scatter(subTraceSSmat(1,:),subTraceSSmat(2,:),10,[1 0 1],'filled');
-scatter(subTraceCSmat(1,:),subTraceCSmat(2,:),10,[0 1 1],'filled')
-xlabel('Basal + apical'); ylabel('Apical - basal'); legend({'SS','CS'})
+    ax1=[]; Prespike_t=5; nTau2show=[150 50];
 
 nexttile([1 1])
-[hist_subV_A_B]=scatter_heatmap(SubBasalApical(1,Blue_off_frame),SubBasalApical(2,Blue_off_frame),50);
-[~, subTraceSSmat]=get_STA(SubBasalApical,allSpikeClassMat{f}(1,:).*Blue_off_frame,Prespike_t,-Prespike_t);
-[~, subTraceCSmat]=get_STA(SubBasalApical,allSpikeClassMat{f}(2,:).*Blue_off_frame,Prespike_t,-Prespike_t);
+[hist_subV_A_B]=scatter_heatmap(SubBasalApical(1,Blue_off_frame),SubBasalApical(2,Blue_off_frame),50,50);
+[~, subTraceSSmat, SSframe]=get_STA(SubBasalApical,max(allSpikeClassMat{f}([1 3],:),[],1).*Blue_off_frame,Prespike_t,-Prespike_t);
+[~, subTraceCSmat, CSframe]=get_STA(SubBasalApical,allSpikeClassMat{f}(2,:).*Blue_off_frame,Prespike_t,-Prespike_t);
+
+[~, NormTraceSSmat]=get_STA(NormalizedTrace_dirt{f},SSframe,nTau2show(1),nTau2show(2));
+[~, SpClassSSmat]=get_STA(allSpikeClassMat{f},SSframe,nTau2show(1),nTau2show(2));
+[~, NormTraceCSmat]=get_STA(NormalizedTrace_dirt{f},CSframe,nTau2show(1),nTau2show(2));
+[~, SpClassCSmat]=get_STA(allSpikeClassMat{f},CSframe,nTau2show(1),nTau2show(2));
+
+SSisolated=sum(SpClassSSmat(:,:,1:-nTau2show(1)),[1 3])==0; CSisolated=sum(SpClassCSmat(:,:,1:-nTau2show(1)),[1 3])==0;
+NormTraceSS=mean(NormTraceSSmat(:,SSisolated,:),2,'omitnan'); NormTraceSS_sem=std(NormTraceSSmat(:,SSisolated,:),0,2,'omitnan')/sum(SSisolated);
+NormTraceSS=permute(NormTraceSS,[1 3 2]); NormTraceSS_sem=permute(NormTraceSS_sem,[1 3 2]);
+NormTraceCS=mean(NormTraceCSmat(:,CSisolated,:),2,'omitnan'); NormTraceCS_sem=std(NormTraceSSmat(:,CSisolated,:),0,2,'omitnan')/sum(CSisolated);
+NormTraceCS=permute(NormTraceCS,[1 3 2]); NormTraceCS_sem=permute(NormTraceCS_sem,[1 3 2]);
 hold all
 scatter(subTraceSSmat(1,:),subTraceSSmat(2,:),10,[1 0 1],'filled');
 scatter(subTraceCSmat(1,:),subTraceCSmat(2,:),10,[0 1 1],'filled')
 xlabel('Basal'); ylabel('Apical'); legend({'SS','CS'})
 colormap('bone')
 
+nexttile([1 1]);
+imagesc(NormTraceSS);
+nexttile([1 1]);
+imagesc(NormTraceCS);
+
 title(ax1,['Neuron ID# ' num2str(f)])
 end
+
 
 %% Mutual information
 SI_zscore=NaN(max(foi),1); SI_SpClass_zscore=NaN(max(foi),4); SI_value=NaN(max(foi),5);
@@ -706,7 +704,7 @@ ylabel('Corr. between Subth. TC & firing TC')
 %% Correlation matrix between ROIs
 figure(118); clf
 perispike_time=[-3:10];
-Corrcoeff=[]; corrMat=[]; labelvec=[];
+Corrcoeff=[]; corrMat=[];
 for f=foi
     nTime=size(Subthreshold{f},2);
     sub_ch=[];
@@ -869,6 +867,132 @@ drawPValueLines(p,0,'TextYOffset',50,'StepHeight',100)
 set(gca,'XTick',[1:size(l_const_show,1)],'XTickLabel',{'Basal','Apical','Oblique'});
 ylabel('Correlation length (\mum)')
 
+%% Auto/Cross correlogram (Figure S)
+dClass2temporal = ...
+[[{1},{1}];[{[3 5]} {[3 5]}];[{[1]} {[5]}];[{[5]} {[5]}]]; % example
+
+maxLag = 500;   % max lag in frames (change as you like)
+
+temporalCorr = cell(length(foi), size(dClass2temporal,1));  % {f, pair}
+lagsCorr      = cell(length(foi), 1);
+
+for fi = 1:length(foi)
+    f = foi(fi);
+    
+    % Use the same subthreshold + silent frames as above
+    nTime = size(Subthreshold{f},2);
+    sub_ch = cell(1,2);
+    for ch = 1:2
+        sub_ch{ch} = get_subthreshold(NormalizedTrace_ch{f,ch}, max(allSpikeMat{f}(1,:),[],1)>0, 7, 17);
+    end
+    
+    % Rebuild silentGoodframe for this loop (or reuse if still in scope)
+    perispike_time  = -3:10;
+    perispike_frame = unique([tovec(find(double(allSpikeMat{f}(1,:)==1))' + perispike_time); find(CStrace{f})']);
+    perispike_frame(perispike_frame <= 0 | perispike_frame > nTime) = [];
+    silenttime_vec  = ind2vec(nTime, perispike_frame, 0, 1);
+    nonvalid_frame  = find(sum(isnan(Subthreshold{f}),1) > 0);
+    Blue_on_frame   = find(imdilate(BlueStim{f} > 0, [ones(1,1), 1, ones(1,200)]));
+    Badframe        = unique([Blue_on_frame nonvalid_frame]);
+    Goodframe       = setdiff(1:nTime, Badframe);
+    silentGoodframe = find(ind2vec(nTime, Goodframe, 1) > 0 & silenttime_vec);
+    
+    % Loop over class pairs defined in dClass2temporal
+    for dc = 1:size(dClass2temporal,1)
+        classA = dClass2temporal{dc,1};   % e.g. [1] or [3 5]
+        classB = dClass2temporal{dc,2};   % e.g. [1] or [5]
+        
+        roiA = ismember(labelvec{f}, classA);
+        roiB = ismember(labelvec{f}, classB);
+        
+        % Average subthreshold across ROIs in each class and across channels
+        % (N_rois x T → 1 x T)
+        traceA_ch1 = mean(sub_ch{1}(roiA, silentGoodframe), 1, 'omitnan');
+        traceA_ch2 = mean(sub_ch{2}(roiA, silentGoodframe), 1, 'omitnan');
+        traceB_ch1 = mean(sub_ch{1}(roiB, silentGoodframe), 1, 'omitnan');
+        traceB_ch2 = mean(sub_ch{2}(roiB, silentGoodframe), 1, 'omitnan');
+        
+        traceA = (traceA_ch1) / 2;
+        traceB = (traceB_ch2) / 2;
+        
+        % Remove NaNs and mean-center
+        valid  = ~isnan(traceA) & ~isnan(traceB);
+        tA     = traceA(valid) - mean(traceA(valid));
+        tB     = traceB(valid) - mean(traceB(valid));
+        
+        % Normalized auto/cross-correlation
+        [xc, lags] = xcorr(tA, tB, maxLag, 'coeff');
+        
+        temporalCorr{fi, dc} = xc;   % correlation vs lag
+        lagsCorr{fi}         = lags; % same for all dc in this f
+    end
+end
+
+param=[];
+for ff=1:size(temporalCorr,1)
+    for dd=1:size(temporalCorr,2)
+        [~, param(ff,dd)]=expfitDM_2(abs(lagsCorr{ff})',temporalCorr{ff,dd}',[0:500]',100);
+    end
+end
+        
+M_b=mean(param(param(:,1)~=100,1)); S_b=std(param(param(:,1)~=100,1));
+M_a=mean(param(param(:,2)~=100,2)); S_a=std(param(param(:,2)~=100,2));
+fprintf(['1/e const. of autocorrelogram, basal = %2.0f ± %2.0f, apical = %2.0f ± %2.0f \n'],M_b,S_b,M_a,S_a);
+
+figure(124); clf; tiledlayout(1,4);
+cmap_temp   = gen_colormap(Plasma,4);
+
+title_str = { ...
+    'Basal, Basal (auto)', ...
+    'Apical, Apical (auto)', ...
+    'Basal, Distal (cross)',...
+    'Distal, Distal (auto)'};
+
+panel_order = [1 2 4 3];
+tileID = 1;
+
+for dc = panel_order
+    % find sessions that have BOTH classes in this pair
+    validSessions = [];
+    for fi = 1:length(foi)
+        f = foi(fi);
+        hasA = any(ismember(labelvec{f}, dClass2temporal{dc,1}));
+        hasB = any(ismember(labelvec{f}, dClass2temporal{dc,2}));
+        if hasA && hasB
+            validSessions(end+1) = fi;
+        end
+    end
+
+    % skip if no valid sessions
+    if isempty(validSessions), cofntinue; end
+
+    % collect correlograms for this pair across valid sessions
+    lags       = lagsCorr{1};
+    Corr2show  = cell2mat(temporalCorr(validSessions, dc));  % [nLags x nSess]
+    t_lag      = lags;
+
+    nexttile(tileID); tileID = tileID + 1;
+
+    % individual sessions in gray
+    plot(t_lag, Corr2show, 'color', [0.7 0.7 0.7]); hold on;
+
+    % mean ± std across valid sessions
+    mCorr = mean(Corr2show, 1, 'omitnan');
+    sCorr = std(Corr2show, 0, 1, 'omitnan');
+    errorbar_shade(t_lag, mCorr, sCorr, ...
+        cmap_temp(dc, :));
+
+    xlabel('Lag (ms)');
+    title(title_str{dc});
+    box off;
+    set(gca,'YLabel',[])
+    if dc~=3
+        ylim([-0.2 1])
+    end
+end
+nexttile(1,[1 1]);
+ylabel('Correlation');
+
 %% correlation length during run/rest, PF in/out
 pair_str=[]; l_const_Run=[]; l_const_PF=[];
 RsquareP=[]; RsquareR=[];
@@ -998,10 +1122,25 @@ for f=foi
         troughvec{f}(n,:)=ind2vec(nTime,loc_trgh,1); 
         troughvec{f}(n,ind2vec(nTime,perispikefrm,1)>0)=0;
 
+        if ~isempty(find(peakvec{f}(n,:)>0))
         [PeakSTA{f}(:,:,n), peakMat, peakloc]=get_STA(Subthreshold{f},peakvec{f}(n,:),nTauPeak(1),nTauPeak(2));
-        [TroughSTA{f}(:,:,n), troughMat, troughloc]=get_STA(Subthreshold{f},troughvec{f}(n,:),nTauPeak(1),nTauPeak(2));
         [~, PeakSTASpClass{f,n}]=get_STA(allSpikeClassVecMat{f},peakvec{f}(n,:),nTauPeak(1),nTauPeak(2));
+        else
+            PeakSTA{f}(:,:,n)=NaN(nROI,sum(nTauPeak)+1);
+            peakMat=NaN(nROI,sum(nTauPeak)+1);
+            peakloc=[];
+            PeakSTASpClass{f,n}=NaN(nROI,sum(nTauPeak)+1);
+        end
+
+        if ~isempty(find(troughvec{f}(n,:)>0))
+        [TroughSTA{f}(:,:,n), troughMat, troughloc]=get_STA(Subthreshold{f},troughvec{f}(n,:),nTauPeak(1),nTauPeak(2));
         [~, TroughSTASpClass{f,n}]=get_STA(allSpikeClassVecMat{f},troughvec{f}(n,:),nTauPeak(1),nTauPeak(2));
+        else
+         TroughSTA{f}(:,:,n)=NaN(nROI,sum(nTauPeak)+1);
+         troughMat=NaN(nROI,sum(nTauPeak)+1);
+         troughloc=[];
+         TroughSTASpClass{f,n}=NaN(nROI,sum(nTauPeak)+1);
+        end
 
         % peakvec{f}(n,:)=ind2vec(nTime,peakloc(sum(isnan(peakMat{f}),[1 3])==0),1);
         % troughvec{f}(n,:)=ind2vec(nTime,troughloc(sum(isnan(troughMat),[1 3])==0),1);
@@ -1100,8 +1239,10 @@ end
 colormap(turbo);
 
 %% Peak correlation over distance (figure 2)
-figure(131); clf; tiledlayout(1,5);
-dClass2plot=[[{1},{1}];[{[3 5]} {[3 5]}];[{[4]} {[4]}]];
+figure(131); clf; tiledlayout(1,5); 
+figure(221); clf;
+%dClass2plot=[[{1},{1}];[{[3 5]} {[3 5]}];[{[4]} {[4]}]];
+dClass2plot=[{[3 4 5]},{[2 3 4 5]}];
 dClass2temporal=[[{1},{1}];[{[3 5]} {[3 5]}];[{[1]} {[5]}];[{[5]} {[1]}]]; %Read & Triggering
 pair_str=[]; Length_PeakMat=[]; %neuronInd, Trigger Pair i, Trigger Label, Measure Label, Length C, R^2, Legnth C dX, R^2 dX
 cmap_corrscatter=[0.5 0.8 1; 1 0.5 0.5]; 
@@ -1133,10 +1274,11 @@ for dc=1:size(dClass2plot,1) %region class to plot
             MaxDistance=[range(dax) range(dax1d)];
             %PeakPercentile=sum(mean(peakdat2fit(dax<10))>peakdat2fit)/length(peakdat2fit);
             peakdatzscore=zscore(peakdat2fit);
-            % figure(221); nexttile([1 1]);
-            % plot(dax,cax,'o',[0:500],y_fit,'r')
-            % title([num2str(f) ', ' corr_str{dc} ', l_c=' num2str(l_const(f,dc))])
-            Length_PeakMat=[Length_PeakMat; [f, dc, l_const, Rsquare, l_const1d, Rsquare1d, N_points, MaxDistance, mean(peakdatzscore(dax<30))]]; 
+            figure(221); nexttile([1 1]);
+            plot(dax,peakdat2fit,'o',[0:500],y_fit,'r')
+            title([num2str(f) ', ' ', l_c=' num2str(l_const)])
+            Length_PeakMat=[Length_PeakMat; [f, dc, l_const, Rsquare, l_const1d, Rsquare1d,...
+                            N_points, MaxDistance, mean(peakdatzscore(dax<30))]]; 
         else
             l_const=NaN; l_const1d=NaN; MaxDistance=NaN(1,2); Rsquare=NaN; Rsquare1d=NaN; peakdatzscore=NaN;
             M(f,1:(length(dendbin)-1),dc)=NaN; S(f,1:(length(dendbin)-1),dc)=NaN;
@@ -1149,7 +1291,7 @@ for dc=1:size(dClass2plot,1) %region class to plot
 
     M_total1d=mean(M1d(foi,:,dc),1,'omitnan'); S_total1d=sem(M1d(foi,:,dc),1); N_total=sum(~isnan(M1d(foi,:,dc)),1);
     M_total1d(N_total<4)=NaN; S_total1d(N_total<4)=NaN;
-
+    figure(131);
     ax1=[nexttile(1,[1 3])];
     l(dc)=errorbar_shade(dendbin_c,M_total,S_total,cmap_errorbar(dc,:)); hold all
     xlabel('Distance from peak ROI (\mum)'); ylabel('Normalized \DeltaF/F');
@@ -1160,6 +1302,9 @@ for dc=1:size(dClass2plot,1) %region class to plot
 end
 %linkaxes([ax1, ax2]);
 xlim([0 400])
+%NeuronInd, Pair class, Length Cst, R^2, Legnth Cst dX, R^2 dX, N fit points, range of distance, range dx, peak zscore
+fieldName={'NeuronID','PairClass','LengthConstant','Rsquare','LengthConstant1d','Rsquare1d','NFitpoints','MaxDistance','MaxDistance1d','peak_zscore'};
+Length_PeakMat=array2table(Length_PeakMat,'VariableNames',fieldName);
 
 % Plot local stimulation data
 saveto='/Volumes/cohen_lab/Lab/Labmembers/Byung Hun Lee/Data/Statistics_Optopatch_Prism';
@@ -1172,19 +1317,21 @@ data2show=cellfun(@(x,y) [x(y,1) x(y,2)/x(x(:,1)==0,2)],data2show,dsort,'Uniform
 data2show1d=cellfun(@(x,y) [(x(y,3)) x(y,2)/x(x(:,1)==0,2)],data2show1d,dsort1d,'UniformOutput',false);
 %cellfun(@(x) plot(x(:,1),x(:,2),'color',[0.7 0.7 0.7]),data2show)
 [M S x_bin N]=binning_data(data2show,dendbin);
+
 l(4)=errorbar_shade(x_bin,M,S./sqrt(sum(cellfun(@sum,N),2))',cmap_errorbar(4,:));
 xlim([0 200]); box off;
-legend(l,[{'Basal & Basal'},{'Apical & Apical'},{'Oblique & Oblique'},{'Local Stim.'}])
+%legend(l,[{'Basal & Basal'},{'Apical & Apical'},{'Oblique & Oblique'},{'Local Stim.'}])
 
 nexttile([1 2])
 cmap=[0 0.6 1;0 0 0; 0.7 0 0.9];
-SponLength2show=find(Length_PeakMat(:,4)>0.2 & Length_PeakMat(:,10)>1);
-LengthC2show={Lstaall(path2show,1), Length_PeakMat(SponLength2show,3)};
+%SponLength2show=find(Length_PeakMat.Rsquare>0.2 & Length_PeakMat.peak_zscore>1);
+SponLength2show=find(Length_PeakMat.MaxDistance>0);
+LengthC2show={Lstaall(path2show,1), Length_PeakMat.LengthConstant(SponLength2show)};
 p=Boxplot_wPoints2(LengthC2show,cmap([1 2],:)); axis tight; hold all
 drawPValueLines(p,300,'TextYOffset',0.1,'StepHeight',0.1)
 set(gca,'yscale','log','xtick',[1 2],'xticklabel',{'Opto. Stim.','Spontaneous'},'ytick',[10 100 1000])
 ylabel('Decay length (\mum)'); ylim([10 1700]); xlim([0.5 2.5]); box off;
-
+%%
 figure(134); clf; tiledlayout(2,2); cmap_temp=gen_colormap(Plasma,4);
 title_str={'Basal peak, Basal voltage','Apical peak, Apical voltage','Apical peak, Basal voltage','Basal peak, Apical voltage'};
 for dc=[1 4 3 2]
@@ -1222,7 +1369,7 @@ end
 legend(ldc,{'Basal','Apical'})
 end
 
-%% Correlation length constant
+%% Correlation length constant (Figure 2)
 figure(122); clf;
 nexttile([1 1])
 l_const_show=l_const(foi,1:size(dClass2plot,1));
@@ -1355,10 +1502,10 @@ ylabel('Correlation length (\mum)')
 %% Basal/Apical/Soma subthreshold dynamics
 
 run_threshold=0.002; max_xcorrT=500;
-PSD_sub=[];
-preCS_SubBA=[]; preSS_SubBA=[]; ThetaPow=[]; PhaseTr=[];
+psd_normOrthAxis=[]; psd_norm=[];
+preCS_SubBA=[]; preSS_SubBA=[]; ThetaPow=[]; PhaseTr=[]; ThetaPowROI=[]; PhaseTrROI=[];
 STmat_SubthOrth=[]; STmat_SubthOrth2=[]; %Orth: A+B, B-A, S; Orth2: B, A, S;
-OrthAxis=[1 0 1 0 1; 1 0 -1 0 -1; 0 1 0 0 0]; %basal, soma, trunk, oblique, distal
+OrthAxis=[1 0 0 0 0; 0 1 0 0 0; 0 0 1 0 1; 0 0 0 0 1; 1 0 1 0 1; 1 0 0 0 -1]; %basal, soma, trunk, oblique, distal
 OrthAxis2=[1 0 0 0 0; 0 0 1 0 1; 0 0 0 0 1]; %basal, soma, trunk, oblique, distal
 xcorr_silentMat=NaN(max(foi),max_xcorrT*2+1); BA=NaN(max(foi),max_xcorrT*2+1);
 xcorrMat=NaN(max(foi),max_xcorrT*2+1);
@@ -1366,7 +1513,7 @@ VecPower=NaN(max(foi),size(OrthAxis,1)); VecPowerPF=NaN(max(foi),size(OrthAxis,1
 VecthetaPower=NaN(max(foi),size(OrthAxis,1)); VecthetaPowerPF=NaN(max(foi),size(OrthAxis,1),2); VecthetaPowerRun=NaN(max(foi),size(OrthAxis,1),2);
 OrthaxisXcorr_silent=NaN(size(OrthAxis2,1),size(OrthAxis2,1),max_xcorrT*2+1,max(foi));
 OrthaxisXcorr=NaN(size(OrthAxis2,1),size(OrthAxis2,1),max_xcorrT*2+1,max(foi));
-FilterFreq=[5 12]; psd_norm=[];
+FilterFreq=[5 12]; 
 
 for f=foi
     f
@@ -1376,7 +1523,7 @@ for f=foi
     % set ROI indices
     roisD_order_ind=cellfun(@find,roisD_order{f},'UniformOutput',false);
     OrthAxis_vec=zeros(size(OrthAxis,1),nROI); OrthAxis_vec2=zeros(size(OrthAxis,1),nROI);
-    for d=1:5
+    for d=1:5 %dClass
         dclassinds=cell2mat(roisD_order_ind(d,:)');
         for v=1:size(OrthAxis,1)
             if abs(OrthAxis(v,d))>0 & isempty(dclassinds)
@@ -1412,130 +1559,279 @@ for f=foi
     filteredSubthres_orthAxis(:,BlueStim{f}>0)=NaN;
     filteredSubthres_orthAxis=(filteredSubthres_orthAxis'*OrthAxis_vec')';
 
+    VoltageTrace_orthAxis = NormalizedTrace_dirt{f}(cell2mat(roisD_order_ind(:)),:);
+    VoltageTrace_orthAxis(:,BlueStim{f}>0)=NaN;
+    VoltageTrace_orthAxis=(VoltageTrace_orthAxis'*OrthAxis_vec')';
+
     for dclass=1:4
-        [~, STmat_SubthOrth{f,dclass}]=get_STA(filteredSubthres_orthAxis, allSpikeClassMat{f}(dclass,:).*(BlueStim{f}==0),30,30); %pre complex spike
+        [~, STmat_SubthOrth{f,dclass}]=get_STA(VoltageTrace_orthAxis, allSpikeClassMat{f}(dclass,:).*(BlueStim{f}==0),30,30); %pre complex spike
     end
 
     silenttime=setdiff([1:nTime],unique(find(max([allSpikeMat{f}(1,:); allSpikeClassMat{f}; CStrace{f}; BlueStim{f}])>0)'+[-5:30]));
     silenttime_vec=ind2vec(nTime,silenttime,1);
-    filteredSubthres_orthAxis_silent=filteredSubthres_orthAxis;
+    VoltageTrace_ROI_silent=NormalizedTrace_dirt{f};
+    VoltageTrace_ROI_silent(:,~silenttime_vec)=NaN;
+    filteredSubthres_orthAxis_silent=VoltageTrace_orthAxis;
     filteredSubthres_orthAxis_silent(:,~silenttime_vec)=NaN;
     filteredSubthres_orthAxis_silent2=filteredSubthres_orthAxis2;
     filteredSubthres_orthAxis_silent2(:,~silenttime_vec,:)=NaN;
 
-    for oi=1:size(OrthAxis2,1)
-        for oj=oi:size(OrthAxis2,1)
-           OrthaxisXcorr_silent(oi,oj,:,f)=nanXCorr(filteredSubthres_orthAxis_silent2(oi,:,1),filteredSubthres_orthAxis_silent2(oj,:,2),max_xcorrT,1);
-           OrthaxisXcorr(oi,oj,:,f)=nanXCorr(filteredSubthres_orthAxis2(oi,:,1),filteredSubthres_orthAxis2(oj,:,2),max_xcorrT,1);
-        end
+    [psd_normOrthAxis{f}.power, psd_normOrthAxis{f}.frequency, psd_normOrthAxis{f}.power_norm] = nanPSD(filteredSubthres_orthAxis_silent(:,:,1), 1000, 3000);
+    for oi=1:size(OrthAxis,1)
+        % for oj=oi:size(OrthAxis2,1)
+        %    OrthaxisXcorr_silent(oi,oj,:,f)=nanXCorr(filteredSubthres_orthAxis_silent2(oi,:,1),filteredSubthres_orthAxis_silent2(oj,:,2),max_xcorrT,1);
+        %    OrthaxisXcorr(oi,oj,:,f)=nanXCorr(filteredSubthres_orthAxis2(oi,:,1),filteredSubthres_orthAxis2(oj,:,2),max_xcorrT,1);
+        % end
         filteredSubthres_orthAxis_silent_interpNaN = interpolateNaN(filteredSubthres_orthAxis_silent);
+        %filteredSubthres_orthAxis_silent_interpNaN = filteredSubthres_orthAxis_silent;
+        % filteredSubthres_orthAxis_silent_interpNaN(isnan(filteredSubthres_orthAxis_silent_interpNaN))=0;
         if any(~isnan(filteredSubthres_orthAxis_silent_interpNaN(oi,:)))
         [PhaseTr{f}(oi,:),~,ThetaPow{f}(oi,:)] = get_phase(filteredSubthres_orthAxis_silent_interpNaN(oi,:), 1000, FilterFreq);
-        [frq, pw] = nanPSD(filteredSubthres_orthAxis_silent2(oi,:,1), 1000, 3000);
-        psd_norm{f}=[frq pw];
         end
     end
+
+    % for n=1:size(VoltageTrace_ROI_silent,1)
+    %     VoltageTrace_ROI_silent_interpNaN = interpolateNaN(VoltageTrace_ROI_silent);
+    %     %VoltageTrace_ROI_silent_interpNaN = VoltageTrace_ROI_silent;
+    %     %VoltageTrace_ROI_silent_interpNaN(isnan(VoltageTrace_ROI_silent_interpNaN))=0;
+    %     if any(~isnan(VoltageTrace_ROI_silent_interpNaN(n,:)))
+    %     [PhaseTrROI{f}(n,:),~,ThetaPowROI{f}(n,:)] = get_phase(VoltageTrace_ROI_silent_interpNaN(n,:), 1000, FilterFreq);
+    %     [pw, frq, pw_norm] = nanPSD(VoltageTrace_ROI_silent(n,:), 1000, 3000);
+    %     psd_norm{f}.frequency=[frq];
+    %     psd_norm{f}.power(n,:)=[pw];
+    %     psd_norm{f}.power_norm(n,:)=[pw_norm];
+    %     end
+    % end
 end
+%% Show Power spectral density (Figure S9)
+figure(23); clf; tiledlayout(1,6);
+cmap=gen_colormap(Plasma,4);
+cmap2=gray(4);
+nexttile([1 2]);
+l=[]; orthax_str={'Basal','Soma','Apical','distal'};
+for oi=1:4%size(OrthAxis2,1)
+    %nexttile(oi,[1 1]);
+    PowerMat=cell2mat(cellfun(@(x) x.power_norm(oi,:),psd_normOrthAxis(foi),'UniformOutput',false)');
+    Freq=psd_normOrthAxis{1}.frequency;
+    M=mean(PowerMat,1,'omitnan'); S=std(PowerMat,0,1,'omitnan')./sqrt(sum(~isnan(PowerMat),1));
 
-% Basal & apical & soma autocorr and crosscorr
-figure(127); clf; t_lag=[-max_xcorrT:max_xcorrT]; ax2=[];
-subplot_loc=[1 3 2 9 6 5]; g=1; ROI_str={'Basal','Apical','Distal'};
-cmap_label=jet(9);
-for oi=1:size(OrthAxis2,1)
-    for oj=oi:size(OrthAxis2,1)
-        nexttile([1 1])
-        plot(t_lag,squeeze(OrthaxisXcorr_silent(oi,oj,:,foi)),'color',[0.8 0.8 0.8]); hold all
-        errorbar_shade(t_lag,mean(squeeze(OrthaxisXcorr_silent(oi,oj,:,foi))',1,'omitnan'),std(squeeze(OrthaxisXcorr_silent(oi,oj,:,foi))',0,1,'omitnan'),cmap_label(g,:));
-        title([ROI_str{oi} ' & ' ROI_str{oj}])
-        g=g+1;
-        xlabel('\tau (ms)')
-ylabel('R(\tau)')
-    end
+    %plot(Freq,PowerMat,'color',[0.7 0.7 0.7]); hold all
+    l(oi)=errorbar_shade(Freq,M,S,cmap(oi,:)); hold all;
+    set(gca,'yscale','log');
+    xlim([1 20])
 end
+legend(l,orthax_str)
+xlabel('Frequency (Hz)'); box off;
+ylabel('Normalized power spectral density (A.U.)')
 
+nexttile([1 2]);
+l=[]; orthax_str2={'Global','See-saw'};
+sizeorth=cell2mat(cellfun(@(x) size(x.power,1),psd_normOrthAxis(foi),'UniformOutput',false)');
+for oi=5:6%size(OrthAxis2,1)
+    PowerMat=cell2mat(cellfun(@(x) x.power_norm(oi,:),psd_normOrthAxis(foi(sizeorth>3)),'UniformOutput',false)');
+    Freq=psd_normOrthAxis{1}.frequency;
+    M=mean(PowerMat,1,'omitnan'); S=std(PowerMat,0,1,'omitnan')./sqrt(sum(~isnan(PowerMat),1));
 
-figure(125); clf; cmap=lines(3); tiledlayout(2,3);
-% Basal & apical during run or rest
-nexttile([1 1]);
-for r=1:2
-    plot([1 2]+(r-1)*2,Run_BA(foi,[1 3]+r-1),'marker','o','color',[0.6 0.6 0.6]); hold all
-    M=mean(Run_BA(foi,[1 3]+r-1),1,'omitnan'); S=std(Run_BA(foi,[1 3]+r-1),0,1,'omitnan')./sqrt(length(foi));
-    errorbar([1 2]+(r-1)*2,M,S,'color',cmap(2,:));
-    [p]=signrank(Run_BA(foi,[1]+r-1),Run_BA(foi,[3]+r-1));
-    mm=max(tovec(Run_BA(foi,[1 3]+r-1)));
-    line([1 2]+(r-1)*2,[mm*1.1 mm*1.1],'color',[0 0 0]);
-    text(1.5+(r-1)*2,mm*1.1+0.01,['p = ' num2str(p,2)],'HorizontalAlignment','center')
+    l(oi-4)=errorbar_shade(Freq,M,S,cmap2(oi-3,:)); hold all;
+    set(gca,'yscale','log');
+    xlim([1 20])
 end
-xlim([0.5 4.5]);
-ylabel('Voltage (spike height')
-set(gca,'XTick',[1:4],'XTickLabel',{'Basal, Run','Basal, Rest','Apical, Run','Apical, Rest'})
+legend(l,orthax_str2)
+xlabel('Frequency (Hz)'); box off;
+ylabel('Normalized power spectral density (A.U.)')
 
-% Basal & apical in PF or out PF
-nexttile([1 1]);
-for r=1:2
-    plot([1 2]+(r-1)*2,PlaceField_BA(foi,[1 3]+r-1),'marker','o','color',[0.6 0.6 0.6]); hold all
-    M=mean(PlaceField_BA(foi,[1 3]+r-1),1,'omitnan'); S=std(PlaceField_BA(foi,[1 3]+r-1),0,1,'omitnan')./sqrt(length(foi));
-    errorbar([1 2]+(r-1)*2,M,S,'color',cmap(2,:));
-    [p]=signrank(PlaceField_BA(foi,[1]+r-1),PlaceField_BA(foi,[3]+r-1));
-    mm=max(tovec(PlaceField_BA(foi,[1 3]+r-1)));
-    line([1 2]+(r-1)*2,[mm*1.1 mm*1.1],'color',[0 0 0]);
-    text(1.5+(r-1)*2,mm*1.1+0.01,['p = ' num2str(p,2)],'HorizontalAlignment','center')
+thetaPowerMat=[];
+for oi=1:6
+PowerMat=cell2mat(cellfun(@(x) x.power_norm(oi,:),psd_normOrthAxis(foi),'UniformOutput',false)');
+frqMat=cell2mat(cellfun(@(x) x.frequency,psd_normOrthAxis(foi),'UniformOutput',false)');
+thetaPowerMat(oi,:)=mean(PowerMat(:,frqMat(1,:)>5 & frqMat(1,:)<10),2,'omitnan');
 end
-xlim([0.5 4.5]);
-ylabel('Voltage (spike height')
-set(gca,'XTick',[1:4],'XTickLabel',{'Basal, in PF','Basal, out PF','Apical, in PF','Apical, out PF'})
-
-% Basal - apical during run or rest
 nexttile([1 1]);
-plot([1 2],Run_BAunbal(foi,3:4),'marker','o','color',[0.6 0.6 0.6]); hold all
-M=mean(Run_BAunbal(foi,3:4),1,'omitnan'); S=std(Run_BAunbal(foi,3:4),0,1,'omitnan')./sqrt(length(foi));
-errorbar([1 2],M,S,'color',cmap(1,:));
-[p]=signrank(Run_BAunbal(foi,3),Run_BAunbal(foi,4));
-xlim([0.5 2.5])
-set(gca,'XTick',[1 2],'XTickLabel',{'Run','Rest'})
-title(['p = ' num2str(p,2)])
-ylabel('Basal- Apical (Spike height)')
-
-% Basal - Apical in PF or Out PF
+p=Boxplot_wPoints2(thetaPowerMat(1:4,:)',[cmap(1:4,:)]);
+ylim([0 0.06])
+drawPValueLines(p,0,'StepHeight',0.005,'TextYOffset',0.003); box off; ylim([0 0.07])
+set(gca,'xticklabels',orthax_str); ylabel('Normalized \theta power (A.U.)');
 nexttile([1 1]);
-plot([1 2],PlaceField_BAunbal(foi,3:4),'marker','o','color',[0.6 0.6 0.6]); hold all
-M=mean(PlaceField_BAunbal(foi,3:4),1,'omitnan'); S=std(PlaceField_BAunbal(foi,3:4),0,1,'omitnan')./sqrt(length(foi));
-errorbar([1 2],M,S,'color',cmap(3,:));
-[p]=signrank(PlaceField_BAunbal(foi,3),PlaceField_BAunbal(foi,4));
-xlim([0.5 2.5])
-ylabel('Basal- Apical (Spike height)')
-set(gca,'XTick',[1 2],'XTickLabel',{'In PF','Out PF'})
-title(['p = ' num2str(p,2)])
-
-% Theta power during run or rest
-nexttile([1 1]);
-for r=1:2
-    plot([1 2]+(r-1)*2,Run_thetapower(foi,:,r),'marker','o','color',[0.6 0.6 0.6]); hold all
-    M=mean(Run_thetapower(foi,:,r),1,'omitnan'); S=std(Run_thetapower(foi,:,r),0,1,'omitnan')./sqrt(length(foi));
-    errorbar([1 2]+(r-1)*2,M,S,'color',cmap(2,:));
-    [p]=signrank(Run_thetapower(foi,1,r),Run_thetapower(foi,2,r));
-    mm=max(tovec(Run_thetapower(foi,:,r)));
-    line([1 2]+(r-1)*2,[mm*1.1 mm*1.1],'color',[0 0 0]);
-    text(1.5+(r-1)*2,mm*1.1+0.01,['p = ' num2str(p,2)],'HorizontalAlignment','center')
+p2=Boxplot_wPoints2(thetaPowerMat(5:6,:)',[cmap2([1 2],:)]);
+ylim([0 0.065])
+drawPValueLines(p2,0,'StepHeight',0.01,'TextYOffset',0.004); box off; ylim([0 0.075])
+set(gca,'xticklabels',orthax_str2); ylabel('Normalized \theta power (A.U.)');
+set_fontsize(12)
+%%
+PowerMatROI=[]; theta_range=[5 12];
+for f=foi
+Pmat=psd_norm{f}.power;
+thetapow_tmp=mean(Pmat(:,psd_norm{f}.frequency>theta_range(1) & psd_norm{f}.frequency<theta_range(2)),2,'omitnan');
+thetapow_tmp(thetapow_tmp>0.045)=NaN;
+thetaPowerMat{f}=[dendaxis{f}' thetapow_tmp];
 end
-xlim([0.5 4.5]);
-ylabel('Theta-band power')
-set(gca,'XTick',[1:4],'XTickLabel',{'Basal, Run','Basal, Rest','Apical, Run','Apical, Rest'})
-
-% Theta power in PF or out PF
+[MeanTheta STDtheta dend_x indicies bdat]=binning_data(thetaPowerMat,[-300:40:270 310:50:490]);%
+N=sum(cellfun(@(x) sum(x),indicies),2);
 nexttile([1 1]);
-for r=1:2
-    plot([1 2]+(r-1)*2,PlaceField_thetapower(foi,:,r),'marker','o','color',[0.6 0.6 0.6]); hold all
-    M=mean(PlaceField_thetapower(foi,:,r),1,'omitnan'); S=std(PlaceField_thetapower(foi,:,r),0,1,'omitnan')./sqrt(length(foi));
-    errorbar([1 2]+(r-1)*2,M,S,'color',cmap(2,:));
-    [p]=signrank(PlaceField_thetapower(foi,1,r),PlaceField_thetapower(foi,2,r));
-    mm=max(tovec(PlaceField_thetapower(foi,:,r)));
-    line([1 2]+(r-1)*2,[mm*1.1 mm*1.1],'color',[0 0 0]);
-    text(1.5+(r-1)*2,mm*1.1+0.01,['p = ' num2str(p,2)],'HorizontalAlignment','center')
-end
-xlim([0.5 4.5]);
-ylabel('Theta-band power')
-set(gca,'XTick',[1:4],'XTickLabel',{'Basal, in PF','Basal, out PF','Apical, in PF','Apical, out PF'})
+errorbar_shade(dend_x,MeanTheta,STDtheta./sqrt(N'),[1 0 0]);
+xlabel('Distance from soma (\mum)');
+ylabel('\theta-frequency power (A.U.)')
+% 
+% t_bin=[20:5:500]; cmap=gen_colormap(Plasma,5);
+% peaktroughVec=[]; pt_str={'Peak','Trough'};
+% if exist('PeakTroughMat')
+%     files=unique(PeakTroughMat.FileInd);
+%     for peaktough_sw=[0 1]
+%         nexttile([1 1]);
+%         l=[]; g=1;
+%     for dclass2see=[1 5]
+%         for f=files'
+%             [nROI nTime]=size(NormalizedTrace_dirt{f});
+%             event2see=find(PeakTroughMat.FileInd==f & PeakTroughMat.IsPeak==peaktough_sw & PeakTroughMat.dClass==dclass2see);
+%             if length(event2see)>150
+%             Peaktroughhist{f,dclass2see}=histcounts(diff(PeakTroughMat.Frame(event2see)),t_bin,'Normalization','probability');
+%             else
+%                 Peaktroughhist{f,dclass2see}=NaN(1,length(t_bin)-1);
+%             end
+%             peaktroughVec{f,dclass2see,peaktough_sw+1}=ind2vec(nTime,PeakTroughMat.Frame(event2see),1);
+%         end
+% MeanPDF=mean(cell2mat(Peaktroughhist(foi,dclass2see)),1,'omitnan');
+% StdPDF=std(cell2mat(Peaktroughhist(foi,dclass2see)),0,1,'omitnan')./sqrt(length(foi));
+% l(g)=errorbar_shade(edge2bin(t_bin),MeanPDF,StdPDF,cmap(dclass2see,:)); hold all;
+% g=g+1;
+% xlabel('Inter-peak interval (ms)'); ylabel('Probability');
+%     end
+%     title(pt_str{peaktough_sw+1})
+%     legend(l,{'Basal','Distal'})
+%     end
+% 
+%     for f=files'
+%         for d=[1 5]
+%             for d2=[1 5]
+%                 for pt=[1 2]
+%                     for pt2=2
+%                         [~, peaktroughTAmat{f,d,d2,pt}]=get_STA(peaktroughVec{f,d,pt},peaktroughVec{f,d2,pt2}>0,500,500);
+%                     end
+%                 end
+%             end
+%         end
+%     end
+% 
+%     omitcell=[8 19 24];
+%     files2show=setdiff(files,omitcell);
+%     TAmat=cellfun(@(x) squeeze(mean(x,2,'omitnan')),peaktroughTAmat,'UniformOutput',false);
+%     Npeaks=cell2mat(cellfun(@(x) size(x,2),peaktroughTAmat(files2show,:,:,:),'UniformOutput',false));
+%     figure(24); clf;
+%     nexttile([1 1])
+%     plot([-500:500],mean(cell2mat(TAmat(files2show,1,1,2)'),2,'omitnan')); hold all
+%     plot([-500:500],mean(cell2mat(TAmat(files2show,5,1,2)'),2,'omitnan')); hold all
+%     title('Basal & Distal peak distribution, triggered by basal peak')
+%     ylim([0 0.01]);
+%     nexttile([1 1])
+%     plot([-500:500],mean(cell2mat(TAmat(files2show,1,5,2)'),2,'omitnan')); hold all
+%     plot([-500:500],mean(cell2mat(TAmat(files2show,5,5,2)'),2,'omitnan')); hold all
+%     title('Basal & Distal peak distribution, triggered by distal peak');
+%     ylim([0 0.01]);
+    
+%end
+
+
+%%
+% 
+% % Basal & apical & soma autocorr and crosscorr
+% figure(127); clf; t_lag=[-max_xcorrT:max_xcorrT]; ax2=[];
+% subplot_loc=[1 3 2 9 6 5]; g=1; ROI_str={'Basal','Apical','Distal'};
+% cmap_label=jet(9);
+% for oi=1:size(OrthAxis2,1)
+%     for oj=oi:size(OrthAxis2,1)
+%         nexttile([1 1])
+%         plot(t_lag,squeeze(OrthaxisXcorr_silent(oi,oj,:,foi)),'color',[0.8 0.8 0.8]); hold all
+%         errorbar_shade(t_lag,mean(squeeze(OrthaxisXcorr_silent(oi,oj,:,foi))',1,'omitnan'),std(squeeze(OrthaxisXcorr_silent(oi,oj,:,foi))',0,1,'omitnan'),cmap_label(g,:));
+%         title([ROI_str{oi} ' & ' ROI_str{oj}])
+%         g=g+1;
+%         xlabel('\tau (ms)')
+% ylabel('R(\tau)')
+%     end
+% end
+% 
+% 
+% figure(125); clf; cmap=lines(3); tiledlayout(2,3);
+% % Basal & apical during run or rest
+% nexttile([1 1]);
+% for r=1:2
+%     plot([1 2]+(r-1)*2,Run_BA(foi,[1 3]+r-1),'marker','o','color',[0.6 0.6 0.6]); hold all
+%     M=mean(Run_BA(foi,[1 3]+r-1),1,'omitnan'); S=std(Run_BA(foi,[1 3]+r-1),0,1,'omitnan')./sqrt(length(foi));
+%     errorbar([1 2]+(r-1)*2,M,S,'color',cmap(2,:));
+%     [p]=signrank(Run_BA(foi,[1]+r-1),Run_BA(foi,[3]+r-1));
+%     mm=max(tovec(Run_BA(foi,[1 3]+r-1)));
+%     line([1 2]+(r-1)*2,[mm*1.1 mm*1.1],'color',[0 0 0]);
+%     text(1.5+(r-1)*2,mm*1.1+0.01,['p = ' num2str(p,2)],'HorizontalAlignment','center')
+% end
+% xlim([0.5 4.5]);
+% ylabel('Voltage (spike height')
+% set(gca,'XTick',[1:4],'XTickLabel',{'Basal, Run','Basal, Rest','Apical, Run','Apical, Rest'})
+% 
+% % Basal & apical in PF or out PF
+% nexttile([1 1]);
+% for r=1:2
+%     plot([1 2]+(r-1)*2,PlaceField_BA(foi,[1 3]+r-1),'marker','o','color',[0.6 0.6 0.6]); hold all
+%     M=mean(PlaceField_BA(foi,[1 3]+r-1),1,'omitnan'); S=std(PlaceField_BA(foi,[1 3]+r-1),0,1,'omitnan')./sqrt(length(foi));
+%     errorbar([1 2]+(r-1)*2,M,S,'color',cmap(2,:));
+%     [p]=signrank(PlaceField_BA(foi,[1]+r-1),PlaceField_BA(foi,[3]+r-1));
+%     mm=max(tovec(PlaceField_BA(foi,[1 3]+r-1)));
+%     line([1 2]+(r-1)*2,[mm*1.1 mm*1.1],'color',[0 0 0]);
+%     text(1.5+(r-1)*2,mm*1.1+0.01,['p = ' num2str(p,2)],'HorizontalAlignment','center')
+% end
+% xlim([0.5 4.5]);
+% ylabel('Voltage (spike height')
+% set(gca,'XTick',[1:4],'XTickLabel',{'Basal, in PF','Basal, out PF','Apical, in PF','Apical, out PF'})
+% 
+% % Basal - apical during run or rest
+% nexttile([1 1]);
+% plot([1 2],Run_BAunbal(foi,3:4),'marker','o','color',[0.6 0.6 0.6]); hold all
+% M=mean(Run_BAunbal(foi,3:4),1,'omitnan'); S=std(Run_BAunbal(foi,3:4),0,1,'omitnan')./sqrt(length(foi));
+% errorbar([1 2],M,S,'color',cmap(1,:));
+% [p]=signrank(Run_BAunbal(foi,3),Run_BAunbal(foi,4));
+% xlim([0.5 2.5])
+% set(gca,'XTick',[1 2],'XTickLabel',{'Run','Rest'})
+% title(['p = ' num2str(p,2)])
+% ylabel('Basal- Apical (Spike height)')
+% 
+% % Basal - Apical in PF or Out PF
+% nexttile([1 1]);
+% plot([1 2],PlaceField_BAunbal(foi,3:4),'marker','o','color',[0.6 0.6 0.6]); hold all
+% M=mean(PlaceField_BAunbal(foi,3:4),1,'omitnan'); S=std(PlaceField_BAunbal(foi,3:4),0,1,'omitnan')./sqrt(length(foi));
+% errorbar([1 2],M,S,'color',cmap(3,:));
+% [p]=signrank(PlaceField_BAunbal(foi,3),PlaceField_BAunbal(foi,4));
+% xlim([0.5 2.5])
+% ylabel('Basal- Apical (Spike height)')
+% set(gca,'XTick',[1 2],'XTickLabel',{'In PF','Out PF'})
+% title(['p = ' num2str(p,2)])
+% 
+% % Theta power during run or rest
+% nexttile([1 1]);
+% for r=1:2
+%     plot([1 2]+(r-1)*2,Run_thetapower(foi,:,r),'marker','o','color',[0.6 0.6 0.6]); hold all
+%     M=mean(Run_thetapower(foi,:,r),1,'omitnan'); S=std(Run_thetapower(foi,:,r),0,1,'omitnan')./sqrt(length(foi));
+%     errorbar([1 2]+(r-1)*2,M,S,'color',cmap(2,:));
+%     [p]=signrank(Run_thetapower(foi,1,r),Run_thetapower(foi,2,r));
+%     mm=max(tovec(Run_thetapower(foi,:,r)));
+%     line([1 2]+(r-1)*2,[mm*1.1 mm*1.1],'color',[0 0 0]);
+%     text(1.5+(r-1)*2,mm*1.1+0.01,['p = ' num2str(p,2)],'HorizontalAlignment','center')
+% end
+% xlim([0.5 4.5]);
+% ylabel('Theta-band power')
+% set(gca,'XTick',[1:4],'XTickLabel',{'Basal, Run','Basal, Rest','Apical, Run','Apical, Rest'})
+% 
+% % Theta power in PF or out PF
+% nexttile([1 1]);
+% for r=1:2
+%     plot([1 2]+(r-1)*2,PlaceField_thetapower(foi,:,r),'marker','o','color',[0.6 0.6 0.6]); hold all
+%     M=mean(PlaceField_thetapower(foi,:,r),1,'omitnan'); S=std(PlaceField_thetapower(foi,:,r),0,1,'omitnan')./sqrt(length(foi));
+%     errorbar([1 2]+(r-1)*2,M,S,'color',cmap(2,:));
+%     [p]=signrank(PlaceField_thetapower(foi,1,r),PlaceField_thetapower(foi,2,r));
+%     mm=max(tovec(PlaceField_thetapower(foi,:,r)));
+%     line([1 2]+(r-1)*2,[mm*1.1 mm*1.1],'color',[0 0 0]);
+%     text(1.5+(r-1)*2,mm*1.1+0.01,['p = ' num2str(p,2)],'HorizontalAlignment','center')
+% end
+% xlim([0.5 4.5]);
+% ylabel('Theta-band power')
+% set(gca,'XTick',[1:4],'XTickLabel',{'Basal, in PF','Basal, out PF','Apical, in PF','Apical, out PF'})
     
 % nexttile([1 1]);
 % plot(t_lag,BAxcorr(foi,:)','color',[0.8 0.8 0.8]); hold all
@@ -1551,13 +1847,13 @@ set(gca,'XTick',[1:4],'XTickLabel',{'Basal, in PF','Basal, out PF','Apical, in P
 % plot(t_lag,AAxcorr(foi,:)','color',[0.8 0.8 0.8]); hold all
 % errorbar_shade(t_lag,mean(AAxcorr(foi,:),1,'omitnan'),std(AAxcorr(foi,:),0,1,'omitnan'));
 % xlabel('\tau (ms)')
-% ylabel('R(\tau)')
-
-figure(128); clf; cmap=distinguishable_colors(2);
-[mean_PSDbs std_PSDbs b_cent]=binning_data(PSD_sub(foi,1),[0:1:20]);
-[mean_PSDap std_PSDap b_cent]=binning_data(PSD_sub(foi,2),[0:1:20]);
-errorbar_shade(b_cent,mean_PSDbs,std_PSDbs,cmap(1,:)); hold all
-errorbar_shade(b_cent,mean_PSDap,std_PSDap,cmap(2,:));
+ % ylabel('R(\tau)')
+% 
+% figure(128); clf; cmap=distinguishable_colors(2);
+% [mean_PSDbs std_PSDbs b_cent]=binning_data(psd_norm(foi,1),[0:1:20]);
+% [mean_PSDap std_PSDap b_cent]=binning_data(psd_norm(foi,2),[0:1:20]);
+% errorbar_shade(b_cent,mean_PSDbs,std_PSDbs,cmap(1,:)); hold all
+% errorbar_shade(b_cent,mean_PSDap,std_PSDap,cmap(2,:));
 
 %
 % sample_gridSS=linspace(-1,2,50);
@@ -1580,6 +1876,9 @@ errorbar_shade(b_cent,mean_PSDap,std_PSDap,cmap(2,:));
 % ax = gca; % Get current axes
 % ax.GridColor = 'w'; % Set grid color (e.g., black)
 % ax.GridAlpha = 0.5; % Set transparency of the grid lines
+
+%% Place tuning Figure S
+%% Power spectrum Figure S
 
 %% bAP amplitude in place fields
 nTau_short=[1 3];

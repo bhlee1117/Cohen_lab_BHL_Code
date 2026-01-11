@@ -28,7 +28,16 @@ for f=foi
     load([fpath{f} '/SomPC_Result.mat'])
     SomPCresult{f}=Result;
 end
+%%
+clear ratoi
+for pf=1:size(PFs,1)
+f=PFs.FileInd(pf);
+n=PFs.Nind(pf);
+FRmap=ringmovMean(SomPCresult{f}.Lap_FR(:,:,1,n),5);
 
+TC=mean(FRmap(PFs.LapStart(pf):PFs.LapEnd(pf),:,:),1,'omitnan');
+ratoi(pf,:)=[TC(PFs.PFstart(pf)) TC(PFs.PFend(pf))]/mean(TC(TC<prctile(TC,30)),'omitnan');
+end
 %% Show all PFs
 figure(100); clf;
 PF_list=[];
@@ -74,7 +83,7 @@ for pf=1:size(PFs,1)
     %     PF_list=[PF_list; [f n [[st ed]+1] wd]];
     % end
 end
-
+f 
 %% Representative image
 
 N2show=table2array(PFs(10,:));
@@ -85,8 +94,8 @@ else
     blueLaps=[];
 end
 Subth=get_subthreshold(SomPCresult{N2show(1)}.normtrace(N2show(2),:),SomPCresult{N2show(1)}.spike(N2show(2),:),7,40);
-normConst=get_F0PCA(Subth);
-%normConst=sqrt(mean(Subth(1,1:end-1).*Subth(1,2:end)));
+%normConst=get_F0PCA(Subth);
+normConst=sqrt(mean(Subth(1,1:end-1).*Subth(1,2:end)));
 %normTr=zscore(SomPCresult{N2show(1)}.normtrace(N2show(2),:));
 normTr=SomPCresult{N2show(1)}.normtrace(N2show(2),:)./normConst;
 Subth=Subth./normConst;

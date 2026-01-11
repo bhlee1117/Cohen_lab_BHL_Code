@@ -18,7 +18,8 @@ for f=1:length(fpath)
     load([fpath{f} '/SomOP_Result.mat'])
     for n=find(Result.isGood>0)
         Subth=get_subthreshold(Result.normtrace(n,:),Result.spike(n,:),9,20);
-        F0PCA=get_F0PCA(Subth,1);
+        %F0PCA=get_F0PCA(Subth,1);
+        F0PCA=sqrt(mean(Subth(2:end).*Subth(1:end-1),'omitnan'));
         NormTr=Result.normtrace(n,:)./F0PCA;
         CatTraces{g,1}=NormTr;
         CatTraces{g,2}=Result.Blue;
@@ -43,11 +44,11 @@ for f=1:length(fpath)
             case 20
                 BlueWvf=4; %increasing blue pulse width
         end
-        NeuronMat=[NeuronMat; [f max(bwlabel(Result.Blue)) BlueWvf Result.NtypeInd contains(Drug{f},'Ket') pixelsize(f)]];
+        NeuronMat=[NeuronMat; [f Mouse(f) NeuronInd(f) max(bwlabel(Result.Blue)) BlueWvf Result.NtypeInd contains(Drug{f},'Ket') pixelsize(f)]];
         g=g+1;
     end
 end
-fieldName={'FileID','N_blueStim','BlueWvf','Ntype','IsKet','pixelsize'};
+fieldName={'FileID','MouseID','NeuronID','N_blueStim','BlueWvf','Ntype','IsKet','pixelsize'};
 NeuronMat=array2table(NeuronMat,'VariableNames',fieldName);
 
 fieldName={'TraceV','Blue','Spike','ref_im','SpClass','CStrace','ftprnt'};
@@ -192,6 +193,7 @@ for Ntype=1:2
 
     for n=NOIs'
         SpikeTr=CatTraces.Spike{n};
+        m=NeuronMat.MouseID(n);
         SpClassTr=CatTraces.SpClass{n};
         blueTr=CatTraces.Blue{n};
         VoltTr=CatTraces.TraceV{n};
@@ -223,13 +225,13 @@ for Ntype=1:2
                     intTime=unique(find((SpikeTr.*ind2vec(size(VoltTr,2),spikefindwindow,1))>0)'+[-9:10]);
                 end
                 AUCcs=sum(VoltTr(intTime));
-                IncTmat=[IncTmat; [n b bonset sum(bframe) AUC AUCcs Nspike isCS Ntype length(intTime)]];
+                IncTmat=[IncTmat; [n b bonset sum(bframe) AUC AUCcs Nspike isCS Ntype length(intTime) m]];
             end
         end
     end
 end
 
-fieldName={'Neuron','BlueSeq','BlueOnset','BlueWidth','AUC','AUCspike','Nspike','isCS','Celltype','AUCintTime'};
+fieldName={'Neuron','BlueSeq','BlueOnset','BlueWidth','AUC','AUCspike','Nspike','isCS','Celltype','AUCintTime','MouseID'};
 IncTmat=array2table(IncTmat,'VariableNames',fieldName);
 
 figure(27); clf;
@@ -580,12 +582,14 @@ fieldName={'NeuronID','StimOrder','RheoBase','SpikeTime','IsCS'};
 SomStimSpikeMat=array2table(SomStimSpikeMat,'VariableNames',fieldName);
 
 Rheobin=[0.7:0.35:4.5]; timebin=[0:1000:6000]; minSpikeN=20;
-Rheobin2=[0 1.5 2 3 4 5 7 9]; 
-RatioBin=[]; g=1; 
+Rheobin2=[0 1.4 9]; 
+RatioBin=[]; RatioBin2=[]; g=1; 
 CSrheobin_count=NaN(length(unique(SomStimSpikeMat.NeuronID)),length(Rheobin)-1); CStimebin_count=[];
 SSrheobin_count=NaN(length(unique(SomStimSpikeMat.NeuronID)),length(Rheobin)-1); 
 CStimebin_count=NaN(length(unique(SomStimSpikeMat.NeuronID)),length(timebin)-1);
 SStimebin_count=NaN(length(unique(SomStimSpikeMat.NeuronID)),length(timebin)-1);
+CSrheobin_count2=NaN(length(unique(SomStimSpikeMat.NeuronID)),length(Rheobin2)-1); 
+SSrheobin_count2=NaN(length(unique(SomStimSpikeMat.NeuronID)),length(Rheobin2)-1); 
 for n=unique(SomStimSpikeMat.NeuronID)'
     allspN=SomStimSpikeMat.NeuronID==n & SomStimSpikeMat.StimOrder==0;
     countindCS=SomStimSpikeMat.NeuronID==n & SomStimSpikeMat.StimOrder==0 & SomStimSpikeMat.IsCS==1; % Only Ramp, CS
@@ -595,6 +599,9 @@ for n=unique(SomStimSpikeMat.NeuronID)'
     CStimebin_count(g,:,1)=histcounts(SomStimSpikeMat.SpikeTime(countindCS),timebin);
     SSrheobin_count(g,:,1)=histcounts(SomStimSpikeMat.RheoBase(countindSS),Rheobin);
     SStimebin_count(g,:,1)=histcounts(SomStimSpikeMat.SpikeTime(countindSS),timebin);
+
+    CSrheobin_count2(g,:,1)=histcounts(SomStimSpikeMat.RheoBase(countindCS),Rheobin2);
+    SSrheobin_count2(g,:,1)=histcounts(SomStimSpikeMat.RheoBase(countindSS),Rheobin2);
     g=g+1;
     end
 end
@@ -602,6 +609,14 @@ RatioBin=CSrheobin_count./(CSrheobin_count+SSrheobin_count);
 RatioBin(RatioBin==inf)=NaN;
 Rheobin_c=mean([Rheobin(2:end); Rheobin(1:end-1)]);
 timebin_c=mean([timebin(2:end); timebin(1:end-1)])/1000;
+
+RatioBin2=CSrheobin_count2./(CSrheobin_count2+SSrheobin_count2);
+RatioBin2(RatioBin2==inf)=NaN;
+
+MeanCSweakvsstrong_2ndhalf=mean(RatioBin2,1,'omitnan');
+StdCSweakvsstrong_2ndhalf=std(RatioBin2,0,1,'omitnan')./sqrt(sum(~isnan(RatioBin2),1));
+fprintf(['Rheobase <1.4 : %2.2f ± %2.2f, > 1.4: %2.2f ± %2.2f  \n'],...
+    MeanCSweakvsstrong_2ndhalf(1),StdCSweakvsstrong_2ndhalf(1),MeanCSweakvsstrong_2ndhalf(2),StdCSweakvsstrong_2ndhalf(2));
 
 figure(32); clf; %tiledlayout(1,5);
 %nexttile(4,[1 2]);
@@ -621,11 +636,14 @@ NOIs=find(NeuronMat.BlueWvf==3 & NeuronMat.Ntype==1 & NeuronMat.IsKet==0); %RP
 NOIs=setdiff(NOIs,omitN);
 RheoThreshold=1.45;
 
-Rheobin=[1:0.25:9.5]; timebin=[0:40:500]; minSpikeN=1;
+Rheobin=[1:0.25:9.5]; timebin=[0:60:120 260:120:500]; minSpikeN=1;
+timebin2=[250 500];
 Rheobin2=[0 1.5 2 3 4 5 7 9]; 
 RatioBin=[]; g=1; 
 CStimebin_count=NaN(length(unique(SomStimSpikeMat.NeuronID)),length(timebin)-1,2);
 SStimebin_count=NaN(length(unique(SomStimSpikeMat.NeuronID)),length(timebin)-1,2);
+CStimebin_count2=NaN(length(unique(SomStimSpikeMat.NeuronID)),length(timebin2)-1,2);
+SStimebin_count2=NaN(length(unique(SomStimSpikeMat.NeuronID)),length(timebin2)-1,2);
 for n=unique(SomStimSpikeMat.NeuronID)'
     allspN=SomStimSpikeMat.NeuronID==n & ismember(SomStimSpikeMat.StimOrder,-[1:5]);
     countindCSweak=SomStimSpikeMat.NeuronID==n & ismember(SomStimSpikeMat.StimOrder,-[1:5]) & SomStimSpikeMat.IsCS==1 & SomStimSpikeMat.RheoBase<=RheoThreshold; % Only Ramp, CS
@@ -638,18 +656,35 @@ for n=unique(SomStimSpikeMat.NeuronID)'
     SStimebin_count(g,:,1)=histcounts(SomStimSpikeMat.SpikeTime(countindSSweak),timebin);
     CStimebin_count(g,:,2)=histcounts(SomStimSpikeMat.SpikeTime(countindCSstrong),timebin);
     SStimebin_count(g,:,2)=histcounts(SomStimSpikeMat.SpikeTime(countindSSstrong),timebin);
+
+    CStimebin_count2(g,:,1)=histcounts(SomStimSpikeMat.SpikeTime(countindCSweak),timebin2);
+    SStimebin_count2(g,:,1)=histcounts(SomStimSpikeMat.SpikeTime(countindSSweak),timebin2);
+    CStimebin_count2(g,:,2)=histcounts(SomStimSpikeMat.SpikeTime(countindCSstrong),timebin2);
+    SStimebin_count2(g,:,2)=histcounts(SomStimSpikeMat.SpikeTime(countindSSstrong),timebin2);
     g=g+1;
     end
 end
+
 RatioBin=CStimebin_count./(CStimebin_count+SStimebin_count);
 RatioBin(RatioBin==inf)=NaN;
 timebin_c=mean([timebin(2:end); timebin(1:end-1)]);
 M=mean(RatioBin,1,'omitnan'); S=std(RatioBin,0,1,'omitnan'); N=sum(~isnan(RatioBin),1); p=[];
 for b=1:size(RatioBin,2)
-p_tmp=get_pValue({RatioBin(:,b,1),RatioBin(:,b,2)},0);
+%p_tmp=get_pValue({RatioBin(:,b,1),RatioBin(:,b,2)},0);
+p_tmp=get_pValue(squeeze(RatioBin(:,b,:)),1);
 p(b)=p_tmp(1,2);
 end
 p
+
+RatioBin2=CStimebin_count2./(CStimebin_count2+SStimebin_count2);
+RatioBin2(RatioBin2==inf)=NaN;
+Ratestmp=squeeze(RatioBin2(:,:,:));
+MeanCSweakvsstrong_2ndhalf=mean(Ratestmp,1,'omitnan');
+StdCSweakvsstrong_2ndhalf=std(Ratestmp,0,1,'omitnan')./sqrt(sum(~isnan(Ratestmp),1));
+fprintf(['CS fraction from 2nd half of stimulation, Weak: %2.2f ± %2.2f, Strong: %2.2f ± %2.2f  \n'],...
+    MeanCSweakvsstrong_2ndhalf(1),StdCSweakvsstrong_2ndhalf(1),MeanCSweakvsstrong_2ndhalf(2),StdCSweakvsstrong_2ndhalf(2));
+
+
 figure(33); clf; %tiledlayout(1,5);
 %nexttile(4,[1 2]);
 nexttile([1 1]);
@@ -657,15 +692,179 @@ nexttile([1 1]);
 % ShowIndSS=ismember(SomStimSpikeMat.StimOrder,-[1:5]) & SomStimSpikeMat.IsCS==0 & SomStimSpikeMat.RheoBase<=RheoThreshold;
 % histogram([SomStimSpikeMat.SpikeTime(ShowIndSS);SomStimSpikeMat.SpikeTime(ShowIndCS)],timebin,'FaceColor',[0.4 0.4 0.4]); hold all
 % histogram(SomStimSpikeMat.SpikeTime(ShowIndCS),timebin,'FaceColor',[1 0 0]); yyaxis right;
-errorbar(timebin_c,M(:,:,1),S(:,:,1)./sqrt(N(:,:,1)),'color',[0 0 0],'LineWidth',1.5); hold all
+errorbar(timebin_c,M(:,:,1),S(:,:,1)./sqrt(N(:,:,1)),'color',[0.5 0.5 0.5],'LineWidth',1.5); hold all
 % nexttile([1 1]);
 % ShowIndCS=ismember(SomStimSpikeMat.StimOrder,-[1:5]) & SomStimSpikeMat.IsCS==1 & SomStimSpikeMat.RheoBase>RheoThreshold;
 % ShowIndSS=ismember(SomStimSpikeMat.StimOrder,-[1:5]) & SomStimSpikeMat.IsCS==0 & SomStimSpikeMat.RheoBase>RheoThreshold;
 % histogram([SomStimSpikeMat.SpikeTime(ShowIndSS);SomStimSpikeMat.SpikeTime(ShowIndCS)],timebin,'FaceColor',[0.4 0.4 0.4]); hold all
 % histogram(SomStimSpikeMat.SpikeTime(ShowIndCS),timebin,'FaceColor',[1 0 0]); yyaxis right;
-errorbar(timebin_c,M(:,:,2),S(:,:,2)./sqrt(N(:,:,2)),'color',[0.5 0.5 0.5],'LineWidth',1.5);
+errorbar(timebin_c,M(:,:,2),S(:,:,2)./sqrt(N(:,:,2)),'color',[0 0 0],'LineWidth',1.5);
 xlim([0 500]); ylim([0 1]);
 xlabel('Time after stimulation onset (ms)'); ylabel('Fraction of complex spike'); box off;
 legend({'Weak stimulation','Strong stimulation'})
 
+figure(34); clf;
+[~, ii]=unique([SomStimSpikeMat.NeuronID SomStimSpikeMat.StimOrder],'row');
+stim_Rheo_FR_CSratio=[];
+for stimInd=ii'
+    if ismember(SomStimSpikeMat.StimOrder(stimInd),-[1:5])
+    Ind2see=find([SomStimSpikeMat.NeuronID==SomStimSpikeMat.NeuronID(stimInd) & SomStimSpikeMat.StimOrder==SomStimSpikeMat.StimOrder(stimInd)]);
+    stim_Rheo_FR_CSratio=[stim_Rheo_FR_CSratio; [SomStimSpikeMat.RheoBase(Ind2see(1)) length(Ind2see)*2 sum(SomStimSpikeMat.IsCS(Ind2see))]];
+    end
+end
+
+%% Ketamien administration
+NOIs=find(NeuronMat.IsKet==1); 
+figure(55); clf; g=1; scale=10;
+for n=NOIs([1 6])'
+   nexttile([1 1])
+   imshow2(CatTraces.ref_im{n},[]); drawScaleBar(10/0.26,'horizontal','color',[1 1 1])
+   NeuronIDs=find(NeuronMat.MouseID==NeuronMat.MouseID(n) & NeuronMat.NeuronID==NeuronMat.NeuronID(n));
+   [~, nuniqe]=unique([NeuronMat.BlueWvf(NeuronIDs) NeuronMat.IsKet(NeuronIDs)],'row');
+   nexttile([1 1])
+   g2=1;
+   for n2=NeuronIDs(nuniqe)'
+       if NeuronMat.BlueWvf(n2)==3
+           time2show=[3000:13500];
+       else
+           time2show=[1:size(CatTraces.TraceV{n2},2)];
+       end
+   TrwCS=CatTraces.TraceV{n2};
+   TrwCS(CatTraces.CStrace{n2}==0)=NaN;
+   plot(CatTraces.TraceV{n2}(time2show)+scale*g2,'k'); hold all
+   plot(TrwCS(time2show)+scale*g2,'r');
+   plot(rescale(CatTraces.Blue{n2}(time2show))*2+scale*(g2-1/5),'color',[0 0.6 1]); axis off;
+   drawScaleBar(1000,'horizontal');
+   g2=g2+1;
+   end
+   g=g+1;
+end
+CSfraction=[]; g=1;
+for n=NOIs'
+   
+   NeuronIDs=find(NeuronMat.MouseID==NeuronMat.MouseID(n) & NeuronMat.NeuronID==NeuronMat.NeuronID(n));
+   experimentlist=[NeuronMat.BlueWvf(NeuronIDs) NeuronMat.IsKet(NeuronIDs)];
+   [experimentlistuniq, nuniqe]=unique(experimentlist,'row');
+   KetamineNeuronID=NeuronIDs(nuniqe(experimentlistuniq(:,2)>0));
+   IsoNeuronID=NeuronIDs(nuniqe(experimentlistuniq(:,2)==0));
+   CSspcat_ket=[]; CSspcat_iso=[];
+   for k=KetamineNeuronID'
+       CSspcat_ket=[CSspcat_ket [CatTraces.Spike{k}.*CatTraces.CStrace{k}; CatTraces.Spike{k}]];
+   end
+   for k=IsoNeuronID'
+       CSspcat_iso=[CSspcat_iso [CatTraces.Spike{k}.*CatTraces.CStrace{k}; CatTraces.Spike{k}]];
+   end
+   CSfraction(g,:)=[sum(CSspcat_ket(1,:),2)/sum(CSspcat_ket(2,:),2) sum(CSspcat_iso(1,:),2)/sum(CSspcat_iso(2,:),2)];
+   g=g+1;
+end
+figure(56); clf;
+p=Boxplot_wPoints2(CSfraction([1 3 4 5 6],[2 1]),[0 0 0; 0.5 0.5 0.5]);
+drawPValueLines(p,0,'TextYOffset',0.05); box off;
+ylabel('Fraction of complex spike')
+set(gca,'xtick',[1 2],'XTickLabel',{'Iso','Iso/ketamine'})
+set_fontsize(13);
+
+%% Classfy complex spike (Figure S)
+
+ExampleTrace=CatTraces.TraceV{11};
+sp_soma=CatTraces.Spike{11};
+CStrace=CatTraces.CStrace{11};
+STA=get_STA(ExampleTrace,sp_soma,1,1);
+spikeheight=STA(2);
+SS_frm=4889+[-30:60];
+BS_frm=4691+[-40:150];
+CS_frm=7585+[-40:150];
+
+% Default parameters
+CS_thres = [4 1];
+N_Spike = 3;
+N_Spike2ISI = 3;
+Max_AUC = 150;
+
+% Process subthreshold trace
+tr_hi=ExampleTrace-movprc(ExampleTrace,400,30,2);
+
+tr_sub= get_subthreshold(tr_hi,sp_soma,7,17);
+CStraceTr=tr_hi;
+CStraceTr(~CStrace)=NaN;
+nTime = length(tr_sub);
+
+% Create figure and main plot
+f = figure(30); clf;
+nexttile([1 1])
+plot(ExampleTrace,'color',[0 0 0]); hold all;
+drawScaleBar(1000,'horizontal','color',[0 0 0],'Linewidth',3,'Position',[14500 -2]);
+drawScaleBar(4,'vertical','color',[0 0 0],'Linewidth',3,'Position',[14500 -2]);
+axis tight off;
+
+nexttile([1 1]);
+tr2show=tr_hi(SS_frm);
+plot(tr2show, 'k','linewidth',1); hold on; grid on;
+plot(tr_sub(SS_frm),'color',[1 0.5 0],'linewidth',1.5);
+plot(find(sp_soma(SS_frm)>0), tr2show(find(sp_soma(SS_frm)>0)),'ro','linewidth',1);
+box off;
+ylabel('Voltage (Z score)'); xlabel('Time (ms)');
+
+nexttile([1 1]);
+tr2show=tr_hi(BS_frm);
+plot(tr2show, 'k','linewidth',1); hold on; grid on;
+plot(tr_sub(BS_frm),'color',[1 0.5 0],'linewidth',1.5);
+plot(find(sp_soma(BS_frm)>0), tr2show(find(sp_soma(BS_frm)>0)),'ro','linewidth',1);
+box off;
+ylabel('Voltage (Z score)'); xlabel('Time (ms)');
+
+nexttile([1 1]);
+tr2show=tr_hi(CS_frm);
+plot(tr2show, 'k','linewidth',1); hold on; grid on;
+plot(tr_sub(CS_frm),'color',[1 0.5 0],'linewidth',1.5);
+plot(find(sp_soma(CS_frm)>0), tr2show(find(sp_soma(CS_frm)>0)),'ro','linewidth',1);
+box off;
+ylabel('Voltage (Z score)'); xlabel('Time (ms)');
+set_fontsize(13);
+
+%% CS amplitude distritubion
+CSamp_ints=[];
+for n=1:157
+tr_hi=CatTraces.TraceV{n}-movprc(CatTraces.TraceV{n},300,30,2);
+tr_sub = movmean(tr_hi, 20, 2);
+tr_sub = tr_sub - movmedian(tr_sub, 300, 2);
+[trans, tr_trace] = detect_transient2(tr_sub, [1.5 1], CatTraces.Spike{n}, 10);
+[~, csfrstfrm]=unique(bwlabel(CatTraces.CStrace{n})); csfrstfrm=csfrstfrm(2:end);
+cscandints=tr_trace(csfrstfrm);
+STA=get_STA(CatTraces.TraceV{n},CatTraces.Spike{n},1,1);
+spikeheight=STA(2);
+CSamp_ints{n}=[trans.amp(cscandints(cscandints>0))' trans.int(cscandints(cscandints>0))' repmat(spikeheight,length(cscandints(cscandints>0)),1)];
+end
+nonemptycell=cell2mat(cellfun(@(x) ~isempty(x),CSamp_ints,'UniformOutput',false));
+minCSamps=cellfun(@(x) [prctile(x(:,1),3) prctile(x(:,2),3) prctile(x(:,1),3)/x(1,3) prctile(x(:,2),3)/x(1,3)],CSamp_ints(nonemptycell),'UniformOutput',false);
+minCSamps=cell2mat(minCSamps');
 %%
+g=1; offset=1.5;
+figure(52); clf; showHalf=[1 1 1 1];
+%tiledlayout(5,5);
+g=1;
+for n=NOIs'
+    nexttile(2,[5 4])
+    avgImg=CatTraces.ref_im{n};
+    SpikeTr=CatTraces.Spike{n};
+    SpClassTr=CatTraces.SpClass{n};
+    blueTr=CatTraces.Blue{n};
+    VoltTr=CatTraces.TraceV{n};
+    SpikeHeight=mean(VoltTr(SpikeTr>0));
+    VoltTr=VoltTr/SpikeHeight;
+    CStr=VoltTr; CStr(CatTraces.CStrace{n}==0)=NaN;
+    t_show=[3300:length(VoltTr)-1200];
+    plot(VoltTr(t_show)+g*offset,'color',[0.4 0.4 0.4]); hold all
+    plot(CStr(t_show)+g*offset,'r'); hold all
+
+    nexttile(1+5*(g-1),[1 1])
+    imshow2(avgImg,[])
+    g=g+1;
+end
+nexttile(16,[1 1]);
+drawScaleBar(10/(6.5/25),'horizontal')
+nexttile(2,[5 4])
+plot(blueTr(t_show)/2,'color',[0 0.6 1]); axis off;
+
+
+

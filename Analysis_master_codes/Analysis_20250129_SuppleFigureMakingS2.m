@@ -13,7 +13,11 @@ clear; clc;
 fpath_prism=rawPrism(:,1);
 
 for i=1:length(fpath)
-    Result_tmp=load(fullfile(fpath{i},'PC_Result.mat'));
+    try
+Result_tmp=load(fullfile(fpath{i},'PC_Result.mat'));
+    catch
+Result_tmp=load(fullfile(fpath{i},'SomPC_Result.mat'));        
+    end
     PC_Result{i}=Result_tmp.Result;
 end
 
@@ -64,30 +68,36 @@ foi2=[1 4 5 6 8 10 11 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27];
 FR_cannula=[]; FR_prism=[]; SI_cannula=[]; SI_prism=[]; FramN=[]; Brst_prism=[]; Brst_cannula=[];
 BrstSz_prism=[]; BrstSz_cannula=[];
 for p=1:length(PC_Result)
-    FR_cannula=[FR_cannula; mean(PC_Result{p}.spike(:,PC_Result{p}.Blue==0),2,'omitnan')*1000];
-
-    for n=1:size(PC_Result{p}.spike,1)
-        sp_tr=PC_Result{p}.spike(n,:);
-        sp_tr(find(PC_Result{p}.Blue>0))=NaN;
-        ss_time=find(sp_tr); % BS is subclass of SS
-        brst=bwlabel((ss_time(2:end)-ss_time(1:end-1))<=20); % SSs that have an ISI shorter than 20 ms are BS.
-        brstprop = regionprops("table",brst,"Area");
-        Brst_cannula=[Brst_cannula; max(brst)/sum(PC_Result{p}.Blue==0)*1000];
-        BrstSz_cannula=[BrstSz_cannula; histcounts(brstprop.Area+1,[0.5:10.5],'Normalization','probability')];
-    end
-
-    FR_cannula=[FR_cannula; mean(PC_Result{p}.spike(:,PC_Result{p}.Blue==0),2,'omitnan')*1000];
-
-     binTrack=(ceil(PC_Result{p}.VR(5,:)/((115)/150)));
-    for n=1:size(PC_Result{p}.normTraces,1)
-        if n==InductionNeuron(p)
-validFrame=(PC_Result{p}.VR(2,:)>=2);
-validFrame(find(PC_Result{p}.Blue>0,1):end)=0;
-        else
-validFrame=(PC_Result{p}.VR(2,:)>=2);
+    if isfield(PC_Result{p},'spike')
+        if ~isfield(PC_Result{p},'Blue')
+            PC_Result{p}.Blue=zeros(1,size(PC_Result{p}.spike,2));
         end
-        FramN=[FramN; sum(validFrame)];
-        SI_cannula = [SI_cannula; SpatialInfo(PC_Result{p}.spike(n,validFrame), binTrack(validFrame))];
+        PC_Result{p}.VR=PC_Result{p}.VR(:,1:size(PC_Result{p}.spike,2));
+        FR_cannula=[FR_cannula; mean(PC_Result{p}.spike(:,PC_Result{p}.Blue==0),2,'omitnan')*1000];
+
+        for n=1:size(PC_Result{p}.spike,1)
+            sp_tr=PC_Result{p}.spike(n,:);
+            sp_tr(find(PC_Result{p}.Blue>0))=NaN;
+            ss_time=find(sp_tr); % BS is subclass of SS
+            brst=bwlabel((ss_time(2:end)-ss_time(1:end-1))<=20); % SSs that have an ISI shorter than 20 ms are BS.
+            brstprop = regionprops("table",brst,"Area");
+            Brst_cannula=[Brst_cannula; max(brst)/sum(PC_Result{p}.Blue==0)*1000];
+            BrstSz_cannula=[BrstSz_cannula; histcounts(brstprop.Area+1,[0.5:10.5],'Normalization','probability')];
+        end
+
+        %FR_cannula=[FR_cannula; mean(PC_Result{p}.spike(:,PC_Result{p}.Blue==0),2,'omitnan')*1000];
+
+        binTrack=(ceil(PC_Result{p}.VR(5,:)/((115)/150)));
+        for n=1:size(PC_Result{p}.spike,1)
+            if n==InductionNeuron(p)
+                validFrame=(PC_Result{p}.VR(2,:)>=2);
+                validFrame(find(PC_Result{p}.Blue>0,1):end)=0;
+            else
+                validFrame=(PC_Result{p}.VR(2,:)>=2);
+            end
+            FramN=[FramN; sum(validFrame)];
+            SI_cannula = [SI_cannula; SpatialInfo(PC_Result{p}.spike(n,validFrame), binTrack(validFrame))];
+        end
     end
 end
 
@@ -147,6 +157,7 @@ PC_ind=PC_list(PF_list(show_PC,1),:);
 nVRbin=[-50:50];
 
 Result_ST=importdata(fullfile(fpath{PC_ind(1)},'PC_Result.mat'),'Result');
+Result_ST=Result_ST.Result;
 Result_Pr=importdata(fullfile(fpath_prism{4},'PC_Result.mat'),'Result');
 
 %show_frame=find(PC_Result{PC_ind(1)}.Blue==0);
@@ -155,7 +166,7 @@ StimLap=unique(Result_ST.VR(8,:).*(Result_ST.Blue>0));
 Endlap=max(Result_ST.VR(8,:));
 %LOI=setdiff([PF_list(show_PC,4):PF_list(show_PC,5)],StimLap);
 LOI=setdiff([3:Endlap],[25]);
-repLap=ringmovMean(Result_ST.Lap_FR(:,:,PC_ind(2))*1000,7);
+repLap=ringmovMean(Result_ST.Lap_FR(:,:,PC_ind(2)),7);
 Show_Lap=repmat(repLap(LOI,:),1,3);
 
 if PF_list(show_PC,2)<PF_list(show_PC,3)

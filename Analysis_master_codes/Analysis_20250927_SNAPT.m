@@ -1,0 +1,157 @@
+%% load data
+clear
+clc;
+load(fullfile('/Volumes/cohen_lab/Lab/Papers/2025 Voltron Optopatch prism dendrites in vivo/FigureS3_ScatteringMeasurement','STAmovs.mat'))
+
+fpath2read='/Volumes/cohen_lab/Lab/Labmembers/Byung Hun Lee/Data/20240207/145931BHLm113_N2_SomStim_RP';
+load(fullfile(fpath2read,'OP_Result.mat'))
+
+
+%%
+bound=6;
+mov_mc=readBinMov_BHL(fpath2read);
+mean_F=squeeze(mean(mov_mc(bound:end-bound,bound:end-bound,:),[1 2]));
+[~, blueOff]=get_blueoffTrace(mean_F,[Result.Blue],70);
+[y_fit]=expfitDM_2(find(blueOff)',mean_F(find(blueOff)),[1:size(mov_mc,3)]',1000);
+
+mov_res= mov_mc-mean(mov_mc,3);
+mov_res = SeeResiduals(mov_res,y_fit);
+mov_res = SeeResiduals(mov_res,Result.mc(:,:));
+mov_res = SeeResiduals(mov_res,Result.mc(:,:).^2);
+mov_res = SeeResiduals(mov_res,Result.mc(:,1).*Result.mc(:,end));
+F0img=get_F0img_PCA(mov_res);
+%%
+f=11;
+STAmoviedF=-STAmovie{f}(:,:,50+[-2:5]);
+STAmoviedF=STAmoviedF-median(-STAmovie{f}(:,:,1:50),3);
+mask=max(Result.Structure_bin,[],3)>0.01;
+
+[dtimg] = get_dtimg(STAmoviedF);
+AmpImg= max(imgaussfilt(STAmoviedF,1.5),[],3)./F0img.*mask;
+StrImg=max(Result.Structure,[],3);
+dtimg2=dtimg;
+dtimg2(isnan(dtimg2))=median(dtimg2(:),'omitnan');
+dtimg2=imgaussfilt(dtimg2,1);
+   %% 
+   bound=4;
+% === Build SNAPT Gaussian-flash movie ===
+subframeT = 0.01; % ms per subframe
+initialT  = -2;   % ms
+finalT    =  2;   % ms
+sigmaT    = 0.05; % ms flash width
+
+[ysize, xsize, ~] = size(STAmoviedF);
+times   = initialT:subframeT:finalT;
+nFrames = numel(times);
+
+stdimgNorm = mat2gray(StrImg);
+AmpNorm    = mat2gray(AmpImg);
+
+GaussPeaksmov = zeros(ysize,xsize,nFrames);
+for q = 1:nFrames
+    GaussPeaksmov(:,:,q) = exp(-(dtimg2-times(q)).^2/(2*sigmaT^2));
+end
+%superlocmov = GaussPeaksmov .* repmat(stdimgNorm,[1 1 nFrames]) .* AmpNorm;
+superlocmov = GaussPeaksmov.* AmpNorm;
+superlocmov(isnan(superlocmov)) = 0;
+
+    % === Convert to RGB overlay on structural image ===
+    superlocColormov = zeros(ysize,xsize,3,nFrames);
+    StrImgGray = grs2rgb(double(stdimgNorm),colormap(gray));
+    for j = 1:nFrames
+        ColorLayer = grs2rgb(double(superlocmov(:,:,j)*4), colormap("hot"),0, 0.45).*Result.Structure_bin;
+        superlocColormov(:,:,:,j) = StrImgGray + ColorLayer;
+    end
+    
+    bluePatt = bwboundaries(imgaussfilt(Result.BlueDMDimg,2)>0.5);
+    superlocColormov=superlocColormov(bound:end-bound,bound:end-50,:,:);
+
+    figure(20); clf;
+    v = VideoWriter([fpath2read '/SNAPT_movie'],'MPEG-4');
+    %v = VideoWriter([fpath2read '/SNAPT_movie'],'Uncompressed AVI');
+    v.FrameRate = 25;  %can adjust this, 5 - 10 works well for me
+    v.Quality= 100;
+    open(v);
+
+    for j = 1:length(times)
+        clf;
+        %set(gca,'units','pixels','position',[200 0 1000 800])
+        imshow2(superlocColormov(:,:,:,j),[0 1])
+        pbaspect([size(double(superlocColormov(:,:,:,j)),2) size(double(superlocColormov(:,:,:,j)),1) 1]),colormap(gray)
+        hold all
+        plot(bluePatt{1}(:,2)-bound,bluePatt{1}(:,1)-bound,'color',[0 0.6 1],'linewidth',2)
+        axis off
+        text(5,10,[num2str(times(j)+0.8) ' ms'], 'FontSize', 15, 'color', [0.99 0.99 0.99])% the value 1. is to adjust timing by eyes
+        drawScaleBar(100/0.936,'horizontal','color',[1 1 1],'Linewidth',3,'Position',[120 160]);
+        text(20,145,['100 \mum'], 'FontSize', 15, 'color', [0.99 0.99 0.99])% the value 1. is to adjust timing by eyes
+        pause(0.1)
+        set(gcf,'color','w')    % Sets background to white
+        frame = getframe(gcf);
+        writeVideo(v,frame);
+        pause(0.1);
+        
+    end;
+    close(v);
+
+    %%
+
+    figure(24); clf;
+    tiledlayout(2,4,'Padding','tight');
+    for j = [127:20:280]
+        nexttile([1 1])
+        imshow2(superlocColormov(:,:,:,j),[0 1]); axis equal tight off;
+        hold all
+        drawScaleBar(100/0.936,'horizontal');
+        plot(bluePatt{1}(:,2)-bound,bluePatt{1}(:,1)-bound,'color',[0 0.6 1],'linewidth',2)
+        text(5,20,[num2str(times(j)+0.8) ' ms'], 'FontSize', 12, 'color', [0.99 0.99 0.99])% the value 1. is to adjust timing by eyes
+    end;
+    set_fontsize(12);
+
+
+
+%%
+
+[kymo kymoR]=polyLineKymo3(dtimg,5,5,mean(mov_mc,3));
+AmpKymo=apply_clicky(kymoR,AmpImg);
+STAKymo=apply_clicky(kymoR,-STAmovie{f});
+NormKymo=apply_clicky(kymoR,F0img);
+%%
+kymocenter=cell2mat(cellfun(@(x) mean(x(1:end-1,:),1),kymoR,'UniformOutput',false)');
+intDD=[];
+for j=1:size(kymocenter,1)
+[intDD(j)]=geodesic_distance(Result.Structure_bin>0,kymocenter(1,:),kymocenter(j,:));
+end
+intDD=intDD*0.936;
+figure(25); clf;
+tiledlayout(2,6,'Padding','normal');
+ax2=nexttile([1 3])
+imshow2(Result.Structure(:,1:end-50),[]); hold all
+plot(kymocenter(:,1),kymocenter(:,2),'r','LineWidth',2)
+drawScaleBar(100/0.936,'horizontal','color',[1 1 1],'Linewidth',3);
+plot(bluePatt{1}(:,2),bluePatt{1}(:,1),'color',[0 0.6 1],'linewidth',2)
+colormap(ax2,'gray');
+ax1=nexttile([1 2]);
+Kymo2show=STAKymo./NormKymo;
+Kymo2show=Kymo2show-median(Kymo2show(1:20,:),1);
+l=plot([-50:50],Kymo2show);
+cmap_plot=gen_colormap(Plasma,size(Kymo2show,2));
+arrayfun(@(l,c) set(l,'Color',c{:}),l,num2cell(cmap_plot,2));
+xlim([-3 5]); xlabel('Time (ms)'); ylabel('Amplitude (Z score)'); box off;
+cb=colorbar; colormap(ax1,cmap_plot);
+cb.Ticks=[0 1]; cb.TickLabels=num2str([0 (max(intDD))]',3);
+ax3=nexttile([1 1]);
+imagesc([-50:50],intDD,Kymo2show');
+colormap(ax3,'turbo');
+xlim([-3 5]);
+cb2=colorbar;
+cb2.Label.String = 'Amplitude (Z score)';
+
+nexttile([1 3]);
+plot(intDD,kymo-min(kymo),'k','LineWidth',2);
+xlabel('Distance (\mum)'); ylabel('Delay (ms)'); box off;
+xlim([0 250]);
+nexttile([1 3]);
+plot(intDD,AmpKymo,'b','LineWidth',2);
+xlabel('Distance (\mum)'); ylabel('Amplitude (Z score)'); box off;
+xlim([0 250]);
+set_fontsize(12);

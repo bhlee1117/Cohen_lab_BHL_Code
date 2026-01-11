@@ -34,7 +34,7 @@ nTau={[-200:50],[-200:50],[-200:50]}; %SS, CS, Brst
 clear SpikeInd MatSpike MatSTA MatBlue MatCStrace MatSub SpikeList NormalizedTrace_ch NormalizedTrace_dirt SpikeIndBlueOff Dist_order allSpikeMat noi interDendDist noi_dist derivSub LapSubSilent
 clear Subthreshold dendaxis BrstOrder roisD roisD_order LapSpclassVec
 
-for f=23
+for f=foi
     f
     load(fullfile(fpath{f},'PC_Result.mat'),'Result') %load traces
     if ~isempty(find(ismember(Result.spike(1,:),Result.SpClass(1,:))==0)) | ~isempty(find(ismember(Result.spike(1,:),Result.SpClass(2,:))==0))
@@ -93,7 +93,7 @@ for f=23
         bwn=find(brst==b);
         SpClass(1,ss_time([bwn bwn(end)+1]))=0;
         SpClass(4,ss_time([bwn(1)]))=1;
-        BS_trace(1,[ss_time(bwn): ss_time(bwn(end)+1)])=b;
+        BS_trace(1,[ss_time(bwn(1)): ss_time(bwn(end)+1)])=b;
     end
     SpClass=SpClass([1 2 4],:);
     Classvec = get_Class2index(SpClass);

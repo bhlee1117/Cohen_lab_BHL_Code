@@ -12,9 +12,15 @@ else
     disp('Treat binaryMatrix as index vector');
 end
 
+if ~isempty(truePoints)
 omitPoints=sum((truePoints'+[-tau1:tau2])<=0 | (truePoints'+[-tau1:tau2])>T,2)>0;
 truePoints(omitPoints)=[];
 
 newMatrix=reshape(nXT(:,truePoints'+[-tau1:tau2]),n,length(truePoints),[tau1+tau2+1]);
 STA=squeeze(mean(newMatrix,2,'omitnan'));
+else
+    STA = [];
+    newMatrix = [];
+    truePoints = [];
+end
 end

@@ -1,4 +1,4 @@
-function [counts, x_edges, y_edges] = scatter_heatmap(x, y, Nbinx,Nbiny)
+function [density, x_edges, y_edges] = scatter_heatmap(x, y, Nbinx,Nbiny)
 % SCATTER_HEATMAP Creates a 2D heatmap from scattered x-y data.
 %
 %   [counts, x_edges, y_edges] = SCATTER_HEATMAP(x, y, Nbin) computes and

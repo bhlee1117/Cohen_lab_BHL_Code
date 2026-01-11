@@ -1,5 +1,5 @@
 function [scale pos_time]=show_traces_align_Position_wCS(traces_F, traces_CS, Subthreshold, pos, Window, VR_data, loi,scale,offset)
-% SHOW_TRACES_ALIGN_POSITION_WCS
+% [scale pos_time]=show_traces_align_Position_wCS(traces_F, traces_CS, Subthreshold, pos, Window, VR_data, loi,scale,offset)
 %   Align traces with a specific position and plot with CS overlay.
 %
 % Inputs:
@@ -75,7 +75,7 @@ for l = loi
 
         % Overlay CS trace
         plot_CS = trace;
-        plot_CS(~cs_mask) = NaN;
+        plot_CS(cs_mask==0) = NaN;
         plot(Window, plot_CS - g*scale - offset, 'Color', cmap_CS, 'LineWidth', 1.2);
 
         % Draw baseline zero line

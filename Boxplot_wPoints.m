@@ -88,7 +88,9 @@ hold all;
             testType = 'Paired t-test';
         else
             [~, p] = ttest2(vector1, vector2);
-            testType = 'Independent t-test';
+            p = ranksum(vector1, vector2);
+            %testType = 'Two-sample t-test';
+            testType = 'Rank-sum';
         end
         
         % Display p-value

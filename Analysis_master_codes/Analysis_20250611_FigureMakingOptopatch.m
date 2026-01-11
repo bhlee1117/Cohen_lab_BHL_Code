@@ -24,7 +24,7 @@ bound=6;
 title_str={'Basal','Apical','Peri-Soma'};
 [~, unqInd] = unique([Mouse NeuronInd] ,'row');
 set(0,'DefaultFigureWindowStyle','docked')
-%
+
 % %% Concatenate data
 % StimROI_Ind={'Soma','Distal Dend','WF'};
 % StimWfn_Ind={'Ramp Stim','Short Pulse'};
@@ -34,19 +34,19 @@ set(0,'DefaultFigureWindowStyle','docked')
 % foi_somDend=[1 22 14 18 10 26 25 32 46 47 48 43 34 37 35 2:4 6:8 12 13 17 20 29 31 39 41 42 44 49 50 53 58];
 % g2=1;
 % for i=unqInd(foi_somDend)' %Neuron Index
-%
+% 
 %     SameCellInd=find(Mouse==Mouse(i) & NeuronInd==NeuronInd(i));
 %     isSoma = ~cellfun(@isempty,strfind(StimROI(SameCellInd), StimROI_Ind{1}));
 %     isDend = ~cellfun(@isempty,strfind(StimROI(SameCellInd), StimROI_Ind{2}));
 %     isWF = ~cellfun(@isempty,strfind(StimROI(SameCellInd), StimROI_Ind{3}));
 %     isRamp = ~cellfun(@isempty,strfind(StimWfn(SameCellInd), StimWfn_Ind{1}));
 %     isSP   = ~cellfun(@isempty,strfind(StimWfn(SameCellInd), StimWfn_Ind{2}));
-%
+% 
 %     ROIwvf_ind=[isSoma isDend isWF isRamp isSP];
 %     validind=find(sum(ROIwvf_ind,2)>=2 & isGoodCell(SameCellInd));
 %     patterns = [1 0 0 1 0; 1 0 0 0 1; 0 1 0 1 0; 0 1 0 0 1; 0 0 1 1 0; 0 0 1 0 1];
 %     values = [1; 2; 3; 4; 5; 6]; % 1=soma, ramp; 2=soma, sp; 3=dend, ramp; 4=dend, sp; 5=WF, ramp; 6=WF, sp;
-%
+% 
 %     g=ones(1,6);
 %     for j=1:length(validind)
 %         f2read=SameCellInd(validind(j))
@@ -63,7 +63,7 @@ set(0,'DefaultFigureWindowStyle','docked')
 %             Dsign=ones(1,size(OpResult{wfn,g(wfn),g2}.interDendDist,2));
 %             Dsign(OpResult{wfn,g(wfn),g2}.dist_order(1:find(OpResult{wfn,g(wfn),g2}.dist_order==1)-1))=-1;
 %             OpResult{wfn,g(wfn),g2}.dendaxis=OpResult{wfn,g(wfn),g2}.interDendDist(1,:).*Dsign * OpResult{wfn,g(wfn),g2}.pixelsize;
-%
+% 
 %             if wfn==1 || wfn==3 || wfn==5
 %                 bwBlue=bwlabel(OpResult{wfn,g(wfn),g2}.Blue>0);
 %                 bluePeriod=regionprops(bwBlue,'Area');
@@ -115,8 +115,12 @@ set(0,'DefaultFigureWindowStyle','docked')
 %% Load the data
 % save(fullfile('/Volumes/cohen_lab/Lab/Labmembers/Byung Hun Lee/Data/Statistics_Optopatch_Prism/Kymo2Use.mat'),'Kymo2use','OpResultLabel','OpResult','-v7.3')
 %save(fullfile('/Volumes/cohen_lab/Lab/Labmembers/Byung Hun Lee/Data/Statistics_Optopatch_Prism/OpResult.mat'),'OpResult','-v7.3')
-load(fullfile('/Volumes/cohen_lab/Lab/Labmembers/Byung Hun Lee/Data/Statistics_Optopatch_Prism/Kymo2Use.mat'))
-load(fullfile('/Volumes/cohen_lab/Lab/Labmembers/Byung Hun Lee/Data/Statistics_Optopatch_Prism/OpResult.mat'))
+%save(fullfile('/Volumes/cohen_lab/Lab/Labmembers/Byung Hun Lee/Data/Statistics_Optopatch_Prism/Prism_optogenetic_Results_20251208.mat'),'OpResult','Kymo2use','OpResultLabel','-v7.3')
+load(fullfile('/Volumes/cohen_lab/Lab/Labmembers/Byung Hun Lee/Data/Statistics_Optopatch_Prism/Prism_optogenetic_Results_20251208.mat'))
+%load(fullfile('/Volumes/cohen_lab/Lab/Labmembers/Byung Hun Lee/Data/Statistics_Optopatch_Prism/OpResult.mat'))
+%OpResultLabel=table2array(OpResultLabel);
+fieldName={'Stim_Region_Waveform','Repeat','Neuron','BlueStim_Order'};
+OpResultLabel=array2table(OpResultLabel,'VariableNames',fieldName);
 OpResultLabel=table2array(OpResultLabel);
 %% Show representative neuron
 figure(20); clf; tiledlayout(2,1,'padding','compact');
@@ -134,7 +138,6 @@ imshow2(Result.Structure',[0 4]); hold all
 plot(Result.bluePatt{1, 1}(:,1),Result.bluePatt{1, 1}(:,2),'color',[0 0.6 1])
 set(gca,'ydir','reverse')
 view([180 90])
-
 
 %% Show STA trace
 i=[73]; nTau=[-15:15];
@@ -304,7 +307,10 @@ for n=1:size(OpResult,3) %neuron
     for wvf=[2 4] %stim region
         for rep=1:size(OpResult,2) %repeat
             if ~isempty(OpResult{wvf,rep,n})
-                normTr=OpResult{wvf,rep,n}.normTraces./OpResult{wvf,rep,n}.F0_PCA;
+                trtmp=OpResult{wvf,rep,n}.normTraces(:,1000:end-1000);
+                F0_PCA=sqrt(mean(trtmp(:,1:end-1).*trtmp(:,2:end),2,'omitnan'));
+                %normTr=OpResult{wvf,rep,n}.normTraces./OpResult{wvf,rep,n}.F0_PCA;
+                normTr=OpResult{wvf,rep,n}.normTraces./F0_PCA;
                 %noi=OpResult{wvf,rep,n}.maintrunkROI; % only main trunks
                 noi=[1:size(OpResult{wvf,rep,n}.normTraces,1)]; % all ROIs
                 dax=OpResult{wvf,rep,n}.dendaxis(noi);
@@ -387,6 +393,11 @@ fieldName={'NeuronID','SpikeFrame','SpikeFrameBlueonset','StimOrder','MouseID','
     'SpikeOrder','TransmissionRatio','AUC_apical','AUC_Soma','ISI','PreSub_apical','PreSub_soma','Kink_soma','Kink_apical','Amp_Soma','Amp_apical'};
 LabelMat_SP=array2table(LabelMat_SP,'VariableNames',fieldName);
 
+for n=unique(LabelMat_SP.NeuronID)'
+    nindex=find(LabelMat_SP.NeuronID==n);
+    LabelMat_SP.AUC_apical_norm(nindex)=zscore(LabelMat_SP.AUC_apical(nindex));
+end
+
 %% Show spike order and TX ratio (figure 4)
 
 timebin=[0 5 20 40 60 100];
@@ -417,6 +428,7 @@ end
 figure(17); clf; g=1; cmap_stimregion=[0 0 0; 0.5 0.5 0.5];
 tiledlayout(1,3,'Padding','tight');
 sp2show_sporder_meanN=NaN(max(LabelMat_SP.NeuronID),3,4);
+usedN=[];
 for wvf=[2 4]
     for sporder=1:3
         for n=unique(LabelMat_SP.NeuronID)'
@@ -425,6 +437,7 @@ for wvf=[2 4]
                 sp2show_sporder_meanN(n,sporder,wvf)=NaN;
             else
                 sp2show_sporder_meanN(n,sporder,wvf)=mean(LabelMat_SP.TransmissionRatio(show_ind),'omitnan');
+                usedN=[usedN; [LabelMat_SP.NeuronID(show_ind) LabelMat_SP.MouseID(show_ind)]];
             end
         end
         length(unique(LabelMat_SP.MouseID(find(LabelMat_SP.StimRegion==wvf & abs(LabelMat_SP.TransmissionRatio)<maxTXratio & LabelMat_SP.SpikeOrder==sporder))))
@@ -437,6 +450,61 @@ for sporder=1:3
     drawPValueLines(p,0,'TextYOffset',0.1,'XCoord',[1:2]); box off;
     set(gca,'XTick',[]);
     xlabel(counting_string(sporder)); ylabel('Transmission ratio'); box off;
+end
+
+%% Show spike order and bAP apical AUC (figure 4)
+
+timebin=[0 5 20 40 60 100];
+maxTXratio=6; stimstr={'Soma','Dendrite'}; g=1; cmap_sporder=gray(10); cmap_sporder=cmap_sporder(1:2:10,:);
+figure(14); clf; tiledlayout(2,1);
+for wvf=[2 4]
+    nexttile([1 1]);
+    % [M S t_center N SubSet]=binning_data({[LabelMat_SP.SpikeFrameBlueonset(show_ind) LabelMat_SP.TransmissionRatio(show_ind)]},timebin);
+    % %p=get_pValue(SubSet,0);
+    % scatter_heatmap(LabelMat_SP.SpikeFrameBlueonset(show_ind),LabelMat_SP.TransmissionRatio(show_ind),100,200);
+    sp2show_sporder=[];
+    for sporder=1:4
+        % show_ind=find(LabelMat_SP.StimRegion==wvf & abs(LabelMat_SP.TransmissionRatio)<maxTXratio & LabelMat_SP.SpikeOrder==sporder); %Pulse & Soma
+        show_ind=find(LabelMat_SP.NeuronID==5 & LabelMat_SP.StimRegion==wvf & abs(LabelMat_SP.TransmissionRatio)<maxTXratio & LabelMat_SP.SpikeOrder==sporder); %Pulse & Soma
+        sp2show_sporder{sporder}=LabelMat_SP.AUC_apical_norm(show_ind);
+    end
+    p=Violin_wPoints(sp2show_sporder,cmap_sporder(1:4,:));
+    % hold all;
+    % errorbar(t_center, M, S ./ sqrt(cellfun(@sum,N)'), 'Color', [1 0 0], 'LineWidth', 1.5);
+    %xlim([0 100]); ylim([0 4]);
+    %drawPValueLines(p,0,'TextYOffset',0.1,'XCoord',t_center);
+    xlabel('Time after blue onset (ms)'); ylabel('Transmission ratio'); box off;
+    title([stimstr{g} ' Stim. (Pulse)']); caxis([0 0.0112]);
+    colormap([gen_colormap([0 0 0; parula(10)])])
+    g=g+1;
+end
+
+figure(17); clf; g=1; cmap_stimregion=[0 0 0; 0.5 0.5 0.5];
+tiledlayout(1,3,'Padding','tight');
+sp2show_sporder_meanN=NaN(max(LabelMat_SP.NeuronID),3,4);
+usedN=[];
+for wvf=[2 4]
+    for sporder=1:3
+        for n=unique(LabelMat_SP.NeuronID)'
+            show_ind=find(LabelMat_SP.NeuronID==n & LabelMat_SP.StimRegion==wvf & abs(LabelMat_SP.TransmissionRatio)<maxTXratio & LabelMat_SP.SpikeOrder==sporder); %Pulse & Soma
+            if isempty(show_ind)
+                sp2show_sporder_meanN(n,sporder,wvf)=NaN;
+            else
+                sp2show_sporder_meanN(n,sporder,wvf)=mean(LabelMat_SP.AUC_apical_norm(show_ind),'omitnan');
+                usedN=[usedN; [LabelMat_SP.NeuronID(show_ind) LabelMat_SP.MouseID(show_ind)]];
+            end
+        end
+        length(unique(LabelMat_SP.MouseID(find(LabelMat_SP.StimRegion==wvf & abs(LabelMat_SP.TransmissionRatio)<maxTXratio & LabelMat_SP.SpikeOrder==sporder))))
+    end
+end
+for sporder=1:3
+    nexttile([1 1]);
+    p=Boxplot_wPoints2(permute(sp2show_sporder_meanN(:,sporder,[2 4]),[1 3 2]),cmap_stimregion);
+    p123_soma=get_pValue(sp2show_sporder_meanN(:,[1 2 3],[2]),1);
+    drawPValueLines(p,0,'TextYOffset',0.1,'XCoord',[1:2]); box off;
+    set(gca,'XTick',[]);
+    xlabel(counting_string(sporder)); ylabel('bAP apical AUC (z-score)'); box off;
+    ylim([-1.5 2])
 end
 
 %% Kink vs Amp vs AUC
@@ -522,6 +590,7 @@ for wvf=[2 4]
     STA2show=STA2showall(ismember(OpResult{1,1,show_neuron}.dist_order,ROIvec)',:);
     STA2show_interp=interp1(dax(ROIvec),STA2show,linspace(dax(ROIvec(1)),dax(ROIvec(end)),10));
     imagesc([-nTau(1):nTau(2)],ROIvec,STA2show_interp,cax);
+    %imagesc([-nTau(1):nTau(2)],[1:size(STA2showall,1)],STA2show_interp,cax);
     set_kymoYtick(dax(ROIvec));
 
     % ax2=[ax2 nexttile([1 1])];
@@ -531,7 +600,7 @@ for wvf=[2 4]
     % axis off;
     % drawScaleBar(1,'vertical');
     % drawScaleBar(50,'horizontal');
-    xlabel('Peri-spike time (ms)')
+     xlabel('Peri-spike time (ms)')
 
     figure(16);
     for t=1:length(t2show)
@@ -712,6 +781,22 @@ end
 fieldName={'SessionID','NeuronID','SpikeFrame','StimOrder','Rheobase','SpikeOrder','MouseID','FileID','StimRegion',...
     'InCS','BurstOrder','RepeatID','SpikeType','TransmissionRatio','AUC_apical','Amp_Soma','ISI'};
 LabelMat=array2table(LabelMat,'VariableNames',fieldName);
+
+NeuronIDs_unq=unique(LabelMat.NeuronID)';
+NormConstant=NaN(1,max(NeuronIDs_unq));
+NormConstant_vec=NaN(size(LabelMat,1),1);
+NormConstantAA=NaN(1,max(NeuronIDs_unq));
+NormConstant_vecAA=NaN(size(LabelMat,1),1);
+for n=NeuronIDs_unq
+    show_ind=find(LabelMat.StimOrder~=6 & LabelMat.SpikeFrame>=250 & LabelMat.StimRegion==1 & abs(LabelMat.TransmissionRatio)<7 & LabelMat.NeuronID==n); %Pulse & Soma
+    NormConstant(n)=mean(LabelMat.TransmissionRatio(show_ind));
+    NormConstant_vec(LabelMat.NeuronID==n,1)=NormConstant(n);
+
+    NormConstantAA(n)=mean(LabelMat.AUC_apical(show_ind));
+    NormConstant_vecAA(LabelMat.NeuronID==n,1)=NormConstantAA(n);
+end
+LabelMat.TransmissionRatio_norm=LabelMat.TransmissionRatio./NormConstant_vec;
+LabelMat.AUC_apical_norm=LabelMat.AUC_apical./NormConstant_vecAA;
 %% Show TX ratio over time (figure 5)
 timebin=[0 30 35 85 110 200:100:500];
 Rheobin=[1 1.3 1.6 2 3 4 5];
@@ -720,24 +805,24 @@ figure(23); clf; tiledlayout(1,2);
 for wvf=[1]
     nexttile([1 1]);
     show_ind=find(LabelMat.StimOrder~=6 & LabelMat.StimRegion==wvf & abs(LabelMat.TransmissionRatio)<maxTXratio); %Pulse & Soma
-    [M S t_center N SubSet]=binning_data({[LabelMat.SpikeFrame(show_ind) LabelMat.TransmissionRatio(show_ind)]},timebin);
+    [M S t_center N SubSet]=binning_data({[LabelMat.SpikeFrame(show_ind) LabelMat.TransmissionRatio_norm(show_ind)]},timebin);
     p=get_pValue(SubSet,0);
-    scatter_density(LabelMat.SpikeFrame(show_ind),LabelMat.TransmissionRatio(show_ind),40);
+    scatter_density(LabelMat.SpikeFrame(show_ind),LabelMat.TransmissionRatio_norm(show_ind),40);
     %scatter_heatmap(LabelMat.SpikeFrame(show_ind),LabelMat.TransmissionRatio(show_ind),100,200);
     hold all;
     errorbar(t_center, M, S ./ sqrt(cellfun(@sum,N)'), 'Color', [1 0 0], 'LineWidth', 1.5);
-    xlim([0 500]); ylim([0 4]);
+    xlim([0 500]); ylim([0 2.5]);
     %set(gca,'xscale','log')
     %drawPValueLines(p,0,'TextYOffset',0.1,'XCoord',t_center);
-    xlabel('Time after blue onset (ms)'); ylabel('Transmission ratio'); box off;
+    xlabel('Time after blue onset (ms)'); ylabel('Normalized transmission ratio'); box off;
     title([stimstr{g} ' Stim. (Pulse)']); caxis([0 0.0012]);
     colormap([gen_colormap([0 0 0; parula(10)])])
 
     nexttile([1 1]);
     show_ind=find(LabelMat.StimOrder==6 & LabelMat.StimRegion==wvf & abs(LabelMat.TransmissionRatio)<maxTXratio); %Pulse & Soma
-    [M S Rheo_center N SubSet]=binning_data({[LabelMat.Rheobase(show_ind) LabelMat.TransmissionRatio(show_ind)]},Rheobin);
+    [M S Rheo_center N SubSet]=binning_data({[LabelMat.Rheobase(show_ind) LabelMat.TransmissionRatio_norm(show_ind)]},Rheobin);
     pR=get_pValue(SubSet,0);
-    scatter_density(LabelMat.Rheobase(show_ind),LabelMat.TransmissionRatio(show_ind),40);
+    scatter_density(LabelMat.Rheobase(show_ind),LabelMat.TransmissionRatio_norm(show_ind),40);
     %scatter_heatmap(LabelMat.Rheobase(show_ind),LabelMat.TransmissionRatio(show_ind),500,200);
     hold all;
     errorbar(Rheo_center, M, S ./ sqrt(cellfun(@sum,N)'), 'Color', [1 0 0], 'LineWidth', 1.5);
@@ -782,6 +867,77 @@ drawPValueLines(p_values,0.1);
 xlim([show_sporder(1)-0.5 show_sporder(end)+0.5]); ylim([0 6]);
 set(gca,'xtick',[1:5],'XTickLabel',counting_string(1:5))
 ylabel('TX ratio');  xlabel('Evoked spike order');
+
+%% Show bAP apical AUC over time (figure 5)
+timebin=[0 30 35 85 110 200:100:500];
+Rheobin=[1 1.3 1.6 2 3 4 5];
+maxTXratio=7; stimstr={'Soma','Dendrite'}; g=1;
+figure(23); clf; tiledlayout(1,2);
+for wvf=[1]
+    nexttile([1 1]);
+    show_ind=find(LabelMat.StimOrder~=6 & LabelMat.StimRegion==wvf & abs(LabelMat.TransmissionRatio)<maxTXratio); %Pulse & Soma
+    [M S t_center N SubSet]=binning_data({[LabelMat.SpikeFrame(show_ind) LabelMat.AUC_apical_norm(show_ind)]},timebin);
+    p=get_pValue(SubSet,0);
+    scatter_density(LabelMat.SpikeFrame(show_ind),LabelMat.AUC_apical_norm(show_ind),40);
+    %scatter_heatmap(LabelMat.SpikeFrame(show_ind),LabelMat.TransmissionRatio(show_ind),100,200);
+    hold all;
+    errorbar(t_center, M, S ./ sqrt(cellfun(@sum,N)'), 'Color', [1 0 0], 'LineWidth', 1.5);
+    xlim([0 500]); ylim([0 2.5]);
+    %set(gca,'xscale','log')
+    %drawPValueLines(p,0,'TextYOffset',0.1,'XCoord',t_center);
+    xlabel('Time after blue onset (ms)'); ylabel('Normalized bAP apical AUC'); box off;
+    title([stimstr{g} ' Stim. (Pulse)']); caxis([0 0.0012]);
+    colormap([gen_colormap([0 0 0; parula(10)])])
+
+    nexttile([1 1]);
+    show_ind=find(LabelMat.StimOrder==6 & LabelMat.StimRegion==wvf & abs(LabelMat.TransmissionRatio)<maxTXratio); %Pulse & Soma
+    [M S Rheo_center N SubSet]=binning_data({[LabelMat.Rheobase(show_ind) LabelMat.AUC_apical_norm(show_ind)]},Rheobin);
+    pR=get_pValue(SubSet,0);
+    scatter_density(LabelMat.Rheobase(show_ind),LabelMat.AUC_apical_norm(show_ind),40);
+    %scatter_heatmap(LabelMat.Rheobase(show_ind),LabelMat.TransmissionRatio(show_ind),500,200);
+    hold all;
+    errorbar(Rheo_center, M, S ./ sqrt(cellfun(@sum,N)'), 'Color', [1 0 0], 'LineWidth', 1.5);
+    xlim([0.5 5]); ylim([0 4]); box off;
+    %drawPValueLines(pR,0,'TextYOffset',0.1,'XCoord',Rheo_center);
+    xlabel('Rheobase'); ylabel('Transmission ratio')
+    title([stimstr{g} ' Stim. (Ramp)']); caxis([0 0.195]);
+    colormap([gen_colormap([parula(10)])])
+    g=g+1;
+end
+
+% Show TX ratio, spike order
+TXratio_sporder=[]; g2=1;
+for stimregion2show=[1 3];
+    for sporder=1:13
+        g=1;
+        [unqLab, refind]=unique([LabelMat.SessionID LabelMat.StimRegion],'row');
+        for n=refind(unqLab(:,2)==stimregion2show,1)' %soma targeted
+            sessioninterested=unique(LabelMat.SessionID(n));
+            stimregioninterested=unique(LabelMat.StimRegion(n));
+            ind2norm=find(LabelMat.SessionID==sessioninterested & LabelMat.StimRegion==stimregioninterested);
+            show_ind=find(LabelMat.StimOrder~=6 & LabelMat.StimRegion==stimregioninterested & abs(LabelMat.TransmissionRatio)<maxTXratio & LabelMat.SpikeOrder==sporder & LabelMat.SessionID==sessioninterested); %Pulse & Soma
+            % TXratio_sporder(sporder,g,1)=mean(LabelMat.TransmissionRatio(show_ind)./median(LabelMat.TransmissionRatio(ind2norm),'omitnan'),'omitnan');
+            % TXratio_sporder(sporder,g,2)=std(LabelMat.TransmissionRatio(show_ind)./median(LabelMat.TransmissionRatio(ind2norm),'omitnan'),'omitnan');
+            TXratio_sporder(sporder,g,1)=mean(LabelMat.AUC_apical_norm(show_ind),'omitnan');
+            TXratio_sporder(sporder,g,2)=std(LabelMat.AUC_apical_norm(show_ind),'omitnan');
+            g=g+1;
+        end
+    end
+    g2=g2+1;
+end
+figure(24); clf; cmap_order=gray(10); show_sporder=[1:7];
+nexttile([1 1]);
+TXratio_sporder(TXratio_sporder>5 | TXratio_sporder<0)=NaN;
+TXratio_sporder_mean=mean(TXratio_sporder(show_sporder,:,1)',1,'omitnan');
+TXratio_sporder_sem=std(TXratio_sporder(show_sporder,:,1)',0,1,'omitnan')./sqrt(sum(~isnan(TXratio_sporder(show_sporder,:,1)),2)');
+%plot([1:4],TXratio_sporder(show_sporder,:,1)','color',[0.7 0.7 0.7]); hold all;
+%errorbar([1:4],TXratio_sporder_mean,TXratio_sporder_sem,'r');
+Violin_wPoints(TXratio_sporder(show_sporder,:,1)',cmap_order(show_sporder,:));
+p_values = get_pValue(TXratio_sporder(show_sporder,:,1)', 1);
+drawPValueLines(p_values,0.1);
+xlim([show_sporder(1)-0.5 show_sporder(end)+0.5]); ylim([0 2.5]);
+set(gca,'xtick',[1:5],'XTickLabel',counting_string(1:5))
+ylabel('Normalized bAP apical AUC');  xlabel('Evoked spike order');
 
 %% Representative Pulse stim (Figure 5a)
 % show example bAP amplitude/AUC image
@@ -885,7 +1041,7 @@ end
 % cb.Label.String = 'AUC (A.U.)';
 
 
-%%
+%% Soma stim VS Dendrite stim (Figure S)
 SomRP_path=[15 54 72 86 92 4 76]; %22
 DenRP_path=[13 55 74 88 91 3 79]; %23
 validresultind=find(cell2mat(cellfun(@(x) ~isempty(x),OpResult,'UniformOutput',false)));
@@ -908,36 +1064,75 @@ for n=1:size(finterest_SomRP,1) %neuron
 end
 
 showneuron=4;
-figure(33); clf; scaleoffset=1.5; tiledlayout(1,5);
-nexttile([1,4]);
 result2show=OpResult{finterest_SomRPw(showneuron),finterest_SomRPr(showneuron),finterest_SomRPn(showneuron)};
 ROIvec=result2show.maintrunkROI;
-normTR=result2show.normTraces./get_F0PCA(result2show.normTraces);
-[S]=get_STA(normTR,result2show.spike(1,:),0,0);
-normTR=normTR./S(1);
+normTR=result2show.normTraces./get_F0PCA(get_subthreshold(result2show.normTraces,result2show.spike(1,:),7,17));
+[nROI nTime]=size(result2show.normTraces);
+%[S]=get_STA(normTR,result2show.spike(1,:),0,0);
+%normTR=normTR./S(1);
 somROI=1; dendROI=10;
 normTR2show_S=mean(normTR(somROI,:),1,'omitnan'); normTR2show_D=mean(normTR(dendROI,:),1,'omitnan');
-normTR2show_S=get_bandstop(normTR2show_S,1000,[70 140]);
+%normTR2show_S=get_bandstop(normTR2show_S,1000,[70 140]);
 normTR2show_S_CS=normTR2show_S; normTR2show_S_CS(result2show.CStrace==0)=NaN;
 normTR2show_D_CS=normTR2show_D; normTR2show_D_CS(result2show.CStrace==0)=NaN;
+load(fullfile(fpath{result2show.fileInd},"output_data.mat"))
+[~,~,~,DMDimg]=get_blueDMDPatt(Device_Data);
+ROIbigger = double(Device_Data{1, 3}.ROI([1 3 2 4])); imgsize=ROIbigger(:,3:4);
+ROIbigger(:,1:2) = ROIbigger(:,1:2)-imgsize/2; ROIbigger(:,3:4) = imgsize*2;
+DMDimg=imcrop(DMDimg,ROIbigger);
+blueboundary=cell2mat(bwboundaries(imgaussfilt(DMDimg,4)>0.5));
+blueboundary=blueboundary-imgsize([2 1])/2;
+
+figure(33); clf; scaleoffset=6; tiledlayout(2,7);
+ax1=nexttile(1,[1 2]);
+SWC2show=result2show.SWC; SWC2show(:,4)=3; SWC2show(1,4)=20;
+Ftprnts=result2show.ftprnt;
+showScaleScatter(ones(nROI),SWC2show,Ftprnts,repmat([0 0 0],256,1),[0 1]); hold all;
+plot(blueboundary(:,1),blueboundary(:,2),'color',[0 0.6 1],'linewidth',1.5);
+drawScaleBar(100/resultdat.pixelsize,'vertical')
+
+nexttile(3,[2 3]);
 plot(normTR2show_S,'color',[0.4 0.4 0.4]); hold all
 plot(normTR2show_S_CS,'color',[1 0 0]); hold all
+axis off;
+drawScaleBar(1000,'horizontal')
 
 result2show=OpResult{finterest_DenRPw(showneuron),finterest_DenRPr(showneuron),finterest_DenRPn(showneuron)};
 ROIvec=result2show.maintrunkROI;
 normTR=result2show.normTraces./result2show.F0_PCA;
-[S]=get_STA(normTR,result2show.spike(1,:),0,0);
-normTR=normTR./S(1);
+load(fullfile(fpath{result2show.fileInd},"output_data.mat"))
+[~,~,~,DMDimg]=get_blueDMDPatt(Device_Data);
+ROIbigger = double(Device_Data{1, 3}.ROI([1 3 2 4])); imgsize=ROIbigger(:,3:4);
+ROIbigger(:,1:2) = ROIbigger(:,1:2)-imgsize/2; ROIbigger(:,3:4) = imgsize*2;
+DMDimg=imcrop(DMDimg,ROIbigger);
+blueboundary=cell2mat(bwboundaries(imgaussfilt(DMDimg,4)>0.5));
+blueboundary=blueboundary-imgsize([2 1])/2;
+
+%[S]=get_STA(normTR,result2show.spike(1,:),0,0);
+%normTR=normTR./S(1);
 somROI=1; dendROI=10;
 normTR2show_S=mean(normTR(somROI,:),1,'omitnan'); normTR2show_D=mean(normTR(dendROI,:),1,'omitnan');
 normTR2show_S=get_bandstop(normTR2show_S,1000,[20 50]);
 normTR2show_S_CS=normTR2show_S; normTR2show_S_CS(result2show.CStrace==0)=NaN;
 normTR2show_D_CS=normTR2show_D; normTR2show_D_CS(result2show.CStrace==0)=NaN;
+
+ax2=nexttile(8,[1 2]);
+showScaleScatter(ones(nROI),SWC2show,Ftprnts,repmat([0 0 0],256,1),[0 1]); hold all;
+plot(blueboundary(:,1),blueboundary(:,2),'color',[0 0.6 1],'linewidth',1.5);
+
+nexttile(3,[2 3]);
 plot(normTR2show_S+scaleoffset,'color',[0.4 0.4 0.4]); hold all
 plot(normTR2show_S_CS+scaleoffset,'color',[1 0 0]); hold all
+axis off;
+nexttile(6,[2 2])
+p=Boxplot_wPoints2(CSfraction,[0 0 0]); box off;
+drawPValueLines(p,0,'Format','text');
+set(gca,'xtick',[1 2],'xticklabel',{'Soma stim.','Dendrite stim.'});
+ylabel('Fraction of complex spikes');
 
-nexttile([1 1])
-Boxplot_wPoints2(CSfraction,[0 0 0])
+p = linkprop([ax1 ax2], {'CameraPosition', 'CameraTarget', ...
+                       'CameraUpVector', 'CameraViewAngle'});
+set_fontsize(14);
 %%
 
 

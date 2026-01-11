@@ -112,164 +112,256 @@ for f=f_local
         end
     end
 end
-%% 
-% % %% Stimulation triggered movie (option)
-% % nTau=[-30:80]; Time2avg=[10:20];
-% % bound=6;
-% % for Mov2See=[97:105]%[69:length(LocalStimResult)]
-% %     try
-% %         f=LocalStimResult{Mov2See}.fileInd; frlength=length(LocalStimResult{Mov2See}.frame2read);
-% %         load([fpath{f} '/OP_Result.mat'])
-% %         load(fullfile(fpath{f},"output_data.mat"))
-% % 
-% %         frm_end=max(Device_Data{1, 2}.Counter_Inputs(1, 1).data);
-% %         f_seg=[[1:TimeSegFrame(f):frm_end] frm_end+1];
-% %         readFrame_all=[1000:min([11000 frm_end])];
-% % 
-% %         mov_mc=readBinMov_BHL_multiple(fpath{f},3,LocalStimResult{Mov2See}.frame2read,TimeSegFrame(f));
-% %         mov_all=readBinMov_BHL_multiple(fpath{f},3,readFrame_all,TimeSegFrame(f));
-% %         sz=size(mov_mc);
-% %         mov_mc=toimg(get_bandstop(tovec(mov_mc),1000,[54 57]),sz(1),sz(2));
-% %         mov_all=toimg(get_bandstop(tovec(mov_all),1000,[54 57]),sz(1),sz(2));
-% %         motionTrace=movmean(Result.mc,5,1);
-% %         motionTrace=motionTrace(LocalStimResult{Mov2See}.frame2read,:);
-% %         motionTraceall=movmean(Result.mc(readFrame_all,:),5,1);
-% % 
-% %         mov_res= mov_mc-mean(mov_mc,3);
-% %         bkg = zeros(1, size(mov_mc,3));
-% %         mean_F=squeeze(mean(mov_mc(bound:end-bound,bound:end-bound,:),[1 2]));
-% %         [~, blueOff]=get_blueoffTrace(mean_F,[Result.Blue(LocalStimResult{Mov2See}.frame2read)],70);
-% %         [y_fit]=expfitDM_2(find(blueOff)',mean_F(find(blueOff)),[1:frlength]',1000);
-% % 
-% %         bkg(1,:)=y_fit;
-% %         mov_res = SeeResiduals(mov_res,motionTrace);
-% %         mov_res = SeeResiduals(mov_res,motionTrace.^2);
-% %         mov_res = SeeResiduals(mov_res,motionTrace(:,1).*motionTrace(:,end));
-% %         mov_res= SeeResiduals(mov_res,bkg,1);
-% % 
-% %         % mov_all regression
-% %         mov_resall= mov_all-mean(mov_all,3);
-% %         bkg_all = zeros(1, size(mov_all,3));
-% %         mean_Fall=squeeze(mean(mov_all(bound:end-bound,bound:end-bound,:),[1 2]));
-% %         [~, blueOffall]=get_blueoffTrace(mean_Fall,[Result.Blue(readFrame_all)],70);
-% %         [y_fitall]=expfitDM_2(find(blueOffall)',mean_Fall(find(blueOffall)),[1:size(mov_all,3)]',[1000]);
-% %         isDirt=sum(Result.dirtTrace(:,readFrame_all)>0,1)>0;
-% % 
-% %         bkg_all(1,:)=y_fitall;
-% %         mov_resall = SeeResiduals(mov_resall,motionTraceall);
-% %         mov_resall = SeeResiduals(mov_resall,motionTraceall.^2);
-% %         mov_resall = SeeResiduals(mov_resall,motionTraceall(:,1).*motionTraceall(:,end));
-% %         mov_resall= SeeResiduals(mov_resall,bkg_all,1);
-% %         F0img=get_F0img(mov_resall,find(blueOffall));
-% %         %F0img=mean(mov_mc,3)-100;
-% %         %F0img= F0img.*(max(Result.bvMask,[],3)==0);
-% % 
-% %         % calculate correlation image
-% %         [~, StimFrame]=get_blueoffTrace(mean_Fall,[Result.Blue(readFrame_all)==0],10);
-% %         oddmask=checkerboard(1, sz(1)/2, sz(2)/2) > 0.5;
-% %         mov_res_odd=(mov_resall-mean(mov_resall,3)).*oddmask./F0img;
-% %         mov_res_even=(mov_resall-mean(mov_resall,3)).*(1-oddmask)./F0img;
-% %         StimROI_Vtrace_odd=tovec(mov_res_odd)'*tovec(LocalStimResult{Mov2See}.blueDMDimg>0);
-% %         StimROI_Vtrace_even=tovec(mov_res_even)'*tovec(LocalStimResult{Mov2See}.blueDMDimg>0);
-% %         corrImg = sum(cat(3,toimg(get_corrMat(tovec(mov_res_odd),StimROI_Vtrace_even',find(blueOffall>0 & isDirt==0)),sz(1),sz(2)),...
-% %             toimg(get_corrMat(tovec(mov_res_even),StimROI_Vtrace_odd',find(blueOffall>0 & isDirt==0)),sz(1),sz(2))),3,'omitnan');
-% %         corrImgStim = sum(cat(3,toimg(get_corrMat(tovec(mov_res_odd),StimROI_Vtrace_even',StimFrame),sz(1),sz(2)),...
-% %             toimg(get_corrMat(tovec(mov_res_even),StimROI_Vtrace_odd',StimFrame),sz(1),sz(2))),3,'omitnan');
-% % 
-% %         % corrImg = sum(cat(3,toimg(tovec(mov_res_odd(:,:,find(blueOff>0)))*StimROI_Vtrace_even(find(blueOff>0),1),sz(1),sz(2)),...
-% %         %                    toimg(tovec(mov_res_even(:,:,find(blueOff>0)))*StimROI_Vtrace_odd( find(blueOff>0),1),sz(1),sz(2))),3,'omitnan');
-% %         % corrImgStim = sum(cat(3,toimg(tovec(mov_res_odd(:,:,StimFrame))*StimROI_Vtrace_even(StimFrame,1),sz(1),sz(2)),...
-% %         %                         toimg(tovec(mov_res_even(:,:,StimFrame))*StimROI_Vtrace_odd(StimFrame,1),sz(1),sz(2))),3,'omitnan');
-% % 
-% %         cax_corr=[prctile(corrImg(:),5) prctile(corrImg(:),98)];
-% %         cax_corrStim=[prctile(corrImgStim(:),5) prctile(corrImgStim(:),98)];
-% %         colorCorr=grs2rgb(tovec(imgaussfilt(corrImg,1)),colormap(turbo),cax_corr(1),cax_corr(2));
-% %         colorCorr=reshape(colorCorr,sz(1),sz(2),1,[]);
-% %         colorCorr=permute(colorCorr,[1 2 4 3]);
-% %         colorCorrStim=grs2rgb(tovec(imgaussfilt(corrImgStim,1)),colormap(turbo),cax_corrStim(1),cax_corrStim(2));
-% %         colorCorrStim=reshape(colorCorrStim,sz(1),sz(2),1,[]);
-% %         colorCorrStim=permute(colorCorrStim,[1 2 4 3]);
-% %         if isfield(Result,'Structure')
-% %             Corrimg_sub_Struc=colorCorr.*mat2gray(Result.Structure)*3;
-% %             CorrimgStim_sub_Struc=colorCorrStim.*mat2gray(Result.Structure)*3;
-% %         else
-% %             Corrimg_sub_Struc=colorCorr.*mat2gray(Result.ref_im-100)*4;
-% %             CorrimgStim_sub_Struc=colorCorrStim.*mat2gray(Result.ref_im-100)*4;
-% %         end
-% %         LocalStimResult{Mov2See}.Corrimg=corrImg;
-% %         LocalStimResult{Mov2See}.CorrimgStim=corrImgStim;
-% %         LocalStimResult{Mov2See}.CorrTr=tovec(cat(3,LocalStimResult{Mov2See}.Corrimg,LocalStimResult{Mov2See}.CorrimgStim))'*double(tovec(LocalStimResult{Mov2See}.ftprnt)>0);
-% % 
-% %         % calculate STA image
-% %         STAmov=get_STA(tovec(mov_res),ind2vec(frlength,LocalStimResult{Mov2See}.triggerPoint,1),-nTau(1),nTau(end));
-% %         STAmov=-toimg(STAmov,size(mov_res,1),size(mov_res,2));
-% %         STAmov=STAmov-mean(STAmov(:,:,1:15),3);
-% %         STAmov_norm=STAmov./F0img;
-% %         STAmov_norm=imgaussfilt(STAmov_norm,1);
-% %         STAmov_norm=movmedian(STAmov_norm,15,3);
-% %         STAmov_norm=pcafilt(STAmov_norm,10);
-% % 
-% %         save(fullfile(fpath{f},['STAmov_norm_' num2str(Mov2See)]),'STAmov_norm','-v7.3')
-% % 
-% %         cax_sub=[prctile(STAmov_norm(:),5) prctile(STAmov_norm(:),97)];
-% %         colorSTA=grs2rgb(tovec(STAmov_norm),colormap(turbo),prctile(STAmov_norm(:),5),prctile(STAmov_norm(:),97));
-% %         colorSTA=reshape(colorSTA,sz(1),sz(2),length(nTau),[]);
-% %         colorSTA=permute(colorSTA,[1 2 4 3]);
-% %         if isfield(Result,'Structure')
-% %             STAimg_sub_Struc=colorSTA.*mat2gray(Result.Structure)*3;
-% %         else
-% %             STAimg_sub_Struc=colorSTA.*mat2gray(Result.ref_im-100)*4;
-% %         end
-% %         LocalStimResult{Mov2See}.STAimg=mean(STAimg_sub_Struc(:,:,:,find(ismember(nTau,Time2avg))),4);
-% % 
-% %         if ~isempty(LocalStimResult{Mov2See}.bluePatt)
-% %             bluePattboundary=LocalStimResult{Mov2See}.bluePatt(:,[1 2]);
-% %         else
-% %             bluePattboundary=[];
-% %         end
-% %         figure(161); clf;
-% %         writeMov4d(fullfile(fpath{f},['STAmovie_' num2str(Mov2See)]),STAimg_sub_Struc,nTau,10,1,cax_sub,bluePattboundary)
-% % 
-% %         figure(160); clf;
-% %         nexttile([1 1]);
-% %         imshow2(LocalStimResult{Mov2See}.STAimg,[]); hold all
-% %         if ~isempty(bluePattboundary)
-% %             plot(bluePattboundary(:,1),bluePattboundary(:,2),'color',[0 0.6 1],'linewidth',1.5)
-% %         end
-% %         title([num2str(Mov2See) ,', STA'])
-% %         nexttile([1 1]);
-% %         imshow2(CorrimgStim_sub_Struc,[]); hold all
-% %         if ~isempty(bluePattboundary)
-% %             plot(bluePattboundary(:,1),bluePattboundary(:,2),'color',[0 0.6 1],'linewidth',1.5)
-% %         end
-% %         title([num2str(Mov2See) ,', CorrImgStim'])
-% %         nexttile([1 1]);
-% %         imshow2(Corrimg_sub_Struc,[]); hold all
-% %         if ~isempty(bluePattboundary)
-% %             plot(bluePattboundary(:,1),bluePattboundary(:,2),'color',[0 0.6 1],'linewidth',1.5)
-% %         end
-% %         title([num2str(Mov2See) ,', CorrImg'])
-% %         saveas(gcf, fullfile(fpath{f},['STA_CorrFootprint' num2str(Mov2See) '.fig']));
-% %         saveas(gcf, fullfile(fpath{f},['STA_CorrFootprint' num2str(Mov2See) '.png']));
-% %         %colorbar;
-% %         saveto='/Volumes/cohen_lab/Lab/Labmembers/Byung Hun Lee/Data/Statistics_Optopatch_Prism';
-% %         save([saveto '/LocalStimulationResult.mat'],'LocalStimResult','-v7.3');
-% %     catch
-% %         disp(['missing file, #' num2str(f) ', g: ' num2str(Mov2See)])
-% %     end
-% % end
-% 
-% %% Stim. TA kymo
-% MouseID=cellfun(@(x) x.Mouse,LocalStimResult);
-% NeuronID=cellfun(@(x) x.NeuronInd,LocalStimResult);
-% [~, unqInd] = unique([MouseID' NeuronID'] ,'row');
-% 
+
+%% Stimulation triggered movie (option)
+nTau=[-30:80]; Time2avg=[10:20];
+bound=6;
+for Mov2See=[99]%[69:length(LocalStimResult)]
+    try
+        f=LocalStimResult{Mov2See}.fileInd; frlength=length(LocalStimResult{Mov2See}.frame2read);
+        load([fpath{f} '/OP_Result.mat'])
+        load(fullfile(fpath{f},"output_data.mat"))
+
+        frm_end=max(Device_Data{1, 2}.Counter_Inputs(1, 1).data);
+        f_seg=[[1:TimeSegFrame(f):frm_end] frm_end+1];
+        readFrame_all=[1000:min([11000 frm_end])];
+
+        mov_mc=readBinMov_BHL_multiple(fpath{f},3,LocalStimResult{Mov2See}.frame2read,TimeSegFrame(f));
+        mov_all=readBinMov_BHL_multiple(fpath{f},3,readFrame_all,TimeSegFrame(f));
+        sz=size(mov_mc);
+        mov_mc=toimg(get_bandstop(tovec(mov_mc),1000,[54 57]),sz(1),sz(2));
+        mov_all=toimg(get_bandstop(tovec(mov_all),1000,[54 57]),sz(1),sz(2));
+        motionTrace=movmean(Result.mc,5,1);
+        motionTrace=motionTrace(LocalStimResult{Mov2See}.frame2read,:);
+        motionTraceall=movmean(Result.mc(readFrame_all,:),5,1);
+
+        mov_res= mov_mc-mean(mov_mc,3);
+        bkg = zeros(1, size(mov_mc,3));
+        mean_F=squeeze(mean(mov_mc(bound:end-bound,bound:end-bound,:),[1 2]));
+        [~, blueOff]=get_blueoffTrace(mean_F,[Result.Blue(LocalStimResult{Mov2See}.frame2read)],70);
+        [y_fit]=expfitDM_2(find(blueOff)',mean_F(find(blueOff)),[1:frlength]',1000);
+
+        bkg(1,:)=y_fit;
+        mov_res = SeeResiduals(mov_res,motionTrace);
+        mov_res = SeeResiduals(mov_res,motionTrace.^2);
+        mov_res = SeeResiduals(mov_res,motionTrace(:,1).*motionTrace(:,end));
+        mov_res= SeeResiduals(mov_res,bkg,1);
+
+        % mov_all regression
+        mov_resall= mov_all-mean(mov_all,3);
+        bkg_all = zeros(1, size(mov_all,3));
+        mean_Fall=squeeze(mean(mov_all(bound:end-bound,bound:end-bound,:),[1 2]));
+        [~, blueOffall]=get_blueoffTrace(mean_Fall,[Result.Blue(readFrame_all)],70);
+        [y_fitall]=expfitDM_2(find(blueOffall)',mean_Fall(find(blueOffall)),[1:size(mov_all,3)]',[1000]);
+        isDirt=sum(Result.dirtTrace(:,readFrame_all)>0,1)>0;
+
+        bkg_all(1,:)=y_fitall;
+        mov_resall = SeeResiduals(mov_resall,motionTraceall);
+        mov_resall = SeeResiduals(mov_resall,motionTraceall.^2);
+        mov_resall = SeeResiduals(mov_resall,motionTraceall(:,1).*motionTraceall(:,end));
+        mov_resall= SeeResiduals(mov_resall,bkg_all,1);
+        F0img=get_F0img_PCA(mov_resall,find(blueOffall));
+        %F0img=mean(mov_mc,3)-100;
+        %F0img= F0img.*(max(Result.bvMask,[],3)==0);
+
+        % calculate correlation image
+        [~, StimFrame]=get_blueoffTrace(mean_Fall,[Result.Blue(readFrame_all)==0],10);
+        oddmask=checkerboard(1, sz(1)/2, sz(2)/2) > 0.5;
+        mov_res_odd=(mov_resall-mean(mov_resall,3)).*oddmask./F0img;
+        mov_res_even=(mov_resall-mean(mov_resall,3)).*(1-oddmask)./F0img;
+        StimROI_Vtrace_odd=tovec(mov_res_odd)'*tovec(LocalStimResult{Mov2See}.blueDMDimg>0);
+        StimROI_Vtrace_even=tovec(mov_res_even)'*tovec(LocalStimResult{Mov2See}.blueDMDimg>0);
+        corrImg = sum(cat(3,toimg(get_corrMat(tovec(mov_res_odd),StimROI_Vtrace_even',find(blueOffall>0 & isDirt==0)),sz(1),sz(2)),...
+            toimg(get_corrMat(tovec(mov_res_even),StimROI_Vtrace_odd',find(blueOffall>0 & isDirt==0)),sz(1),sz(2))),3,'omitnan');
+        corrImgStim = sum(cat(3,toimg(get_corrMat(tovec(mov_res_odd),StimROI_Vtrace_even',StimFrame),sz(1),sz(2)),...
+            toimg(get_corrMat(tovec(mov_res_even),StimROI_Vtrace_odd',StimFrame),sz(1),sz(2))),3,'omitnan');
+
+        % corrImg = sum(cat(3,toimg(tovec(mov_res_odd(:,:,find(blueOff>0)))*StimROI_Vtrace_even(find(blueOff>0),1),sz(1),sz(2)),...
+        %                    toimg(tovec(mov_res_even(:,:,find(blueOff>0)))*StimROI_Vtrace_odd( find(blueOff>0),1),sz(1),sz(2))),3,'omitnan');
+        % corrImgStim = sum(cat(3,toimg(tovec(mov_res_odd(:,:,StimFrame))*StimROI_Vtrace_even(StimFrame,1),sz(1),sz(2)),...
+        %                         toimg(tovec(mov_res_even(:,:,StimFrame))*StimROI_Vtrace_odd(StimFrame,1),sz(1),sz(2))),3,'omitnan');
+
+        cax_corr=[prctile(corrImg(:),5) prctile(corrImg(:),98)];
+        cax_corrStim=[prctile(corrImgStim(:),5) prctile(corrImgStim(:),98)];
+        colorCorr=grs2rgb(tovec(imgaussfilt(corrImg,1)),colormap(turbo),cax_corr(1),cax_corr(2));
+        colorCorr=reshape(colorCorr,sz(1),sz(2),1,[]);
+        colorCorr=permute(colorCorr,[1 2 4 3]);
+        colorCorrStim=grs2rgb(tovec(imgaussfilt(corrImgStim,1)),colormap(turbo),cax_corrStim(1),cax_corrStim(2));
+        colorCorrStim=reshape(colorCorrStim,sz(1),sz(2),1,[]);
+        colorCorrStim=permute(colorCorrStim,[1 2 4 3]);
+        if isfield(Result,'Structure')
+            Corrimg_sub_Struc=colorCorr.*mat2gray(Result.Structure)*3;
+            CorrimgStim_sub_Struc=colorCorrStim.*mat2gray(Result.Structure)*3;
+        else
+            Corrimg_sub_Struc=colorCorr.*mat2gray(Result.ref_im-100)*4;
+            CorrimgStim_sub_Struc=colorCorrStim.*mat2gray(Result.ref_im-100)*4;
+        end
+        LocalStimResult{Mov2See}.Corrimg=corrImg;
+        LocalStimResult{Mov2See}.CorrimgStim=corrImgStim;
+        LocalStimResult{Mov2See}.CorrTr=tovec(cat(3,LocalStimResult{Mov2See}.Corrimg,LocalStimResult{Mov2See}.CorrimgStim))'*double(tovec(LocalStimResult{Mov2See}.ftprnt)>0);
+
+        % calculate STA image
+        STAmov=get_STA(tovec(mov_res),ind2vec(frlength,LocalStimResult{Mov2See}.triggerPoint,1),-nTau(1),nTau(end));
+        STAmov=-toimg(STAmov,size(mov_res,1),size(mov_res,2));        
+        %STAmov=movmedian(STAmov,10,3);
+        bvTrace=tovec(Result.bvMask(:,:,[4 5]))'*tovec(STAmov);
+        bvTrace=get_bandpass(bvTrace,1000,[30 60]);
+        STAmov=SeeResiduals(STAmov,bvTrace);
+        STAmov=STAmov-mean(STAmov(:,:,end-20:end),3);
+        bvMask=max(Result.bvMask,[],3)>0;
+        for t=1:size(STAmov,3)
+            frmtmp=STAmov(:,:,t);
+            frmtmp(bvMask>0)=NaN;
+        [~, idx]=bwdist(~isnan(frmtmp));
+        frmtmp(isnan(frmtmp)) = frmtmp(idx(isnan(frmtmp)));  % assign nearest values
+        STAmov(:,:,t)=frmtmp;
+        end
+        STAmov=movmean(imgaussfilt(STAmov,1),3,3);        
+
+        [u_sub,s,v] = svds(tovec(imgaussfilt(STAmov-mean(STAmov,3),1)),10);
+        sz=size(STAmov);
+        reshape_u_sub=reshape(u_sub,sz(1),sz(2),[]);
+        figure(23); clf; imshow2_patch(reshape_u_sub);
+        figure(24); clf; stackplot(v); axis tight;
+        
+        %STAmov_filt=pcafilt_template(STAmov,reshape_u_sub(:,:,[pca2keep]));
+        STAmov_filt=SeeResiduals(STAmov,movmean(v(:,2),5));
+        [u_sub,s,v] = svds(tovec(imgaussfilt(STAmov_filt-mean(STAmov_filt,3),1)),10);
+        sz=size(STAmov);
+        reshape_u_sub=reshape(u_sub,sz(1),sz(2),[]);
+        pca2keep=[1:3];
+        STAmov_filt2=pcafilt_template(STAmov_filt,reshape_u_sub(:,:,[pca2keep]));
+        STAmov_filt2=STAmov_filt2-mean(STAmov_filt2(:,:,10:30),3);
+        STAmov_norm=STAmov_filt2./imgaussfilt(F0img,1);
+
+        save(fullfile(fpath{f},['STAmov_norm_' num2str(Mov2See)]),'STAmov_norm','F0img','-v7.3')
+%%
+%load(fullfile(fpath{f},['STAmov_norm_' num2str(Mov2See)]))
+STAmov_norm=MovMaskNaN(STAmov_norm,Result.Structure==0);
+STAmov_norm_filt=medfilt2_mov(STAmov_norm,[7 7]);
+STAmov_norm_filt=STAmov_norm_filt-mean(STAmov_norm_filt(:,:,10:30),3);
+        cax_sub=[0 1];
+        cmap=gen_colormap([0 0 0;0.5 0 0;1 0 0; 1 1 0],256);
+        colorSTA=grs2rgb(tovec(STAmov_norm_filt),cmap,cax_sub(1),cax_sub(2));
+        colorSTA=reshape(colorSTA,sz(1),sz(2),length(nTau),[]);
+        colorSTA=permute(colorSTA,[1 2 4 3]);
+        if isfield(Result,'Structure')
+            STAimg_sub_Struc=repmat(mat2gray(Result.Structure),1,1,3)/1.5+colorSTA.*Result.Structure_bin*0.5;
+        else
+            STAimg_sub_Struc=colorSTA.*mat2gray(Result.ref_im-100)*4;
+        end
+        LocalStimResult{Mov2See}.STAimg=mean(STAimg_sub_Struc(:,:,:,find(ismember(nTau,Time2avg))),4);
+
+        if ~isempty(LocalStimResult{Mov2See}.bluePatt)
+            bluePattboundary=LocalStimResult{Mov2See}.bluePatt(:,[1 2]);
+        else
+            bluePattboundary=[];
+        end
+        
+        % Generate movie;
+        figure(161); clf;
+        v = VideoWriter(fullfile(fpath{f},['LocalStimTAMovie' num2str(Mov2See)]),'MPEG-4');
+        %v = VideoWriter([fpath2read '/SNAPT_movie'],'Uncompressed AVI');
+        v.FrameRate = 15;  %can adjust this, 5 - 10 works well for me
+        v.Quality= 100;
+        open(v);
+
+        for j = 5:size(STAimg_sub_Struc,4)-8
+            clf;
+            set(gca,'units','pixels','position',[200 0 1000 800])
+            ax1=[]; tiledlayout(length(1),1,'padding','compact');
+                ax1=[ax1 nexttile([1 1])];
+                imshow2(STAimg_sub_Struc(:,150:420,:,j),[0 1]);
+                pbaspect([size(double(STAimg_sub_Struc(:,:,:,j)),2) size(double(STAimg_sub_Struc(:,:,:,j)),1) 1]),colormap(gray)
+                hold all;
+                plot(bluePattboundary(:,1),bluePattboundary(:,2),'color',[0 0.5 1],'linewidth',1.5);
+                colormap(gen_colormap([1 1 1; 1 0 0; 1 1 0],256))
+                cb=colorbar; cb.Label.String='Z score';
+                cb.Ticks=[0 1]; cb.TickLabels=cax_sub;
+            drawScaleBar(100/1.17,'horizontal','color',[1 1 1],'Linewidth',3);
+            text(40,150,'100 \mum','color','w','Fontsize',13);
+            if ismember((j)+nTau(1),[1:30])
+                scatter(50,12,55,[0 0.5 1],'filled')
+            end
+            set_fontsize(12);
+            axis off
+            text(7,12,[num2str((j)+nTau(1)) ' ms'], 'FontSize', 13, 'color', [0.99 0.99 0.99])% the value 1. is to adjust timing by eyes
+            pause(0.1)
+            set(gcf,'color','w')    % Sets background to white
+            frame = getframe(gcf);
+            writeVideo(v,frame);
+            pause(0.1);
+        end;
+        close(v);
+        figure(160); clf;
+        nexttile([1 1]);
+        imshow2(LocalStimResult{Mov2See}.STAimg,[]); hold all
+        if ~isempty(bluePattboundary)
+            plot(bluePattboundary(:,1),bluePattboundary(:,2),'color',[0 0.6 1],'linewidth',1.5)
+        end
+        title([num2str(Mov2See) ,', STA'])
+        nexttile([1 1]);
+        imshow2(CorrimgStim_sub_Struc,[]); hold all
+        if ~isempty(bluePattboundary)
+            plot(bluePattboundary(:,1),bluePattboundary(:,2),'color',[0 0.6 1],'linewidth',1.5)
+        end
+        title([num2str(Mov2See) ,', CorrImgStim'])
+        nexttile([1 1]);
+        imshow2(Corrimg_sub_Struc,[]); hold all
+        if ~isempty(bluePattboundary)
+            plot(bluePattboundary(:,1),bluePattboundary(:,2),'color',[0 0.6 1],'linewidth',1.5)
+        end
+        title([num2str(Mov2See) ,', CorrImg'])
+        saveas(gcf, fullfile(fpath{f},['STA_CorrFootprint' num2str(Mov2See) '.fig']));
+        saveas(gcf, fullfile(fpath{f},['STA_CorrFootprint' num2str(Mov2See) '.png']));
+        %colorbar;
+        saveto='/Volumes/cohen_lab/Lab/Labmembers/Byung Hun Lee/Data/Statistics_Optopatch_Prism';
+        save([saveto '/LocalStimulationResult.mat'],'LocalStimResult','-v7.3');
+    catch
+        disp(['missing file, #' num2str(f) ', g: ' num2str(Mov2See)])
+    end
+end
+
+% Stim. TA kymo
+MouseID=cellfun(@(x) x.Mouse,LocalStimResult);
+NeuronID=cellfun(@(x) x.NeuronInd,LocalStimResult);
+[~, unqInd] = unique([MouseID' NeuronID'] ,'row');
+%% generate STA movie (Figure S6)
+ nTau=[-30:80]; Time2avg=[10:20];
+ load('/Volumes/cohen_lab/Lab/Labmembers/Byung Hun Lee/Data/20250225/163635BHLm162_N2_GridOpto_15mW/STAmov_norm_99.mat')
+
+ sz=size(STAmov_norm);
+ [u_sub,s,v] = svds(tovec(STAmov_norm),20);
+ reshape_u_sub=reshape(u_sub,sz(1),sz(2),[]);
+figure(23); clf; imshow2_patch(reshape_u_sub);
+
+ STAmov_norm=pcafilt_template()
+ cax_sub=[prctile(STAmov_norm(:),5) prctile(STAmov_norm(:),97)];
+ colorSTA=grs2rgb(tovec(STAmov_norm),colormap(turbo),prctile(STAmov_norm(:),5),prctile(STAmov_norm(:),97));
+ colorSTA=reshape(colorSTA,sz(1),sz(2),length(nTau),[]);
+ colorSTA=permute(colorSTA,[1 2 4 3]);
+ if isfield(Result,'Structure')
+     STAimg_sub_Struc=colorSTA.*mat2gray(Result.Structure)*3;
+ else
+     STAimg_sub_Struc=colorSTA.*mat2gray(Result.ref_im-100)*4;
+ end
+ LocalStimResult{Mov2See}.STAimg=mean(STAimg_sub_Struc(:,:,:,find(ismember(nTau,Time2avg))),4);
+
+ if ~isempty(LocalStimResult{Mov2See}.bluePatt)
+     bluePattboundary=LocalStimResult{Mov2See}.bluePatt(:,[1 2]);
+ else
+     bluePattboundary=[];
+ end
+ 
+ figure(161); clf;
+ writeMov4d(fullfile(fpath{f},['STAmovie_' num2str(Mov2See)]),STAimg_sub_Struc,nTau,10,1,cax_sub,bluePattboundary)
+
 %% Representative local stimulation, Figure2
 figure(150); clf; tiledlayout(2,2,'padding','tight');
 %show_ind=[1:4 6 7 10 12:15 17:19 21:34 40:43 56 60:64 84 86 87 85 88 89 99:106];
 %show_ind=[1:length(LocalStimResult)];
 nTau_new=[-30:80];
-show_ind=[95];
+show_ind=[99];
 Show_Row=[1 2 3 5 8 10];
 bandstop_freq=[45 150];
 cmap_decay=hot(round(length(Show_Row)*1.5));

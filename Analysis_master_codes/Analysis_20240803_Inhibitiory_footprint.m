@@ -2,20 +2,20 @@ clear
 clc;
 cd '/Volumes/BHL18TB_D2/Arranged_Data/Prism_OptopatchResult';
 [~, ~, raw] = xlsread(['/Volumes/cohen_lab/Lab/Labmembers/Byung Hun Lee/Data/' ...
-    'Prism_OptopatchData_Arrangement.xlsx'], 'Sheet1', 'B5:K154');
+    'Prism_OptopatchData_Arrangement.xlsx'], 'Sheet1', 'B5:L154');
 
 save_to='/Volumes/BHL18TB_D2/Arranged_Data/Prism_OptopatchResult';
-fpath=raw(:,1);
-Mouse=cell2mat(raw(:,2));
-NeuronInd=cell2mat(raw(:,5));
-CamType=raw(:,3);
-StructureData=raw(:,10);
+fpath=raw(:,2);
+Mouse=cell2mat(raw(:,3));
+NeuronInd=cell2mat(raw(:,6));
+CamType=raw(:,4);
+StructureData=raw(:,11);
 
 %% Stimulation power 0.15V 0.3V 0.5V
 g=1; ref_spike_ROI=5;
 clear NormTrace subth_trace spike_erode_trace Blue skewBlue
 for i=[148 147 146]
-    load([fpath{i} '/Result.mat'])
+    load([fpath{i} '/OP_Result.mat'])
 tr_norm= Result.traces_bvMask-movprc(Result.traces_bvMask,100,30,2);
 tr_norm= tr_norm./get_threshold(tr_norm,1);
 spike{g}= find_spike_bh(tr_norm,5,3);
@@ -81,7 +81,7 @@ title('Blue On')
 linkaxes(ax2,'x')
 %% Low stim
 for i=146
-    load([fpath{i} '/Result.mat'])
+    load([fpath{i} '/OP_Result.mat'])
     load(fullfile(fpath{i},"output_data.mat"))
     sz=double(Device_Data{1, 3}.ROI([2 4]));
     mov_mc=double(readBinMov([fpath{i} '/mc_ShutterReg01.bin'],sz(2),sz(1)));
@@ -106,13 +106,14 @@ mov_blueon=mov_res(:,:,BlueTime{2} & spike_erode_trace{3}==0);
 %% Calculate inter-distance
 nROI=size(Result.ftprnt,3);
 SkelDend = Skeletonize_dendrite(Result.ref_im,4,0.01,25);
-interDendDist=[];
-for i=1:nROI
-    i
-    for j=1:nROI
-        [interDendDist(i,j), ~]=geodesic_distance(SkelDend,get_coord(Result.ftprnt(:,:,i)),get_coord(Result.ftprnt(:,:,j)));
-    end
-end
+% interDendDist=[];
+% for i=1:nROI
+%     i
+%     for j=1:nROI
+%         [interDendDist(i,j), ~]=geodesic_distance(SkelDend,get_coord(Result.ftprnt(:,:,i)),get_coord(Result.ftprnt(:,:,j)));
+%     end
+% end
+interDendDist=Result.interDendDist;
 
 %% Low Stim plot
 coord_1d=dim_reduce(get_coord(Result.ftprnt));
@@ -186,10 +187,10 @@ linkaxes(ax1,'x')
 
 nexttile([1 1])
 ExcImg=std(-mov_res(bound:end-bound,bound:end-bound,EItrace(1,:)>0),0,3);
-%imshow2(ExcImg./F0(bound:end-bound,bound:end-bound),[])
-imshow2(imgaussfilt(ExcImg,2),[])
+imshow2(ExcImg./F0(bound:end-bound,bound:end-bound),[])
+%imshow2(imgaussfilt(ExcImg,2),[])
 
 nexttile([1 1])
 InhImg=std(mov_res(bound:end-bound,bound:end-bound,EItrace(2,:)>0),0,3);
-%imshow2(InhImg./F0(bound:end-bound,bound:end-bound),[])
-imshow2(imgaussfilt(InhImg,2),[])
+imshow2(InhImg./F0(bound:end-bound,bound:end-bound),[])
+%imshow2(imgaussfilt(InhImg,2),[])

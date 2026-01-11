@@ -43,7 +43,7 @@ function roilabel = interactive_ROIlabel(imageStack, referenceImage, mode)
         end
         hold off;
 
-        title(sprintf('Label %d: Mode = %s. Press "Enter" to continue, or double click to quit.', label, mode));
+        title(sprintf('Label %d: Mode = %s. Press "Enter" to continue, or type "q" to quit.', label, mode));
         drawnow;
 
         if strcmpi(mode, 'click')

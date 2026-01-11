@@ -21,12 +21,14 @@ lines=plot(t,tr(noi,:)'+[1:size(noi,2)]*scale);
 arrayfun(@(l,c) set(l,'Color',c{:}),lines,num2cell(line_color,2))
 %arrayfun(@(l,c) set(l,'Color',c{:}),lines,num2cell(line_color,2))
 hold all
+drawnow limitrate
+if any(tovec(spikes==1))
 S=tr; S(~(spikes==1))=NaN;
 %S=ones(size(tr,1),size(tr,2)); S(~(spikes==1))=NaN;
 plot(t,S(noi,:)'+[1:size(noi,2)]*scale,'r.')
 set(gca,'ytick',[1:size(noi,2)]*scale,'yticklabel',noi)
 %axis off
-
+end
 ax2=subplot(10,1,9:10);
 
 if size(otherT,1)>size(otherT,2)

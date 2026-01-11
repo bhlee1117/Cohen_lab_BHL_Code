@@ -19,12 +19,16 @@ end
 
 N = size(ftprnt,3);
 sz = [size(ftprnt,1), size(ftprnt,2)];
-if min(str_rot(:,3))<=0
-    str_rot(:,3)=str_rot(:,3)+5;
+% if min(str_rot(:,3))<=0
+%     str_rot(:,4)=str_rot(:,4)+5;
+% end
+if size(str_rot,2)<4
+    str_rot(:,4)=1;
 end
+str_rot(str_rot(:,4)==0,4)=1;
 
 % Initialize all points to gray
-scatter(str_rot(:,2), str_rot(:,1), str_rot(:,3), [0.5 0.5 0.5], 'filled');
+scatter(str_rot(:,2), str_rot(:,1), str_rot(:,4), [0.5 0.5 0.5], 'filled');
 axis equal tight off; hold on;
 
 % Map dSpikeRate to RGB colors using vec2cmap
@@ -40,7 +44,7 @@ for r = 1:N
 
     insideMask = DMDmask(ind);
 
-    scatter(points(insideMask,2), points(insideMask,1), points(insideMask,3), ...
+    scatter(points(insideMask,2), points(insideMask,1), points(insideMask,4), ...
         colors(r,:), 'filled');
 end
 

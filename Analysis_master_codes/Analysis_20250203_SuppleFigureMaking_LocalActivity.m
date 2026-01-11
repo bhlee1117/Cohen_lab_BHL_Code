@@ -27,7 +27,7 @@ title_str={'Basal','Apical','Peri-Soma'};
 PlaceFieldList=cellfun(@(x) (str2num(num2str(x))),raw(:,21),'UniformOutput',false);
 PlaceFieldBin=cellfun(@(x) (str2num(num2str(x))),raw(:,22),'UniformOutput',false);
 set(0,'DefaultFigureWindowStyle','docked')
-%%
+%% Load data
 f=26;
 load(fullfile(fpath{f},'PC_Result.mat'))
    f
@@ -73,7 +73,7 @@ LapFR=PlaceTrigger_average(Result.spike(1,:),150,Result.VR,-0.002,115)*1000; %to
 StimLap=unique(Result.VR(8,:).*(Result.Blue>0));
 Show_t=[find(Result.VR(8,:)==StimLap(end)+1,1):find(Result.VR(8,:)==StimLap(end)+1,1)+140000];
 show_lap=unique(Result.VR(8,Show_t));
-%%
+%% Plot 
 figure(11); clf; tiledlayout(3,4);
 cmap=[0. 0.1 0.5; 0.5 0.1 0]; cmap_line=[0.2 0.6 1; 1 0.6 0.2]; h=[];
 nexttile([2 4])
@@ -81,12 +81,12 @@ plot([Show_t-Show_t(1)]/1000,normTr(11,Show_t),'color',cmap_line(1,:)); hold all
 plot([Show_t-Show_t(1)]/1000,SubTr(11,Show_t),'color',cmap(1,:))
 sp=Result.spike(1,Show_t);
 %plot(find(sp)/1000,normTr(11,Show_t(find(sp))),'r.')
-plot(find(sp)/1000,0.012,'r.')
+plot(find(sp)/1000,9,'r.')
 
-plot([Show_t-Show_t(1)]/1000,normTr(19,Show_t)-0.02,'color',cmap_line(2,:)); hold all
-plot([Show_t-Show_t(1)]/1000,SubTr(19,Show_t)-0.02,'color',cmap(2,:))
+plot([Show_t-Show_t(1)]/1000,normTr(19,Show_t)-10,'color',cmap_line(2,:)); hold all
+plot([Show_t-Show_t(1)]/1000,SubTr(19,Show_t)-10,'color',cmap(2,:))
 
-plot([Show_t-Show_t(1)]/1000,Result.VR(5,Show_t)/10000-0.04,'color',[0.2 0.7 0])
+plot([Show_t-Show_t(1)]/1000,Result.VR(5,Show_t)/20-22,'color',[0.2 0.7 0])
 axis off
 
 PFcenter=75; nVRbin=[-50:150];
@@ -99,32 +99,42 @@ xlabel('VR position (cm)');
 
 nexttile([1 1])
 L=repmat(ringmovMean(LapSub(show_lap,:,11),7),1,3);
-imagesc((PFcenter-150+nVRbin)/150*200,[1:length(show_lap)],L(:,PFcenter+150+nVRbin),[-0.002 0.005]*1000)
+imagesc((PFcenter-150+nVRbin)/150*200,[1:length(show_lap)],L(:,PFcenter+150+nVRbin),[-2 5])
 xlabel('VR position (cm)');
 cb=colorbar;
 cb.Label.String='Z score';
 
 nexttile([1 1])
 L=repmat(ringmovMean(LapSub(show_lap,:,19),7),1,3);
-imagesc((PFcenter-150+nVRbin)/150*200,[1:length(show_lap)],L(:,PFcenter+150+nVRbin),[-0.002 0.005]*1000)
+imagesc((PFcenter-150+nVRbin)/150*200,[1:length(show_lap)],L(:,PFcenter+150+nVRbin),[-2 5])
 colormap(turbo);
 xlabel('VR position (cm)');
 cb=colorbar;
 cb.Label.String='Z score';
 
 nexttile([1 1])
-L=repmat(ringmovMean(cat(3,LapFR(show_lap,:),LapSub(show_lap,:,11),LapSub(show_lap,:,19)),5),1,3);
+L=repmat(ringmovMean(cat(3,LapFR(show_lap,:),LapSub(show_lap,:,11),LapSub(show_lap,:,19)),7),1,3);
 
-plot((PFcenter-150+nVRbin)/150*200,mean(L(:,PFcenter+150+nVRbin,1),1,'omitnan'),'k'); hold all
+plot((PFcenter-150+nVRbin)/150*200,mean(L(:,PFcenter+150+nVRbin,1),1,'omitnan'),'k','linewidth',1); hold all
 ylabel('Firing rate (Hz)');
 yyaxis right
-plot((PFcenter-150+nVRbin)/150*200,mean(L(:,PFcenter+150+nVRbin,2),1,'omitnan'),'color',cmap_line(1,:),'linestyle','-')
-plot((PFcenter-150+nVRbin)/150*200,mean(L(:,PFcenter+150+nVRbin,3),1,'omitnan'),'color',cmap_line(2,:),'linestyle','-')
+%plot((PFcenter-150+nVRbin)/150*200,mean(L(:,PFcenter+150+nVRbin,2),1,'omitnan'),'color',cmap_line(1,:),'linestyle','-')
+plot((PFcenter-150+nVRbin)/150*200,mean(L(:,PFcenter+150+nVRbin,3),1,'omitnan'),'color',cmap_line(2,:),'linestyle','-','linewidth',1);
+axis tight; box off;
 set(gca,'YColor','k')
-ylabel('\DeltaF/F');
+ylabel('Z score');
 xlabel('VR position (cm)');
 
-
+figure(12); clf;
+calframe=ismember(Result.VR(8,:),show_lap) & Result.VR(end,:)>0.002;
+[p_map, z_map] = position_selectivity(SubTr(19,calframe), Result.VR(5,calframe), Result.VR(8,calframe),'nBins',150,'nShuffles',100000,'Show','on','Smoothing',7);
+sigmap_rep=repmat(p_map'<0.001,1,3);
+p_map_rep=repmat(p_map',1,3);
+show_p_map=p_map_rep(:,PFcenter+150+nVRbin);
+plot((PFcenter-150+nVRbin)/150*200,show_p_map); hold all;
+yyaxis right;
+plot((PFcenter-150+nVRbin)/150*200,mean(L(:,PFcenter+150+nVRbin,3),1,'omitnan'),'color',cmap_line(2,:),'linestyle','-','linewidth',1);
+plot((PFcenter-150+nVRbin)/150*200,sigmap_rep(PFcenter+150+nVRbin),'color',[1 0 0],'linestyle','-','linewidth',1);
 %%
 for f=26
     f

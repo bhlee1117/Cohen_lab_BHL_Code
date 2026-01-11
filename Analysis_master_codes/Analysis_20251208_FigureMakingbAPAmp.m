@@ -432,6 +432,7 @@ for f=[foi]%[8 10 11 15 16 17 18 19 20 21 22 23 24 25 26 27];
 
     PreSub=squeeze(mean(AlignedEvntall{f,3}(:,-nTau_EV(1)+presub_readtime,:),2,'omitnan'));
     PreSub_Basal=squeeze(mean(AlignedEvntall{f,3}(ismember(PCresult{f}.roi_dClass,1),-nTau_EV(1)+presub_readtime,:),[1 2],'omitnan'));
+    PreSub_Soma=squeeze(mean(AlignedEvntall{f,3}(ismember(PCresult{f}.roi_dClass,2),-nTau_EV(1)+presub_readtime,:),[1 2],'omitnan'));
     PreSub_Distal=squeeze(mean(AlignedEvntall{f,3}(ismember(PCresult{f}.roi_dClass,5),-nTau_EV(1)+presub_readtime,:),[1 2],'omitnan'));
     PreSub_cell = num2cell(PreSub, 1);
     PreSub_cell = cellfun(@(x) [dax' x(:,1)],PreSub_cell,'UniformOutput',false);
@@ -453,7 +454,6 @@ for f=[foi]%[8 10 11 15 16 17 18 19 20 21 22 23 24 25 26 27];
     EVAUC_Soma=cellfun(@(x) x(2,2),AUCEVbin_cell(~emptycellEV));
     EVAmp_Apical=cellfun(@(x) x(4,2),AmpEVbin_cell(~emptycellEV));
     PreSub_Apical=cellfun(@(x) x(4,2),PreSubbin_cell(~emptycellEV));
-    PreSub_Soma=cellfun(@(x) x(2,2),PreSubbin_cell(~emptycellEV));
 
     Evlab=[EVList' PCresult{f}.BlueStim(EVList)'>0 sum(isnan(PCresult{f}.NormalizedTrace_dirt(:,EVList)),1)'>0 PCresult{f}.PFvec(EVList)'...
         PCresult{f}.runVec(EVList)' IntervalMat' centroid_EVAUC' trnsmit_EVAUC EVAUC_Apical EVAUC_Soma ISIEV' EVAmp_Apical Evtype' NSpike' PreSub_Soma PreSub_Apical TRevMax' TRevFirst' PreSub_Distal PreSub_Basal...
@@ -462,7 +462,7 @@ for f=[foi]%[8 10 11 15 16 17 18 19 20 21 22 23 24 25 26 27];
     EventPropsMat{f,2}={TransRatebAPinEvent,AUCrawEV,AUCEVbin_cell,AlignedEvntcell_bin};
 
     fieldName={'SpikeFrame','IsBlue','IsNA','IsPF','IsRun','Length','AUC_centroid','TransmissionRate','AUC_apical','AUC_soma',...
-               'ISI','Amp_apical','Spike_type','Nspike','PreSub_Apical','PreSub_Soma','TRmax_bAP','TRfrst_bAP','PreSub_Distal',...
+               'ISI','Amp_apical','Spike_type','Nspike','PreSub_Soma','PreSub_Apical','TRmax_bAP','TRfrst_bAP','PreSub_Distal',...
                'PreSub_Basal','PostSub_Basal','PostSub_Distal','AUCapical_frst'};
     EventPropsMat{f,1}=array2table(EventPropsMat{f,1},'VariableNames',fieldName);
     EventPropsMat{f,2}=array2table(EventPropsMat{f,2},'VariableNames',{'bAPtransmissionRate','AUC','AUC_binned','AlignedEv_binned'});
@@ -477,6 +477,30 @@ end
 % nexttile(3,[1 1])
 % plot(bAPPropsMat{f,1}.SpikeOrder(spsort),'.')
 % xlabel('Spike ID'); ylabel('Spike order');
+for f=foi
+    showInd=find(~bAPPropsMat{f,1}.IsBlue & ~bAPPropsMat{f,1}.IsNA);
+    showDat=[log10(bAPPropsMat{f,1}.ISI(showInd)) bAPPropsMat{f,1}.TransmissionRate(showInd)];
+    showDat((showDat(:,2)>50 | showDat(:,2)<-5),:)=[];
+    showDatAA=[log10(bAPPropsMat{f,1}.ISI(showInd)) bAPPropsMat{f,1}.AUC_apical(showInd)];
+    showDatAA((showDatAA(:,2)>50 | showDatAA(:,2)<-5),:)=[];
+
+    Normconst=mean(showDat(showDat(:,1)>log10(300),2),1,'omitnan');
+    NormconstAA=mean(showDatAA(showDatAA(:,1)>log10(300),2),1,'omitnan');
+
+    NormTXratio=bAPPropsMat{f,1}.TransmissionRate/Normconst;
+    NormTXratio_event_frst=EventPropsMat{f,1}.TRfrst_bAP/Normconst;
+    NormTXratio_event_max=EventPropsMat{f,1}.TRmax_bAP/Normconst;
+
+    NormAA=bAPPropsMat{f,1}.AUC_apical/NormconstAA;
+    NormAA_event_frst=EventPropsMat{f,1}.AUCapical_frst/NormconstAA;
+
+    bAPPropsMat{f,1}.TransmissionRate_norm=NormTXratio;
+    bAPPropsMat{f,1}.AUC_apical_norm=NormAA;
+    EventPropsMat{f,1}.TRfrst_bAP_norm=NormTXratio_event_frst;
+    EventPropsMat{f,1}.TRmax_bAP_norm=NormTXratio_event_max;
+    EventPropsMat{f,1}.AUCapical_frst_norm=NormAA_event_frst;
+end
+
 %% Coorelation mat of spike AUC
 figure(53); clf;
 for f=foi
@@ -488,7 +512,7 @@ for f=foi
     imagesc(bAPCorr{f},[-0.2 0.8])
 end
 
-%% Correlation between pre-spike sub and tx ratio
+%% Correlation between pre-spike sub and tx ratio 
 %figure(46); clf; 
 f=23;
 clf; %tiledlayout(4,2);
@@ -649,17 +673,19 @@ for sptype=1:3
 end
 arrayfun(@(x) colormap(x,gen_colormap([0 0.4 1;1 1 1;1 0 0])),ax2);
 
-%% Plot correlation between distal pre-sub and TX ratio (figure 4);
+%% Plot correlation between distal pre-sub and bAP apical AUC (figure 4);
 f=23; cax=[-0.7 3.5]; minISI=50;
-prespikedistalSubth=EventPropsMat{f,1}.PreSub_Distal;
-threshold2showLow=[prctile(prespikedistalSubth,1), prctile(prespikedistalSubth,15)];
-threshold2showHigh=[prctile(prespikedistalSubth,85), prctile(prespikedistalSubth,99)];
-LowInd=[prespikedistalSubth<threshold2showLow(2) & prespikedistalSubth>=threshold2showLow(1) & EventPropsMat{f,1}.ISI>minISI & EventPropsMat{f,1}.Spike_type==1]; 
-HighInd=[prespikedistalSubth<threshold2showHigh(2) & prespikedistalSubth>=threshold2showHigh(1) & EventPropsMat{f,1}.ISI>minISI & EventPropsMat{f,1}.Spike_type==1];
+vec2threshold=EventPropsMat{f,1}.AUCapical_frst_norm;
+threshold2showLow=[prctile(vec2threshold,1), prctile(vec2threshold,15)];
+threshold2showHigh=[prctile(vec2threshold,75), prctile(vec2threshold,99)];
+LowInd=[vec2threshold<threshold2showLow(2) & vec2threshold>=threshold2showLow(1) & EventPropsMat{f,1}.ISI>minISI & EventPropsMat{f,1}.Spike_type==1]; 
+HighInd=[vec2threshold<threshold2showHigh(2) & vec2threshold>=threshold2showHigh(1) & EventPropsMat{f,1}.ISI>minISI & EventPropsMat{f,1}.Spike_type==1];
 dax=PCresult{f}.dendaxis; nROI=length(PCresult{f}.sortDist);
 [daxsorted daxsortedInd]=sort(dax,'ascend');
+find(LowInd)
 LowTXSTA=mean(AlignedEvntall{f,1}(daxsortedInd,:,LowInd),3,'omitnan');
 HighTXSTA=mean(AlignedEvntall{f,1}(daxsortedInd,:,HighInd),3,'omitnan');
+% clf; imagesc(LowTXSTA(:,200+[-50:50]),cax)
 %LowTXSTA=LowTXSTA-median(LowTXSTA(:,1:20),2);
 %HighTXSTA=HighTXSTA-median(HighTXSTA(:,1:20),2);
 
@@ -692,20 +718,20 @@ set(findall(gcf, '-property', 'FontSize'), 'FontSize', 13);
 t2avg=[-155:20:-5]; Presubmat=[]; 
 corrTXnPreSub=NaN(max(foi),4);  corrTXnPreSub_timelapse=NaN(max(foi),4,length(t2avg)-1);
 for f=foi
-    validInd = ~isnan(EventPropsMat{f,1}.TRfrst_bAP) & ~isnan(EventPropsMat{f,1}.PreSub_Distal);
-    [corrTXnPreSub(f,1), corrTXnPreSub(f,3)] = corr(EventPropsMat{f,1}.TRfrst_bAP(validInd), EventPropsMat{f,1}.PreSub_Distal(validInd), 'Type', 'Pearson');
-    [corrTXnPreSub(f,2), corrTXnPreSub(f,4)] = corr(EventPropsMat{f,1}.TRfrst_bAP(validInd), EventPropsMat{f,1}.PreSub_Basal(validInd), 'Type', 'Pearson');
+    validInd = ~isnan(EventPropsMat{f,1}.AUCapical_frst_norm) & ~isnan(EventPropsMat{f,1}.PreSub_Distal);
+    [corrTXnPreSub(f,1), corrTXnPreSub(f,3)] = corr(EventPropsMat{f,1}.AUCapical_frst_norm(validInd), EventPropsMat{f,1}.PreSub_Distal(validInd), 'Type', 'Pearson');
+    [corrTXnPreSub(f,2), corrTXnPreSub(f,4)] = corr(EventPropsMat{f,1}.AUCapical_frst_norm(validInd), EventPropsMat{f,1}.PreSub_Basal(validInd), 'Type', 'Pearson');
     for t=1:length(t2avg)-1
     Presubtmp=squeeze(mean(AlignedEvntall{f}(:,-nTau_EV(1)+[t2avg(t):t2avg(t+1)],:),2,'omitnan'));
     Presubmat{f,1}(t,:)=mean(Presubtmp(PCresult{f}.roi_dClass==5,:),1,'omitnan');
     Presubmat{f,2}(t,:)=mean(Presubtmp(PCresult{f}.roi_dClass==1,:),1,'omitnan');
-    validIndt = ~isnan(EventPropsMat{f,1}.TRfrst_bAP) & ~isnan(Presubmat{f,1}(t,:)');
+    validIndt = ~isnan(EventPropsMat{f,1}.AUCapical_frst_norm) & ~isnan(Presubmat{f,1}(t,:)');
     if any(validIndt)
-    [corrTXnPreSub_timelapse(f,1,t) corrTXnPreSub_timelapse(f,3,t)]=corr(EventPropsMat{f,1}.TRfrst_bAP(validIndt), Presubmat{f,1}(t,validIndt)', 'Type', 'Pearson');
+    [corrTXnPreSub_timelapse(f,1,t) corrTXnPreSub_timelapse(f,3,t)]=corr(EventPropsMat{f,1}.AUCapical_frst_norm(validIndt), Presubmat{f,1}(t,validIndt)', 'Type', 'Pearson');
     end
-    validIndt2 = ~isnan(EventPropsMat{f,1}.TRfrst_bAP) & ~isnan(Presubmat{f,2}(t,:)');
+    validIndt2 = ~isnan(EventPropsMat{f,1}.AUCapical_frst_norm) & ~isnan(Presubmat{f,2}(t,:)');
     if any(validIndt2)
-    [corrTXnPreSub_timelapse(f,2,t) corrTXnPreSub_timelapse(f,4,t)]=corr(EventPropsMat{f,1}.TRfrst_bAP(validIndt2), Presubmat{f,2}(t,validIndt2)', 'Type', 'Pearson');
+    [corrTXnPreSub_timelapse(f,2,t) corrTXnPreSub_timelapse(f,4,t)]=corr(EventPropsMat{f,1}.AUCapical_frst_norm(validIndt2), Presubmat{f,2}(t,validIndt2)', 'Type', 'Pearson');
     end
     end
 end
@@ -714,14 +740,119 @@ figure(55); clf;
 tiledlayout(1,8,'padding','tight');
 nexttile([1 3]);
 f=23;
-validInd = ~isnan(EventPropsMat{f,1}.TRfrst_bAP) & ~isnan(EventPropsMat{f,1}.PreSub_Distal);
-scatter(EventPropsMat{f,1}.PreSub_Distal,EventPropsMat{f,1}.TRfrst_bAP,20,[0 0 0],'filled','MarkerFaceAlpha',0.5); hold all;
+validInd = ~isnan(EventPropsMat{f,1}.AUCapical_frst_norm) & ~isnan(EventPropsMat{f,1}.PreSub_Distal);
+scatter(EventPropsMat{f,1}.PreSub_Distal,EventPropsMat{f,1}.AUCapical_frst_norm,20,[0 0 0],'filled','MarkerFaceAlpha',1); hold all;
 %scatter_density(EventPropsMat{f,1}.PreSub_Distal,EventPropsMat{f,1}.TRfrst_bAP); hold all;
-validInd = ~isnan(EventPropsMat{f,1}.TRfrst_bAP) & ~isnan(EventPropsMat{f,1}.PreSub_Distal);
-[R, P] = corr(EventPropsMat{f,1}.TRfrst_bAP(validInd), EventPropsMat{f,1}.PreSub_Distal(validInd), 'Type', 'Pearson');
+validInd = ~isnan(EventPropsMat{f,1}.AUCapical_frst_norm) & ~isnan(EventPropsMat{f,1}.PreSub_Distal);
+[R, P] = corr(EventPropsMat{f,1}.AUCapical_frst_norm(validInd), EventPropsMat{f,1}.PreSub_Apical(validInd), 'Type', 'Pearson');
+ylabel('bAP apical AUC'); xlabel(['Pre-spike subthreshold' newline 'in distal dendrite']);
+title(sprintf('R= %.2f, P: %.2d',R,P))
+xlim([-3 3.5]); ylim([-0.5 5.5]/3);
+
+nexttile([1 2]);
+p=Boxplot_wPoints2(corrTXnPreSub(foi,[2 1]),cmap_AP([1 10],:)); ylim([-0.5 1]);
+set(gca,'xtick',[1:2],'XTickLabel',{'Basal','Distal'}); box off;
+ylabel(['Correlation between' newline 'bAP apical AUC and pre-spike subthreshold']);
+
+nexttile([1 3]);
+tax=mean([t2avg(2:end); t2avg(1:end-1)],1);
+corrTXnPreSub_t_mean=squeeze(mean(corrTXnPreSub_timelapse(foi,:,:),1,'omitnan'));
+corrTXnPreSub_t_std=squeeze(std(corrTXnPreSub_timelapse(foi,:,:),0,1,'omitnan'));
+corrTXnPreSub_t_N=squeeze(sum(~isnan(corrTXnPreSub_timelapse(foi,:,:)),1));
+corrTXnPreSub_t_sem=corrTXnPreSub_t_std./sqrt(corrTXnPreSub_t_N);
+l=errorbar(tax,corrTXnPreSub_t_mean([2 1],:),corrTXnPreSub_t_sem([2 1],:),'linewidth',1.5)';
+set(gca,'xdir','reverse')
+arrayfun(@(l,c) set(l,'Color',c{:}),l,num2cell(cmap_AP([1 10],:),2)); box off;
+ylabel(['Correlation between' newline 'bAP apical AUC and pre-spike subthreshold']);
+xlabel('Time before spike (ms)')
+set(findall(gcf, '-property', 'FontSize'), 'FontSize', 16);
+
+%% Plot correlation between distal pre-sub and TX ratio (figure 4a);
+f=23; cax=[-0.7 3.5]; minISI=50;
+vec2threshold=EventPropsMat{f,1}.TRfrst_bAP_norm;
+% threshold2showLow=[prctile(vec2threshold,1), prctile(vec2threshold,25)];
+% threshold2showHigh=[prctile(vec2threshold,75), prctile(vec2threshold,99)];
+% LowInd=[vec2threshold<threshold2showLow(2) & vec2threshold>=threshold2showLow(1) & EventPropsMat{f,1}.ISI>minISI & EventPropsMat{f,1}.Spike_type==1]; 
+% HighInd=[vec2threshold<threshold2showHigh(2) & vec2threshold>=threshold2showHigh(1) & EventPropsMat{f,1}.ISI>minISI & EventPropsMat{f,1}.Spike_type==1];
+ValidInd=find([EventPropsMat{f,1}.ISI>minISI & EventPropsMat{f,1}.Spike_type==1]);
+threshold2showLow=[prctile(vec2threshold(ValidInd),1), prctile(vec2threshold(ValidInd),20)];
+threshold2showHigh=[prctile(vec2threshold(ValidInd),80), prctile(vec2threshold(ValidInd),99)];
+LowInd=ValidInd([vec2threshold(ValidInd)<threshold2showLow(2) & vec2threshold(ValidInd)>=threshold2showLow(1)]); 
+HighInd=ValidInd([vec2threshold(ValidInd)<threshold2showHigh(2) & vec2threshold(ValidInd)>=threshold2showHigh(1)]); 
+
+omitROI=[2 22 33 38]; 
+showROI=setdiff([1:size(AlignedEvntall{f,2},1)],omitROI);
+daxshowROI=PCresult{f}.dendaxis(showROI);
+[sorteddax, dsort]=sort(daxshowROI,'ascend');
+
+nTau_baseline=[-50:-30];
+
+LowTXSTA=mean(AlignedEvntall{f,1}(showROI,:,LowInd),3,'omitnan');
+HighTXSTA=mean(AlignedEvntall{f,1}(showROI,:,HighInd),3,'omitnan');
+LowTXSTA=LowTXSTA-median(LowTXSTA(:,-nTau_EV(1)+nTau_baseline),2);
+HighTXSTA=HighTXSTA-median(HighTXSTA(:,-nTau_EV(1)+nTau_baseline),2);
+
+figure(54); clf; tiledlayout(5,2,'TileSpacing','compact'); ax3=[]; 
+ax3=[ax3 nexttile([3 1])];
+imagesc([nTau_EV(1):nTau_EV(2)],[1:length(showROI)],LowTXSTA(dsort,:),cax)
+set_kymoYtick(sorteddax);
+ax3=[ax3 nexttile([3 1])];
+imagesc([nTau_EV(1):nTau_EV(2)],[1:length(showROI)],HighTXSTA(dsort,:),cax);
+set_kymoYtick(sorteddax);
+colormap(turbo); cb=colorbar; cb.Label.String='Z score';
+
+ax3=[ax3 nexttile([2 1])];
+cmap_AP=gen_colormap(Plasma,10); 
+LowTXSTAtr=mean(EventPropsMat{f,2}.AlignedEv_binned{1}(:,:,LowInd),3,'omitnan');
+HighTXSTAtr=mean(EventPropsMat{f,2}.AlignedEv_binned{1}(:,:,HighInd),3,'omitnan');
+LowTXSTAtr=LowTXSTAtr-median(LowTXSTAtr(:,-nTau_EV(1)+nTau_baseline),2);
+HighTXSTAtr=HighTXSTAtr-median(HighTXSTAtr(:,-nTau_EV(1)+nTau_baseline),2);
+
+l=plot([nTau_EV(1):nTau_EV(2)],[LowTXSTAtr(2,:); LowTXSTAtr([4],:)]','LineWidth',1.5);
+arrayfun(@(l,c) set(l,'Color',c{:}),l,num2cell(cmap_AP([1 10],:),2)); axis off tight; ylim([-0.7 5]);
+
+ax3=[ax3 nexttile([2 1])];
+l=plot([nTau_EV(1):nTau_EV(2)],[HighTXSTAtr(2,:); HighTXSTAtr([4],:)]','LineWidth',1.5);
+arrayfun(@(l,c) set(l,'Color',c{:}),l,num2cell(cmap_AP([1 10],:),2)); axis off tight; ylim([-0.7 5]);
+linkaxes(ax3,'x')
+%drawScaleBar(50,'horizontal','Position',[19 -0.5]); drawScaleBar(5,'vertical','Position',[19 -0.5]); 
+set(findall(gcf, '-property', 'FontSize'), 'FontSize', 13);
+xlim([-80 30]); set_fontsize(18);
+
+
+t2avg=[-155:20:-5]; Presubmat=[]; 
+corrTXnPreSub=NaN(max(foi),4);  corrTXnPreSub_timelapse=NaN(max(foi),4,length(t2avg)-1);
+for f=foi
+    validInd = ~isnan(EventPropsMat{f,1}.AUCapical_frst_norm) & ~isnan(EventPropsMat{f,1}.PreSub_Distal);
+    [corrTXnPreSub(f,1), corrTXnPreSub(f,3)] = corr(EventPropsMat{f,1}.AUCapical_frst_norm(validInd), EventPropsMat{f,1}.PreSub_Distal(validInd), 'Type', 'Pearson');
+    [corrTXnPreSub(f,2), corrTXnPreSub(f,4)] = corr(EventPropsMat{f,1}.AUCapical_frst_norm(validInd), EventPropsMat{f,1}.PreSub_Basal(validInd), 'Type', 'Pearson');
+    for t=1:length(t2avg)-1
+    Presubtmp=squeeze(mean(AlignedEvntall{f}(:,-nTau_EV(1)+[t2avg(t):t2avg(t+1)],:),2,'omitnan'));
+    Presubmat{f,1}(t,:)=mean(Presubtmp(PCresult{f}.roi_dClass==5,:),1,'omitnan');
+    Presubmat{f,2}(t,:)=mean(Presubtmp(PCresult{f}.roi_dClass==1,:),1,'omitnan');
+    validIndt = ~isnan(EventPropsMat{f,1}.AUCapical_frst_norm) & ~isnan(Presubmat{f,1}(t,:)');
+    if any(validIndt)
+    [corrTXnPreSub_timelapse(f,1,t) corrTXnPreSub_timelapse(f,3,t)]=corr(EventPropsMat{f,1}.AUCapical_frst_norm(validIndt), Presubmat{f,1}(t,validIndt)', 'Type', 'Pearson');
+    end
+    validIndt2 = ~isnan(EventPropsMat{f,1}.AUCapical_frst_norm) & ~isnan(Presubmat{f,2}(t,:)');
+    if any(validIndt2)
+    [corrTXnPreSub_timelapse(f,2,t) corrTXnPreSub_timelapse(f,4,t)]=corr(EventPropsMat{f,1}.AUCapical_frst_norm(validIndt2), Presubmat{f,2}(t,validIndt2)', 'Type', 'Pearson');
+    end
+    end
+end
+
+figure(55); clf;
+tiledlayout(1,8,'padding','tight');
+nexttile([1 3]);
+f=23;
+validInd = ~isnan(EventPropsMat{f,1}.AUCapical_frst_norm) & ~isnan(EventPropsMat{f,1}.PreSub_Distal);
+scatter(EventPropsMat{f,1}.PreSub_Distal,EventPropsMat{f,1}.AUCapical_frst_norm,20,[0 0 0],'filled','MarkerFaceAlpha',1); hold all;
+%scatter_density(EventPropsMat{f,1}.PreSub_Distal,EventPropsMat{f,1}.TRfrst_bAP); hold all;
+validInd = ~isnan(EventPropsMat{f,1}.AUCapical_frst_norm) & ~isnan(EventPropsMat{f,1}.PreSub_Distal);
+[R, P] = corr(EventPropsMat{f,1}.AUCapical_frst_norm(validInd), EventPropsMat{f,1}.PreSub_Distal(validInd), 'Type', 'Pearson');
 ylabel('TX ratio'); xlabel(['Pre-spike subthreshold' newline 'in distal dendrite']);
 title(sprintf('R= %.2f, P: %.2d',R,P))
-xlim([-3 3.5]); ylim([-0.5 5.5]);
+xlim([-3 3.5]); ylim([-0.5 5.5]/3);
 
 nexttile([1 2]);
 p=Boxplot_wPoints2(corrTXnPreSub(foi,[2 1]),cmap_AP([1 10],:)); ylim([-0.5 1]);
@@ -734,58 +865,118 @@ corrTXnPreSub_t_mean=squeeze(mean(corrTXnPreSub_timelapse(foi,:,:),1,'omitnan'))
 corrTXnPreSub_t_std=squeeze(std(corrTXnPreSub_timelapse(foi,:,:),0,1,'omitnan'));
 corrTXnPreSub_t_N=squeeze(sum(~isnan(corrTXnPreSub_timelapse(foi,:,:)),1));
 corrTXnPreSub_t_sem=corrTXnPreSub_t_std./sqrt(corrTXnPreSub_t_N);
-l=errorbar(-tax,corrTXnPreSub_t_mean([2 1],:),corrTXnPreSub_t_sem([2 1],:),'linewidth',1.5)';
+l=errorbar(tax,corrTXnPreSub_t_mean([2 1],:),corrTXnPreSub_t_sem([2 1],:),'linewidth',1.5)';
 set(gca,'xdir','reverse')
 arrayfun(@(l,c) set(l,'Color',c{:}),l,num2cell(cmap_AP([1 10],:),2)); box off;
 ylabel(['Correlation between' newline 'TX ratio and pre-spike subthreshold']);
-xlabel('Time to spike (ms)')
+xlabel('Time before spike (ms)')
 set(findall(gcf, '-property', 'FontSize'), 'FontSize', 16);
 
 %% Get variance in bAP success/fail
 % figure(53); clf; tiledlayout('padding','tight');
 Varfraction=[]; 
 for f=foi([1:end])
-bAPmat=bAPPropsMat{f,2}.AUCbAPraw{1}./mean(bAPPropsMat{f,2}.AUCbAPrawShort{1}(ismember(PCresult{f}.roi_dClass,2),:),1,'omitnan');
-[V D eigt validI] =get_eigvector(bAPmat);
-eigt_p=NaN(size(bAPmat));
-eigt_p(:,validI)=eigt';
+%bAPmat=bAPPropsMat{f,2}.AUCbAPraw{1}./mean(bAPPropsMat{f,2}.AUCbAPrawShort{1}(ismember(PCresult{f}.roi_dClass,2),:),1,'omitnan');
+somaROI=ismember(PCresult{f}.roi_dClass,2);
+NonBlueInd=bAPPropsMat{f,1}.IsBlue==0;
+bAPmat=bAPPropsMat{f,2}.AUCbAPraw{1}(:,NonBlueInd);
+bAPmat(somaROI,:)=bAPPropsMat{f,2}.AUCbAPrawShort{1}(ismember(PCresult{f}.roi_dClass,2),NonBlueInd);
+bAPmat=bAPmat./mean(bAPPropsMat{f,2}.AUCbAPrawShort{1}(ismember(PCresult{f}.roi_dClass,2),NonBlueInd),1,'omitnan');
+%bAPmat=bAPmat-mean(bAPmat,1,'omitnan');
+bAPmat=bAPmat-mean(bAPmat,2,'omitnan');
+
+sortedbranchInd=PCresult{f}.BranchLabel(PCresult{f}.sortDist);
+bAPmat_branch=NaN(max(sortedbranchInd),size(bAPmat,2));
+ftprnts_branch=NaN(size(PCresult{f}.Ftprnts,1),size(PCresult{f}.Ftprnts,2),max(sortedbranchInd));
+ftprnts_branch_sorted=PCresult{f}.Ftprnts(:,:,PCresult{f}.sortDist);
+for b=1:max(sortedbranchInd)
+    bindtmp=find(sortedbranchInd==b);
+if ~isempty(bindtmp)
+bAPmat_branch(b,:)=mean(bAPmat(bindtmp,:),1,'omitnan');    
+ftprnts_branch(:,:,b)=max(ftprnts_branch_sorted(:,:,bindtmp),[],3);
+end
+end
+omitInds=[find(sum(isnan(bAPmat_branch),2)>size(bAPmat_branch,2)/2)];
+bAPmat_branch(omitInds,:)=[];
+ftprnts_branch(:,:,omitInds)=[];
+
 TXthres=[prctile(bAPPropsMat{f,1}.TransmissionRate,75) prctile(bAPPropsMat{f,1}.TransmissionRate,25)];
-%TXthres=[prctile(eigt(:,1),75) prctile(eigt(:,1),25)];
-ind2Successtemplate=bAPPropsMat{f,1}.TransmissionRate>TXthres(1); ind2Failtemplate=bAPPropsMat{f,1}.TransmissionRate<TXthres(2);
+ind2Successtemplate=bAPPropsMat{f,1}.TransmissionRate(NonBlueInd)>TXthres(1); ind2Failtemplate=bAPPropsMat{f,1}.TransmissionRate(NonBlueInd)<TXthres(2);
 %ind2Successtemplate=eigt_p(1,:)>TXthres(1); ind2Failtemplate=eigt_p(1,:)<TXthres(2);
-Successtemplate=mean(bAPmat(:,ind2Successtemplate),2,'omitnan')-mean(bAPmat(:,ind2Failtemplate),2,'omitnan');
-Successtemp_trace=Successtemplate'*bAPmat;
+Successtemplate=mean(bAPmat_branch(:,ind2Successtemplate),2,'omitnan')-mean(bAPmat_branch(:,ind2Failtemplate),2,'omitnan');
+Successtemp_trace=Successtemplate'*bAPmat_branch;
+
+[V D eigt validI] =get_eigvector(bAPmat_branch);
+
 swc2show=PCresult{f}.swc;
-swc2show(:,3)=2; swc2show(1,3)=15;
+swc2show(:,4)=2; swc2show(1,4)=15;
+% figure(5); clf;
 % nexttile([1 1]);
-% showScaleScatter(Successtemplate,swc2show,PCresult{f}.Ftprnts(:,:,PCresult{f}.sortDist),turbo(256),[prctile(Successtemplate(:),5) prctile(Successtemplate(:),95)])
-% drawScaleBar(100/Pixelsize(f),'vertical');
-if f<20
-    view([100 90]); axis equal off;
-else
-    view([-90 90]); axis equal off;
-end
+% showScaleScatter(Successtemplate,swc2show,ftprnts_branch,turbo(256),[prctile(Successtemplate(:),5) prctile(Successtemplate(:),95)])
+% title(sprintf('TX template'))
+% for pc=1:11
+%     nexttile([1 1]);
+%     showScaleScatter(V(:,pc),swc2show,ftprnts_branch,turbo(256),[prctile(V(:),5) prctile(V(:),95)])
+%     title(sprintf('PC: %1.0f, Fraction: %.2f %',pc,D(pc)/sum(D)))
+% end
 
-%dax=PCresult{f}.dendaxis;
-[V D eigt validI] =get_eigvector(bAPmat);
+dax=PCresult{f}.dendaxis;
+
 validI=find(validI);
-TXratio_sub=bAPPropsMat{f,1}.TransmissionRate(validI);
-validIJ=find(abs(zscore(TXratio_sub./eigt(:,1)))<4);
+TXratio_sub=bAPPropsMat{f,1}.TransmissionRate(NonBlueInd);
+TXratio_sub=TXratio_sub(validI);
+%validIJ=find(abs(zscore(TXratio_sub./eigt(:,1)))<4);
+validIJ=[1:length(validI)];
 
-[Varfraction(f,1)] = get_variance(bAPmat(:,validI(validIJ)),eigt(validIJ,1)');
-[Varfraction(f,2)] = get_variance(bAPmat(:,validI(validIJ)),bAPPropsMat{f,1}.AUC_apical(validI(validIJ))');
-[Varfraction(f,3)] = get_variance(bAPmat(:,validI(validIJ)),bAPPropsMat{f,1}.TransmissionRate(validI(validIJ))');
-[Varfraction(f,4)] = get_variance(bAPmat(:,validI(validIJ)),Successtemp_trace(validI(validIJ)));
+[Varfraction(f,1)] = get_variance(bAPmat_branch(:,validI(validIJ)),eigt(validIJ,1)');
+Varfraction(f,5)=D(1)/sum(D);
+[Varfraction(f,2)] = get_variance(bAPmat_branch(:,validI(validIJ)),bAPPropsMat{f,1}.AUC_apical(validI(validIJ))');
+[Varfraction(f,3)] = get_variance(bAPmat_branch(:,validI(validIJ)),bAPPropsMat{f,1}.TransmissionRate(validI(validIJ))');
+[Varfraction(f,4)] = get_variance(bAPmat_branch(:,validI(validIJ)),Successtemp_trace(validI(validIJ)));
+
+% AUCprnt=bAPmat(:,validI(validIJ))'\bAPPropsMat{f,1}.AUC_apical(validI(validIJ));
+% TXprnt=bAPmat(:,validI(validIJ))'\bAPPropsMat{f,1}.TransmissionRate(validI(validIJ));
+% 
+% [Varfraction(f,1)] = get_variance(bAPmat(:,validI(validIJ))',V(:,1)');
+% [Varfraction(f,2)] = get_variance(bAPmat(:,validI(validIJ))',AUCprnt');
+% [Varfraction(f,3)] = get_variance(bAPmat(:,validI(validIJ))',TXprnt');
+% [Varfraction(f,4)] = get_variance(bAPmat(:,validI(validIJ))',Successtemplate');
 end
+
 figure(52); clf;
-f=23;
 %Boxplot_wPoints2(Varfraction(foi,[1 4 2 3]),[1 0 0])
 % set(gca,'xtick',[1:4],'XTickLabel',{'PC1','High TX template','AUC apical','TX ratio'})
-Boxplot_wPoints2(Varfraction(foi,[4]),[0 0 0])
+Boxplot_wPoints2(Varfraction(foi,4),[0 0 0])
 set(gca,'xtick',[],'FontSize',13); ylim([0 1]); xlim([0.5 3.5]);
 ylabel('Variance explained'); box off;
-:%%
-% Show TX ratio STAs
+fprintf('Variance explained (branch averaged), %2.2f ± %2.2f, mean ± s.d.\n', mean(Varfraction(foi,4)),std(Varfraction(foi,4)/sqrt(length(foi))))
+
+corrApical=NaN(1,max(foi));
+omitN=[24 27]; dlimit=250;
+for f=setdiff(foi,[])
+
+somaROI=ismember(PCresult{f}.roi_dClass,2);
+NonBlueInd=bAPPropsMat{f,1}.IsBlue==0;
+bAPmat=bAPPropsMat{f,2}.AUCbAPraw{1}(:,NonBlueInd);
+bAPmat(somaROI,:)=bAPPropsMat{f,2}.AUCbAPrawShort{1}(ismember(PCresult{f}.roi_dClass,2),NonBlueInd);
+bAPmat=bAPmat./mean(bAPPropsMat{f,2}.AUCbAPrawShort{1}(ismember(PCresult{f}.roi_dClass,2),NonBlueInd),1,'omitnan');
+%bAPmat=bAPmat-mean(bAPmat,1,'omitnan');
+bAPmat=bAPmat-mean(bAPmat,2,'omitnan');
+dcclass=PCresult{f}.roi_dClass;
+dax=PCresult{f}.dendaxis;
+
+bAPCorrMat=get_corrMat(bAPmat,bAPmat);
+uppertri_ind=triu(ones(size(bAPCorrMat)),1);
+label_ind=ismember(dcclass,[5])'*ismember(dcclass,[5]);
+Ndend(f)=max(sum(uppertri_ind & label_ind,2));
+Ndendpair(f)=sum(uppertri_ind & label_ind,[1 2]);
+%label_ind=(dax>dlimit)'*(dax>dlimit);
+cax=tovec(bAPCorrMat(uppertri_ind & label_ind));
+corrApical(f)=mean(cax);
+end
+fprintf('Apical bAP correlation: %2.2f ± %2.2f, mean ± s.e.m.\n', mean(corrApical(foi),'omitnan'),std(corrApical(foi),'omitnan')/sqrt(length(foi)))
+
+%% Show TX ratio STAs
 figure(16); clf;
 prcax=[0:20:100]; ax2=[];
 tiledlayout(3,length(prcax)-1,'Padding','tight')
@@ -824,13 +1015,11 @@ cb=colorbar;
 cb.Label.String = 'AUC';
 %% Event props, Linear discrimination analysis
 f=23;
-A=EventPropsMat{f,1}.TRfrst_bAP;
+A=EventPropsMat{f,1}.AUCapical_frst_norm;
 Feature2use=setdiff(1:size(EventPropsMat{f,1},2),[1 2 3 4 5 6 13 17 18]);
 %Feature=[EventPropsMat{f,1}.AUC_apical EventPropsMat{f,1}.AUC_soma EventPropsMat{f,1}.TransmissionRate EventPropsMat{f,1}.Nspike EventPropsMat{f,1}.PreSub_Apical EventPropsMat{f,1}.PreSub_Soma EventPropsMat{f,1}.TRmax_bAP EventPropsMat{f,1}.TRfrst_bAP EventPropsMat{f,1}.ISI];
 %Feature=[EventPropsMat{f,1}.AUC_soma EventPropsMat{f,1}.Nspike];
-VariableName={'SpikeFrame','IsBlue','IsNA','IsPF','IsRun','Length','AUC_centroid','TransmissionRate','AUC_apical','AUC_soma',...
-               'ISI','Amp_apical','Spike_type','Nspike','PreSub_Apical','PreSub_Soma','TRmax_bAP','TRfrst_bAP','PreSub_Distal',...
-               'PreSub_Basal','PostSub_Basal','PostSub_Distal','AUCapical_frst'};
+VariableName=EventPropsMat{f,1}.Properties.VariableNames;
 features=EventPropsMat{f,1}.Variables;
 features=features(:,Feature2use);
 [n, t] = size(features);  % features is N x T matrix
@@ -853,44 +1042,62 @@ ylabel('R-squared')
 f=23;
 TrRateEdge=[-0.005:0.002:0.036]; CShist=[]; CSpoints=[]; BSpoints=[];
 showInd=find(~bAPPropsMat{f,1}.IsBlue & ~bAPPropsMat{f,1}.IsNA & bAPPropsMat{f,1}.IsIsolated);
-SSpoints={bAPPropsMat{f,1}.AUC_apical(showInd), bAPPropsMat{f,1}.AUC_soma(showInd), bAPPropsMat{f,1}.TransmissionRate(showInd)};
+SSpoints={bAPPropsMat{f,1}.AUC_apical_norm(showInd), bAPPropsMat{f,1}.AUC_soma(showInd), bAPPropsMat{f,1}.TransmissionRate_norm(showInd)};
 Ind2show=[];
 for Spikeorder2show=[1:6]
-    Ind2show{Spikeorder2show}=find(~bAPPropsMat{f,1}.IsBlue & ~bAPPropsMat{f,1}.IsNA & bAPPropsMat{f,1}.SpikeOrder==Spikeorder2show & ~bAPPropsMat{f,1}.IsIsolated);
-    BSpoints{Spikeorder2show,1}=bAPPropsMat{f,1}.AUC_apical(Ind2show{Spikeorder2show});
+    Ind2show{Spikeorder2show}=find(~bAPPropsMat{f,1}.IsBlue & ~bAPPropsMat{f,1}.IsNA & bAPPropsMat{f,1}.SpikeOrder==Spikeorder2show & ~bAPPropsMat{f,1}.IsIsolated & bAPPropsMat{f,1}.TransmissionRate<5.8);
+    BSpoints{Spikeorder2show,1}=bAPPropsMat{f,1}.AUC_apical_norm(Ind2show{Spikeorder2show});
     BSpoints{Spikeorder2show,2}=bAPPropsMat{f,1}.AUC_soma(Ind2show{Spikeorder2show});
-    BSpoints{Spikeorder2show,3}=bAPPropsMat{f,1}.TransmissionRate(Ind2show{Spikeorder2show});
+    BSpoints{Spikeorder2show,3}=bAPPropsMat{f,1}.TransmissionRate_norm(Ind2show{Spikeorder2show});
 end
 cmap_spikeorder=gray(10);
 figure(10); clf; ax1=[];
 nexttile([1 1]);
-CSind=EventPropsMat{f,1}.Spike_type==2;
-Boxplot_wPoints2({bAPPropsMat{f,1}.TransmissionRate_equal(showInd),EventPropsMat{f,1}.TransmissionRate(CSind)},hsv(2))
-ylim([-1 5])
+CSind=EventPropsMat{f,1}.Spike_type==2; SSind=EventPropsMat{f,1}.Spike_type==1;
+Boxplot_wPoints2({bAPPropsMat{f,1}.TransmissionRate_norm(showInd),EventPropsMat{f,1}.TRfrst_bAP_norm(CSind)},hsv(2))
+%Boxplot_wPoints2({EventPropsMat{f,1}.TRfrst_bAP_norm(SSind),EventPropsMat{f,1}.TRfrst_bAP_norm(CSind)},hsv(2))
+ylim([-1 5]/3)
 set(gca,'XTick', [1 2],'XTickLabel',{'Isolated Spike','CS'},'Box','off');
-ylabel('Transmission rate')
+ylabel('Transmission ratio')
 nexttile([1 1]);
 show_data=[SSpoints{1,3} BSpoints(:,3)'];
 show_data=cellfun(@(x) subsasgn(x, substruct('()', {find(x>5.5)}), NaN), show_data, 'UniformOutput', false);
 p=Violin_wPoints(show_data,cmap_spikeorder(1:7,:));
 orderstring=counting_string(1:5);
 set(gca,'xtick',[1:6],'XTickLabel',[{'Isolated'} orderstring]);
-ylabel('Transmission ratio'); xlim([0.5 6.5]);
+ylabel('Normalized transmission ratio'); xlim([0.5 6.5]); ylim([0 2.7])
 
 figure(11); clf;
 showInd=find(~bAPPropsMat{f,1}.IsBlue & ~bAPPropsMat{f,1}.IsNA & bAPPropsMat{f,1}.TransmissionRate<5.5);
-histogram(bAPPropsMat{f,1}.TransmissionRate(showInd),[0:0.25:10],'Normalization','probability','FaceColor',[0.4 0.4 0.4]); box off;
-xlabel('Transmission ratio'); ylabel('Probability'); xlim([-0.5 6.5]);
+histogram(bAPPropsMat{f,1}.AUC_apical_norm(showInd),[0:0.1:10]/3,'Normalization','probability','FaceColor',[0.4 0.4 0.4]); box off;
+xlabel('Normalized bAP apical AUC'); ylabel('Probability'); xlim([0.5 7.5]/3);
+%%
+figure(12); clf;
+TXratiobins=[0:0.1:2.5]
+distTXratio_norm=NaN(max(foi),length(TXratiobins)-1);
+for f=foi
+showInd=find(~bAPPropsMat{f,1}.IsBlue & ~bAPPropsMat{f,1}.IsNA & bAPPropsMat{f,1}.TransmissionRate<5.5);
+distTXratio_norm(f,:)=histcounts(bAPPropsMat{f,1}.TransmissionRate_norm(showInd),TXratiobins,'Normalization','probability'); 
+xlabel('Normalized Transmission ratio'); ylabel('Probability'); xlim([0.5 7.5]/3);
+end
+plot(edge2bin(TXratiobins),distTXratio_norm','color',[0.6 0.6 0.6]); hold all;
+errorbar_shade(edge2bin(TXratiobins),mean(distTXratio_norm,1,'omitnan'),std(distTXratio_norm,0,1,'omitnan'),[0 0 0]);
+xlabel('Normalized transmission ratio'); ylabel('Probability');
+xlim([0 2.5]); box off;
+
 
 %% Representative cases (figure 3)
-%f=23; load(fullfile(fpath{f},'PC_Result.mat')) % load the result file
-figure(17); clf; tiledlayout(2,4,'padding','compact');
+f=23; %load(fullfile(fpath{f},'PC_Result.mat')) % load the result file
+figure(17); clf; tiledlayout(2,4,'TileSpacing','compact');
 ShowInd=[602 329 530 365 525 479 785 705]-3; show_t=[190:210]; omitROI=[2 22 33 38]; cax=[-2 8];
+
+showROI=setdiff([1:size(AlignedEvntall{f,2},1)],omitROI);
+daxshowROI=PCresult{f}.dendaxis(showROI);
+[sorteddax, dsort]=sort(daxshowROI,'ascend');
 g=1;
 for sp=ShowInd
-    showROI=setdiff([1:size(AlignedbAPall{f,2},1)],omitROI);
     showTr=bAPPropsMat{f,2}.AlignedbAP_binned{1}([2 4],:,sp);
-    %showTr=showTr-movmedian(showTr,50,2);
+    showTr=showTr-movmedian(showTr,50,2);
     % l=plot(show_t+nTau(1),showTr(:,show_t)','LineWidth',1.5); box off;
     % arrayfun(@(l,c) set(l,'Color',c{:}),l,num2cell(cmap_ExTr([1 10],:),2));
     %title(['Tx rate: ' num2str(bAPPropsMat{f,1}.TransmissionRate(sp))]);
@@ -901,60 +1108,66 @@ for sp=ShowInd
     dax=PCresult{f}.dendaxis(ROIvec_distorder); tax=nTau;
     dendriteaxis_bin=linspace(min(dax),max(dax),17);
 
-    %filteredkymo=pcafilterTrace(AlignedbAPall{f,2}(showROI,:,sp),[1:20]);
-    filteredkymo=AlignedbAPall{f,2}(ROIvec_distorder,:,sp);
-    filteredkymo=pcafilterTrace(filteredkymo,[1:6]);
+    filteredkymo=pcafilterTrace(AlignedbAPall{f,2}(showROI,:,sp),[1:20]);
+    %filteredkymo=AlignedbAPall{f,2}(ROIvec_distorder,:,sp);
+    %filteredkymo=pcafilterTrace(filteredkymo,[1:6]);
 
     [~, sortind]=sort(dax,'ascend');
     [Xq, Yq] = meshgrid([tax], dendriteaxis_bin);
     filteredkymo_main = interp2([tax], dax(sortind), filteredkymo(sortind,:), Xq, Yq, 'linear');
 
-    %imagesc(show_t+nTau(1),[1:length(showROI)],filteredkymo(:,show_t),cax);
-    imagesc(show_t+nTau(1),dendriteaxis_bin,filteredkymo_main(:,show_t),cax);
+    imagesc(show_t+nTau(1),[1:length(showROI)],filteredkymo(dsort,show_t),cax);
+    %imagesc(show_t+nTau(1),dendriteaxis_bin,filteredkymo_main(:,show_t),cax);
     colormap(turbo); set(gca,'ytick',[]);
     g=g+1;
 end
 colorbar;
 nexttile(1,[1 1]);
-set(gca,'ytick',[-150:150:500]);
+set_kymoYtick(sorteddax);
+%set(gca,'ytick',[-150:150:500]);
 nexttile(5,[1 1]);
-set(gca,'ytick',[-150:150:500]);
+set_kymoYtick(sorteddax);
+%set(gca,'ytick',[-150:150:500]);
 
-%% Representative cases (figure 4a)
+%% Representative cases (figure 4H)
 figure(18); clf; tiledlayout(2,3,'padding','tight');
 ShowInd=[223 335 55 330 16 144]-1;
 show_t=[180:250]; omitROI=[2 22 33 38]; cax=[-2 8]; g=1;
+showROI=setdiff([1:size(AlignedEvntall{f,2},1)],omitROI);
+
+daxshowROI=PCresult{f}.dendaxis(showROI);
+[sorteddax, dsort]=sort(daxshowROI,'ascend');
 for sp=ShowInd
     nexttile(g,[1 1])
     % showTr=bAPPropsMat{f,2}.AlignedbAP_binned{1}([2 4],:,sp);
     % showTr=showTr-movmedian(showTr,30,2);
     % l=plot([-10:55],showTr(:,190:255)','LineWidth',1.5); box off;
     % arrayfun(@(l,c) set(l,'Color',c{:}),l,num2cell(cmap_ExTr([1 10],:),2));
-    showROI=setdiff([1:size(AlignedEvntall{f,2},1)],omitROI);
     % showTr=bAPPropsMat{f,2}.AlignedbAP_binned{1}([2 4],:,sp);
     filteredkymo=pcafilterTrace(AlignedEvntall{f,2}(showROI,:,sp),[1:20]);
-    imagesc(show_t+nTau_EV(1),[1:length(showROI)],filteredkymo(:,show_t),cax);
+    imagesc(show_t+nTau_EV(1),[1:length(showROI)],filteredkymo(dsort,show_t),cax);
     colormap(turbo); set(gca,'ytick',[]);
     g=g+1;
 end
 nexttile(1,[1 1]);
-set_kymoYtick(PCresult{f}.dendaxis(showROI));
+set_kymoYtick(sorteddax);
 nexttile(4,[1 1]);
-set_kymoYtick(PCresult{f}.dendaxis(showROI));
+set_kymoYtick(sorteddax);
 %% Multiple neurons (Figure 4G)
 
 figure(11); clf; tiledlayout('horizontal');
 showDat=[]; showDatall=[]; bAPdecayConst=[];
-M=[]; N=[]; S=[]; t_edge=[0.5:0.25:2 2.4:0.8:4]; R2=[];
+M=[]; N=[]; S=[]; t_edge=[0.5:0.25:1.6 2 2.6 3.2 3.8]; R2=[];
 for f=foi
     showInd=find(~bAPPropsMat{f,1}.IsBlue & ~bAPPropsMat{f,1}.IsNA);
-    showDat=[log10(bAPPropsMat{f,1}.ISI(showInd)) bAPPropsMat{f,1}.TransmissionRate(showInd)];
-    showDat((showDat(:,2)>50 | showDat(:,2)<-5),:)=[];
+    showDat=[log10(bAPPropsMat{f,1}.ISI(showInd)) bAPPropsMat{f,1}.AUC_apical_norm(showInd)];
+    showDat((showDat(:,2)>50/3 | showDat(:,2)<-5/3),:)=[];
     %[M(f,:) S(f,:) t_center Ntmp]=binning_data_median({showDat},t_edge);
     [M(f,:) S(f,:) t_center Ntmp]=binning_data({showDat},t_edge);
-    Normconst=mean(M(f,end-4:end),2,'omitnan');
-    showDat(:,2)=showDat(:,2)/Normconst;
-    M(f,:)=M(f,:)/Normconst;
+    %Normconst=mean(M(f,end-4:end),2,'omitnan');
+    %Normconst=mean(showDat(showDat(:,1)>log10(300),2),1,'omitnan');
+    %showDat(:,2)=showDat(:,2)/Normconst;
+    %M(f,:)=M(f,:)/Normconst;
     if all(isnan(M(f,:)))
         bAPdecayConst(f)=NaN;
         R2(f)=NaN;
@@ -966,27 +1179,29 @@ for f=foi
     N(f,:)=sqrt(cellfun(@sum,Ntmp)');
 end
 
-nexttile([1 1]);
-dsc=densityScatterChart(showDatall(:,1),showDatall(:,2));
-[Show_M Show_S t_center Show_N]=binning_data({showDatall},t_edge);
-dsc.ColorbarLabel = 'Probability';
-[~, ax2, scat]=unmanage(dsc); scat.SizeData=10; hold all;
-set(ax2, 'XTick', [0 1 2 3 4],'XTickLabel',10.^[0 1 2 3 4],'Box','off');
-errorbar(ax2, t_center, Show_M, Show_S ./ sqrt(cellfun(@sum,Show_N)'), 'Color', [1 0 0], 'LineWidth', 1.5);
-xlabel('Time since previous spike (ms)'); ylabel('Normalized transmission rate');
-ylim([-2 10]);
+% 
+% nexttile([1 1]);
+% dsc=densityScatterChart(showDatall(:,1),showDatall(:,2));
+% [Show_M Show_S t_center Show_N]=binning_data({showDatall},t_edge);
+% dsc.ColorbarLabel = 'Probability';
+% [~, ax2, scat]=unmanage(dsc); scat.SizeData=10; hold all;
+% set(ax2, 'XTick', [0 1 2 3 4],'XTickLabel',10.^[0 1 2 3 4],'Box','off');
+% errorbar(ax2, t_center, Show_M, Show_S ./ sqrt(cellfun(@sum,Show_N)'), 'Color', [1 0 0], 'LineWidth', 1.5);
+% xlabel('Time since previous spike (ms)'); ylabel('Normalized transmission rate');
+% ylim([-2 10]);
 
 nexttile([1 1]);
 plot(t_center,M(foi,:)','color',[.6 .6 .6]); hold all
 Sall=sem(M(foi,:),1);
 errorbar(t_center,mean(M(foi,:),1,'omitnan'),Sall,'color','r','LineWidth',1.5)
 set(gca,'XTick', [0 1 2 3 4],'XTickLabel',10.^[0 1 2 3 4],'Box','off');
-xlabel('Time since previous spike (ms)'); ylabel('Normalized transmission rate');
-ylim([0.7 1.5]); xlim([0.5 4]);
+xlabel('Time since previous spike (ms)'); ylabel('Normalized bAP apical AUC');
+ylim([0.7 1.8]); xlim([0.5 4]);
+set(gca,'xdir','reverse','YAxisLocation','right')
+fprintf('Decay cont; mean: %.2f, std: %.2f\n',mean(bAPdecayConst(foi)),std(bAPdecayConst(foi)))
 
-fprintf('Decay cont; mean: %.2f, std: %.2f',mean(bAPdecayConst(foi)),std(bAPdecayConst(foi)))
 
-%%
+%% ISI vs TX ratio (Figure 4)
 
 figure(11); clf; tiledlayout(2,2);
 maxspikeN=max(LabelMat(:,1)); cmap=hsv(maxspikeN);
@@ -1220,7 +1435,7 @@ for f=[foi]
     dSpikePropsMat{f}=array2table(dSpikePropsMat{f},'VariableNames',fieldName);
 
     % Define somAP and dAP
-    conductionspeed=250; %um/ms
+    conductionspeed=230; %um/ms
     dt_error=1; %ms
     bAPthreshold=@(x) conductionspeed*(x+dt_error);
     dAPCandidates=find(~dSpikePropsMat{f}.IsbAP & ~dSpikePropsMat{f}.IsCS & dSpikePropsMat{f}.dClass~=2 & dSpikePropsMat{f}.dt_post_somAP<2.5);
@@ -1282,6 +1497,47 @@ for f=[foi]
     AligndSpiketr{f}=permute(AligndSpiketr{f},[1 3 2]);
 end
 
+%% Show dAP neuron image (Figure S_dAP)
+f=22;
+conductionspeed=230; %um/ms
+dt_error=1; %ms
+bAPthreshold=@(x) conductionspeed*(x+dt_error);
+dAPCandidates=find(~dSpikePropsMat{f}.IsbAP & ~dSpikePropsMat{f}.IsCS & dSpikePropsMat{f}.dClass~=2 & dSpikePropsMat{f}.dt_post_somAP<2.5);
+bAPsCandidates=find(dSpikePropsMat{f}.IsbAP & ~dSpikePropsMat{f}.IsCS & dSpikePropsMat{f}.dClass~=2 & dSpikePropsMat{f}.dt_pre_somAP<4);
+catCandidates=[bAPsCandidates;dAPCandidates];
+dt2show=[dSpikePropsMat{f}.dt_pre_somAP_int(bAPsCandidates); -dSpikePropsMat{f}.dt_post_somAP_int(dAPCandidates)];
+dst2show=[dSpikePropsMat{f}.Distance_from_soma([bAPsCandidates;dAPCandidates])];
+dAPCandidates_threshold=catCandidates(find((dst2show-bAPthreshold(dt2show))>0));
+
+dAPSTA=get_STA(PCresult{f}.NormalizedTrace_dirt,FiringRate{f}.DendIntSpFrame,10,20);
+somAPSTA=get_STA(PCresult{f}.NormalizedTrace_dirt,setdiff(FiringRate{f}.SimpleSpikeFrame,FiringRate{f}.DendIntSpFrame),10,20);
+nROI=size(PCresult{f}.NormalizedTrace_dirt,1);
+dAPSTA=dAPSTA-median(dAPSTA(:,1:5),2);
+somAPSTA=somAPSTA-median(somAPSTA(:,1:5),2);
+
+figure(33); clf; tiledlayout(3,2);
+ax1=nexttile([2 1]); cax=[0 10];
+imshow2(PCresult{f}.avgImg,[]);
+drawScaleBar(100/PCresult{f}.pixelsize,'horizontal','color',[1 1 1]);
+nexttile([2 1]);
+scatter(dt2show,dst2show,20,[0 0 0],'filled'); hold all
+f2=plot([-1:2],bAPthreshold([-1:2]),'r--','linewidth',2);
+xlabel('\Deltat (ms)'); ylabel('Distance from soma (\mum)'); axis tight;
+ax3=nexttile([1 1]);
+imagesc([-10:20],[1:nROI],dAPSTA,cax);
+set_kymoYtick(PCresult{f}.dendaxis)
+xlabel('Time (ms)'); ylabel('Distance (\mum)'); axis tight;
+title('Average of spikes inititated from dendrite (SomAPs)')
+ax2=nexttile([1 1]);
+imagesc([-10:20],[1:nROI],somAPSTA,cax);
+set_kymoYtick(PCresult{f}.dendaxis)
+title('Average of spikes inititated from soma (SomAPs)')
+xlabel('Time (ms)'); ylabel('Distance (\mum)'); axis tight;
+colormap(ax2,turbo);
+colormap(ax3,turbo);
+cb=colorbar;
+cb.Label.String='Z score';
+set_fontsize(13);
 %% Show neuron image and example (figure 3)
 f=18;
 load(fullfile(fpath{f}, 'PC_Result.mat'), 'Result')
@@ -1387,10 +1643,10 @@ scatter(dSpikePropsMat{f}.AUC_soma(dSpike2show),dSpikePropsMat{f}.AUC_apical(dSp
 xlabel('AUC soma'); ylabel('AUC apical');
 title(['Neuron # ' num2str(f)])
 legend({'SomAP','dAP','dSpike'});
-%%
-% Kymographh
-ROIvec=Result.maintrunk;
-ROIvec_distorder=find_index_bh(PCresult{f}.sortDist,ROIvec);
+%% dSpike Kymograph
+%ROIvec=Result.maintrunk;
+%ROIvec_distorder=find_index_bh(PCresult{f}.sortDist,ROIvec);
+ROIvec_distorder=ShowROI;
 dax=PCresult{f}.dendaxis(ROIvec_distorder);
 SomAPkymo=mean(AligndSpiketr{f}(:,:,SomAP2show),3,'omitnan');
 SomAPkymo_main=SomAPkymo(ROIvec_distorder,:);
@@ -1413,19 +1669,21 @@ for k=[1 3]
     drawScaleBar(100/Pixelsize(f),'vertical')
     view(-155, 90); axis tight;
 
-    dendriteaxis_bin=linspace(min(dax),max(dax),15);
-    taxis=[1:size(AligndSpiketr{f},2)];
-    [~, sortind]=sort(dax,'ascend');
-    [Xq, Yq] = meshgrid([taxis], dendriteaxis_bin);
-    ShowKymo_main = interp2([taxis], dax(sortind), showKymoCell_main{k}(sortind,:), Xq, Yq, 'linear');
+    % dendriteaxis_bin=linspace(min(dax),max(dax),15);
+    % taxis=[1:size(AligndSpiketr{f},2)];
+    [dax_sorted, sortind]=sort(dax,'ascend');
+    % [Xq, Yq] = meshgrid([linspace(taxis(1),taxis(end),100)], dendriteaxis_bin);
+    % ShowKymo_main = interp2([taxis], dax(sortind), showKymoCell_main{k}(sortind,:), Xq, Yq, 'linear');
+    ShowKymo_main=showKymoCell_main{k}(sortind,:);
+    ShowKymo_main=ShowKymo_main-mean(ShowKymo_main(:,1:5),2);
 
     ax1=[ax1 nexttile(2*(g-1)+7,[1 2])];
-    %imagesc([-nTauAlign(1):nTauAlign(2)],[1:size(AligndSpiketr{f},1)],showKymoCell{k}(ShowROI,:));
-    imagesc([-nTauAlign(1):nTauAlign(2)],dendriteaxis_bin,ShowKymo_main,cax);
-    %[yt yl]=set_kymoYtick(Yq(:,1));
+    imagesc([-nTauAlign(1):nTauAlign(2)],[1:size(showKymoCell_main{k},1)],ShowKymo_main);
+    %imagesc([-nTauAlign(1):nTauAlign(2)],dendriteaxis_bin,ShowKymo_main,cax);
+    [yt yl]=set_kymoYtick(dax_sorted);
     %ylabel('Distance from soma (\mum)');
     ax2=[ax2 nexttile(2*(g-1)+17,[1 2])];
-    l=plot([-nTauAlign(1):nTauAlign(2)],showKymoCell{k}(ShowROI,:),'LineWidth',1.5);
+    l=plot([-nTauAlign(1):nTauAlign(2)],ShowKymo_main,'LineWidth',1.5);
     arrayfun(@(l,c) set(l,'Color',c{:}),l,num2cell(cmap_ROIs,2));
     xlabel('Time (ms)'); ylabel('Z score'); box off;
     g=g+1;
