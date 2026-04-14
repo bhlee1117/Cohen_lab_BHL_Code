@@ -1,4 +1,4 @@
-function writeMov(filename,movie,stack2,rate,frmrate,range,dmd_mask_sequence_rois,Dwave)
+function writeMov(filename,movie,timestamp,videorate,movie_frmrate,imshowrange,dmd_mask_sequence_rois,Dwave)
 if nargin < 7;
     dmd_mask_sequence_rois=[];
     Dwave=[];
@@ -9,15 +9,19 @@ end
     stack=[1:size(movie,3)];
 %end
 
-if isempty(range)
-    range=[min(tovec(movie(:,:,floor(size(movie,3)/2)))) max(tovec(movie(:,:,floor(size(movie,3)/2))))]
+if isempty(imshowrange)
+    imshowrange=[min(tovec(movie(:,:,floor(size(movie,3)/2)))) max(tovec(movie(:,:,floor(size(movie,3)/2))))]
+end
+
+if isempty(timestamp)
+    timestamp=[1:size(movie,3)];
 end
 
 f=figure(1);
 set(f, 'Color', 'w');
 myVideo = VideoWriter([filename],"MPEG-4"); %open video file 
 %myVideo = VideoWriter([filename],"Uncompressed AVI");
-myVideo.FrameRate = rate;  %can adjust this, 5 - 10 works well for me
+myVideo.FrameRate = videorate;  %can adjust this, 5 - 10 works well for me
 myVideo.Quality= 100;
 open(myVideo)
 
@@ -26,7 +30,7 @@ for i=stack
     clf;
     
     pbaspect([size(double(movie),2) size(double(movie),1) 1]*2)
-    imshow2(movie(:,:,i),range)
+    imshow2(movie(:,:,i),imshowrange)
     axis tight off equal
     hold on
     if ~isempty(dmd_mask_sequence_rois)
@@ -39,7 +43,7 @@ if Dwave(i)
     plot(15,15,'.','color',[0 0.6 1],'markersize',32)
 end
     end
-    title([num2str(stack2(i)/frmrate) ' ms'])
+    title([num2str(timestamp(i)*movie_frmrate) ' ms'])
     %set(gca, 'Position', [100, 100, 1700, 800]);
     %title([num2str(i*frmrate) ' \mum'],'HorizontalAlignment','left')
     %pause(0.005) %Pause and grab frame
@@ -52,5 +56,5 @@ colormap(gray)
 end
 end
 close(myVideo);
-close(figure(1));
+%close(figure(1));
 end

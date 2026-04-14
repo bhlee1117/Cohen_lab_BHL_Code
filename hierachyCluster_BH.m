@@ -21,19 +21,19 @@ for i = 1:num_clusters
 end
 [~,sort_cluster]=sort(cluster_weight,'descend');
 ExcPatt_reduce=ExcPatt_reduce(:,sort_cluster);
-[VExcpatt, ~, ExcPattTrace]=get_eigvector(ExcPatt');
+[VExcpatt, ~, ExcPattTrace]=get_eigvector(ExcPatt);
 clusterBinMat=get_indMat(find_index_bh(sort_cluster,cluster_indices)');
 
 % Alternatively, you can plot a dendrogram to visualize the clustering
 %imagesc(rescale2(Vs_reduce(:,sort_cluster),1))
 if figureSwitch
-clf; tiledlayout(1,3);
-nexttile([1 1]); dendrogram(Z,size(Z,1),'ColorThreshold',cutoff);
-nexttile([1 1]); silhouette(ExcPatt',cluster_indices,'Euclidean');
-nexttile([1 1]); 
-for c=1:num_clusters
-    scatter3(ExcPattTrace(find(clusterBinMat(:,c)),1),ExcPattTrace(find(clusterBinMat(:,c)),2),ExcPattTrace(find(clusterBinMat(:,c)),3),'filled'); hold all
-end
-xlabel('PC1'); ylabel('PC2'); zlabel('PC3');
+    clf; tiledlayout(1,3);
+    nexttile([1 1]); dendrogram(Z,size(Z,1),'ColorThreshold',cutoff);
+    nexttile([1 1]); silhouette(ExcPatt',cluster_indices,'Euclidean');
+    nexttile([1 1]);
+    for c=1:num_clusters
+        scatter3(ExcPattTrace(find(clusterBinMat(:,c)),1),ExcPattTrace(find(clusterBinMat(:,c)),2),ExcPattTrace(find(clusterBinMat(:,c)),3),'filled'); hold all
+    end
+    xlabel('PC1'); ylabel('PC2'); zlabel('PC3');
 end
 end

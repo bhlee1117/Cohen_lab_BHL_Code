@@ -11,7 +11,7 @@ function [RegImg, tformReg] = interactiveImageRegistration(Img2Reg, refImg)
     % Axes
     tiledlayout(3,2);
     ax1 = nexttile([2 1]); imshow(Img2Reg,[prctile(Img2Reg(:),1) prctile(Img2Reg(:),99)]); title('Image to Register'); hold on;
-    ax2 = nexttile([2 1]); imshow(refImg,[]); title('Reference Image'); hold on;
+    ax2 = nexttile([2 1]); imshow(refImg,[prctile(refImg(:),1) prctile(refImg(:),99)]); title('Reference Image'); hold on;
     ax3 = nexttile([1 2]); hOverlay = imshow(zeros(size(refImg)),[]); title('Registered Overlay'); hold on;
 
     points1 = [];

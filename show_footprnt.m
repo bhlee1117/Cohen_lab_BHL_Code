@@ -1,4 +1,4 @@
-function show_footprnt(c_ftprnt,mov_mc,colr)
+function mergedImg=show_footprnt(c_ftprnt,mov_mc,colr)
 coord=get_coord(c_ftprnt>0);
 if nargin<3
     colr = max(colormap(turbo(size(c_ftprnt,3))),0); colr(colr>1)=1;
@@ -12,8 +12,9 @@ b=[1:size(c_ftprnt,3)];
 ax1=nexttile([1 1]);
 %ax1=subplot(2,1,1);
 
-imshow2(squeeze(sum(c_ftprnt.*reshape(colr(b,:),1,1,[],3),3)),[]);
-text(coord(:,1)',coord(:,2)',num2str([1:size(c_ftprnt,3)]'),'color','w')
+mergedImg=squeeze(sum(c_ftprnt.*reshape(colr(b,:),1,1,[],3),3));
+imshow2(mergedImg,[]);
+%text(coord(:,1)',coord(:,2)',num2str([1:size(c_ftprnt,3)]'),'color','w')
 
 %ax2=subplot(2,1,2);
 ax2=nexttile([1 1]);

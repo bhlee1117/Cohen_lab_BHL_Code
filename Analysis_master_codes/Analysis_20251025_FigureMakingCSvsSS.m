@@ -1491,7 +1491,7 @@ ylim([0 0.065])
 drawPValueLines(p2,0,'StepHeight',0.01,'TextYOffset',0.004); box off; ylim([0 0.075])
 set(gca,'xticklabels',orthax_str2); ylabel('Normalized \theta power (A.U.)');
 set_fontsize(12)
-%%
+%% theta-power
 PowerMatROI=[]; theta_range=[5 12];
 for f=foi
     Pmat=psd_norm{f}.power;
@@ -1565,7 +1565,7 @@ ylabel('\theta-frequency power (A.U.)')
 %end
 
 
-%%
+%% Run vs Rest
 %
 % % Basal & apical & soma autocorr and crosscorr
 % figure(127); clf; t_lag=[-max_xcorrT:max_xcorrT]; ax2=[];

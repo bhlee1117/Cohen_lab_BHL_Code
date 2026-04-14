@@ -2,11 +2,11 @@ function p_values = Boxplot_wPoints2(X, faceColor)
 % Boxplot_wPoints2 - Plots box plots with beeswarm or jittered points.
 % Supports both unpaired (cell array) and paired (numeric matrix) data.
 %
-%   - Cell array input → unpaired, ttest2.
+%   - Cell array input → unpaired, ranksum.
 %   - Numeric matrix input → paired, ttest.
 %
 %   Also connects points with lines for paired input.
-
+markersize=10;
 isPaired = isnumeric(X) && ismatrix(X);
 if isPaired
     numGroups = size(X,2);
@@ -63,12 +63,12 @@ for i = 1:numGroups
     xVals = repmat(i, size(values));
     
     if exist('swarmchart', 'file')
-        swarmchart(xVals, values, 40, faceColor(i,:), 'filled', ...
+        swarmchart(xVals, values, markersize, faceColor(i,:), 'filled', ...
             'MarkerFaceAlpha', 0.7, 'MarkerEdgeColor', 'k', ...
             'XJitter', 'randn', 'XJitterWidth', 0.1);
     else
         x_jittered = i + 0.1 * (rand(size(values)) - 0.5);
-        scatter(x_jittered, values, 40, faceColor(i,:), 'filled', ...
+        scatter(x_jittered, values, markersize, faceColor(i,:), 'filled', ...
             'MarkerFaceAlpha', 0.7, 'MarkerEdgeColor', 'k');
     end
 end

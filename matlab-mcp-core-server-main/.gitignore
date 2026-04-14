@@ -1,0 +1,8 @@
+/.bin
+/cover.out
+/vendor
+/.env
+AGENTS.md
+.agents/
+CLAUDE.md
+.claude/

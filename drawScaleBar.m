@@ -15,7 +15,7 @@ function h = drawScaleBar(barLength, direction, varargin)
 % Parse inputs
 p = inputParser;
 addParameter(p, 'Position', []);
-addParameter(p, 'Color', 'k');
+addParameter(p, 'Color', 'w');
 addParameter(p, 'LineWidth', 2);
 parse(p, varargin{:});
 opts = p.Results;
