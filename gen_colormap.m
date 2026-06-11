@@ -3,6 +3,7 @@ function customColormap = gen_colormap(keyColors, numSteps)
         numSteps = 256;
     end
 
+    if numSteps>1
     % Define the positions of key colors in the interpolation space
     keyPositions = linspace(1, numSteps, size(keyColors, 1));
 
@@ -10,5 +11,8 @@ function customColormap = gen_colormap(keyColors, numSteps)
     customColormap = [interp1(keyPositions, keyColors(:, 1), 1:numSteps, 'linear')', ...
                       interp1(keyPositions, keyColors(:, 2), 1:numSteps, 'linear')', ...
                       interp1(keyPositions, keyColors(:, 3), 1:numSteps, 'linear')'];
+    else
+        customColormap =mean(keyColors,1);
+    end
 
 end

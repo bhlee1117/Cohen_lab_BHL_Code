@@ -29,10 +29,12 @@ for f=[13]
 
     Result.ref_im=mean(mov_mc,3);
     mov_res= mov_mc-mean(mov_mc,3);
-    %mcTrace.xymean=movmean(mcTrace.xymean,3,1);
-    mov_res = SeeResiduals(mov_res,mcTrace.xymean(ref_time,:));
-    mov_res = SeeResiduals(mov_res,mcTrace.xymean(ref_time,:).^2);
-    mov_res = SeeResiduals(mov_res,mcTrace.xymean(ref_time,1).*mcTrace.xymean(ref_time,end));
+    if isstruct(mcTrace)
+        mcTrace=movmean(mcTrace.xymean,3,1);
+    end
+    mov_res = SeeResiduals(mov_res,mcTrace(ref_time,:));
+    mov_res = SeeResiduals(mov_res,mcTrace(ref_time,:).^2);
+    mov_res = SeeResiduals(mov_res,mcTrace(ref_time,1).*mcTrace(ref_time,end));
     mov_res = mov_res.*double(max(Result.bvMask,[],3)==0);
 
     [~, ~, icsTrace]=clickyICA(imresize(mov_res,0.5),imresize(mean(mov_mc,3),0.5),10);
@@ -40,7 +42,7 @@ for f=[13]
 
     ROIimg=mean(mov_mc,3);
     %ROIimg=mean(icsImgs(:,:,[1]),3);
-    excludeImg=mean(icsImgs(:,:,[4 5]),3);
+    excludeImg=mean(icsImgs(:,:,[end]),3);
     %excludeImg=mean(mov_mc,3);
 
     figure(3); clf;
@@ -97,7 +99,7 @@ for f=[13]
         linkaxes(ax2,'xy')
         n_take = input('#components to take: ', 's');
         n_take = str2num(n_take);
-        coeff=subMov*mean(eigTrace(:,n_take)*V(:,n_take)',2);
+        coeff = V(:, n_take) * D(n_take);
         ftprnt(pixelList,p)=coeff;
     end
     close(figure(4));
@@ -114,36 +116,46 @@ for f=[13]
     % Result.ftprnt=ref_ftprnt;
 
     figure(99); clf;
-    show_footprnt(Result.ftprnt,Result.ref_im)
+    show_footprnt(Result.ftprnt,Result.ref_im);
     save(fullfile(fpath{f},'Volt_Result.mat'),'Result','-v7.3')
+    disp(['Footprint saved at ' fullfile(fpath{f},'Volt_Result.mat')]);
 end
 
 %% Signal extraction from multiple movie files, in streaming mode
 bound = 6;
-for f = [3]
+for f = [9 10 12 13]
 
     time_segment = 15000;
-    load([fpath{f} '/Volt_Result.mat'])
+    Result=importdata([fpath{f} '/Volt_Result.mat']);
     Devicedata_filename = fullfile(fpath{f}, 'output_data.mat');
     load(Devicedata_filename);
 
     sz = double(Device_Data{3}.ROI([2 4]));  % ROI on the camera
     exposuretime1 = Device_Data{3}.exposuretime;
     o_laser = 200001;
+    DAQ_rate=Device_Data{1, 2}.Counter_Inputs(1, 1).rate;
 
+    % voltage camera clock
     cam1_vsyn = Device_Data{1, 2}.Counter_Inputs(1, 1).data;
-    start_idx = min(find(cam1_vsyn == max(cam1_vsyn)));
-    end_idx   = length(Device_Data{1, 2}.buffered_tasks(1, 2).channels(1, 1).data);
-    segment_size = 103 * floor(exposuretime1 / 0.001);
-    last_val  = cam1_vsyn(start_idx - 1);
-    n_to_add  = end_idx - start_idx + 1;
+    start_idx = min(find(cam1_vsyn ==max (cam1_vsyn)));
+    end_idx = length(Device_Data{1, 2}.buffered_tasks(1, 2).channels(1, 1).data);
+    CamTrigger1_DAQax=find((cam1_vsyn(2:end)-cam1_vsyn(1:end-1))>0);
+    segment_size=unique(diff(CamTrigger1_DAQax));
+    last_val = cam1_vsyn(start_idx - 1);
+    n_to_add = end_idx - start_idx + 1;
     n_segments = ceil(n_to_add / segment_size);
     added_part = repelem((last_val + 1 : last_val + n_segments)', segment_size);
     added_part = added_part(1:n_to_add);
     cam1_vsyn(start_idx:end_idx) = added_part;
-    VmovTimesegments = [(cam1_vsyn(o_laser) + 2) : V2moviemaxTime : cam1_vsyn(end)];
-    nFrame2analyze   = VmovTimesegments(end) - VmovTimesegments(1) + 1;
-    t_vol = (0:nFrame2analyze-1) * exposuretime1;
+
+    % Prepare
+    VmovTimesegments=[(cam1_vsyn(o_laser)+2):V2moviemaxTime:cam1_vsyn(end)];
+    VmovTimesegments(end+1)=cam1_vsyn(end);
+    nFrame2analyze=VmovTimesegments(end)-VmovTimesegments(1);
+    CamTrigger1_DAQaxVec=ind2vec(length(cam1_vsyn),CamTrigger1_DAQax(1):segment_size:cam1_vsyn(end)*segment_size,1);
+    CamTrigger1_DAQaxVec=CamTrigger1_DAQaxVec(o_laser:end);
+    FirstFrameDAQax=find(CamTrigger1_DAQaxVec>0,1);
+    t_vol=[FirstFrameDAQax:segment_size:(FirstFrameDAQax+segment_size*nFrame2analyze)]/DAQ_rate;
 
     %-- Build checkerboard masks for each footprint
     % Checkerboard pattern: odd pixels = (row+col) is even, even pixels = (row+col) is odd
@@ -165,25 +177,31 @@ for f = [3]
 
     for j = 1:length(VmovTimesegments)-1
         load([fpath{f} '/mcTrace' num2str(j, '%02d') '.mat']);
-        motionTrace = movmean(mcTrace.xymean, 5, 1);
+        if isstruct(mcTrace)
+            mcTrace=mcTrace.xymean;
+        end
+        motionTrace = movmean(mcTrace, 5, 1);
         Result.mc   = [Result.mc; motionTrace];
 
         try
             readFrame = VmovTimesegments(j+1) - VmovTimesegments(j);
             mov_mc = double(readBinMov_times([fpath{f} '/mc' num2str(j, '%02d') '.bin'], sz(2), sz(1), [1:readFrame]));
-            disp('readBinMov_times succeeded')
+            %disp('readBinMov_times succeeded')
         catch
             mov_mc = double(readBinMov([fpath{f} '/mc' num2str(j, '%02d') '.bin'], sz(2), sz(1)));
-            disp('Movie loaded via readBinMov')
+            %disp('Movie loaded via readBinMov')
         end
 
         %-- Motion correction and artefact regression
         bv_trace = tovec(mov_mc)' * tovec(Result.bvMask);
         V_trace  = tovec(mov_mc)' * tovec(Result.ftprnt);
-        bv_trace = squeeze(SeeResiduals(permute(bv_trace, [2 3 1]), V_trace))';
+        bv_trace = squeeze(SeeResiduals(permute(bv_trace, [2 3 1]), V_trace));
+        if size(bv_trace,2)~=size(mov_mc,3)
+            bv_trace=bv_trace';
+        end
 
         mov_res = mov_mc - mean(mov_mc, 3);
-        Result.bvTrace=[Result.bvTrace bv_trace'];
+        Result.bvTrace=[Result.bvTrace bv_trace];
 
         %-- Extract main traces
         Trace2add = -(tovec(mov_mc)' * tovec(Result.ftprnt))';
@@ -196,11 +214,11 @@ for f = [3]
         %-- Stitch segments with offset correction
         if ~isempty(Result.traces)
             offset = mean(Result.traces(:, end-20:end), 2, 'omitnan') - ...
-                     mean(Trace2add(:, 1:20), 2, 'omitnan');
+                mean(Trace2add(:, 1:20), 2, 'omitnan');
             offset_ch{1} = mean(Result.traces_checker{1}(:, end-20:end), 2, 'omitnan') - ...
-                           mean(Trace2add_ch{1}(:, 1:20), 2, 'omitnan');
+                mean(Trace2add_ch{1}(:, 1:20), 2, 'omitnan');
             offset_ch{2} = mean(Result.traces_checker{2}(:, end-20:end), 2, 'omitnan') - ...
-                           mean(Trace2add_ch{2}(:, 1:20), 2, 'omitnan');
+                mean(Trace2add_ch{2}(:, 1:20), 2, 'omitnan');
         else
             offset     = zeros(Npoly, 1);
             offset_ch  = {zeros(Npoly, 1), zeros(Npoly, 1)};
@@ -209,6 +227,9 @@ for f = [3]
         Result.traces            = [Result.traces,            Trace2add     + offset];
         Result.traces_checker{1} = [Result.traces_checker{1}, Trace2add_ch{1} + offset_ch{1}];
         Result.traces_checker{2} = [Result.traces_checker{2}, Trace2add_ch{2} + offset_ch{2}];
+        Result.t_ax= t_vol;
+
+        fprintf('Trace extracting from movie (%2.0d/%2.0d)...\n',j,length(VmovTimesegments)-1);
     end
 
     %-- Diagnostic figure
@@ -230,7 +251,7 @@ exclude_frq  = [241.7 242];  % Monitor frequency to exclude
 exclude_frq2 = [55.5  56];   % Motion frequency to exclude
 time_bin = 15000;
 Fs       = 1000;
-nOverlap  = 10; 
+nOverlap  = 10;
 
 % Design Butterworth filters
 [b,  a ] = butter(4, exclude_frq  / (Fs/2), 'stop');    % Notch: monitor
@@ -238,7 +259,7 @@ nOverlap  = 10;
 [b3, a3] = butter(4, 2             / (Fs/2), 'low');     % Low-pass: sub-threshold
 [b4, a4] = butter(4, [5 11]        / (Fs/2), 'bandpass'); % Band-pass: theta
 
-for f = 3
+for f = [8 9 10 12 13]
 
     %-- Load data
     load(fullfile(fpath{f}, 'Volt_Result.mat'), 'Result');
@@ -260,7 +281,7 @@ for f = 3
     SilentPeriod = ones(1, nTime);
     sp_time_all  = find(max(sp, [], 1))';
     valid_sp     = sum((sp_time_all + SilentTau) < 1 | ...
-                       (sp_time_all + SilentTau) > nTime, 2) == 0;
+        (sp_time_all + SilentTau) > nTime, 2) == 0;
     SilentPeriod(sp_time_all(valid_sp) + SilentTau) = NaN;
     t_silent = find(~isnan(SilentPeriod));
 

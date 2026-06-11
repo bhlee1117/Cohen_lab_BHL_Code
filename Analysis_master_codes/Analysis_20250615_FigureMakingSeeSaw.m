@@ -33,7 +33,7 @@ foi=[1 4 5 6 8 10 11 15 16 17 18 19 20 21 22 23 24 25 26 27];
 %% Concatenate data
 nTau={[-200:50],[-200:50],[-200:50]}; %SS, CS, Brst
 clear SpikeInd MatSpike MatSTA MatBlue MatCStrace MatSub SpikeList NormalizedTrace_ch NormalizedTrace_dirt SpikeIndBlueOff Dist_order allSpikeMat noi interDendDist noi_dist derivSub LapSubSilent
-clear Subthreshold dendaxis BrstOrder roisD roisD_order LapSpclassVec dendaxis1d
+clear Subthreshold dendaxis BrstOrder roisD roisD_order LapSpclassVec dendaxis1d SpikeHeight
 clear SI MI
 
 % Load local stimulation data
@@ -43,9 +43,12 @@ load([saveto '/LocalStimulationResult.mat']);
 for f=foi(1:end)
     f
     load(fullfile(fpath{f},'PC_Result.mat'),'Result') %load traces
+    dFFrobust=importdata(fullfile(fpath{f},'RobustdFFfit.mat'));
+
     if ~isempty(find(ismember(Result.spike(1,:),Result.SpClass(1,:))==0)) | ~isempty(find(ismember(Result.spike(1,:),Result.SpClass(2,:))==0))
         error('Spclass and spike mat is not matching');
     end
+    
 
     Result.spike=Result.spike>0; Result.SpClass=Result.SpClass>0;
     Dist_order{f}=Result.BrancDist_order;
@@ -82,15 +85,17 @@ for f=foi(1:end)
     dendaxis1d{f} = projectTrunkaxis(ftcoord);
     dendaxis1d{f} = dendaxis1d{f}(Dist_order{f}(noi_dist{f}));
 
-    NormalizedTrace=(Result.normTraces)./Result.F0_PCA;
+    %NormalizedTrace=(Result.normTraces)./Result.F0_PCA;
+    NormalizedTrace=(Result.normTraces)./dFFrobust.ScaleFactor;
+
     bAP_STA=get_STA(NormalizedTrace, Result.spike(1,:), 30, 20);
     bAP_STA=bAP_STA-prctile(bAP_STA,20,2);
-    SpikeHeight=max(mean(bAP_STA(perisomaROI,:),1),[],2);
+    SpikeHeight(f)=max(mean(bAP_STA(perisomaROI,:),1),[],2);
 
     NormalizedTrace=NormalizedTrace;%/SpikeHeight;
     NormalizedTrace_dirt{f,1}=NormalizedTrace;
     NormalizedTrace_dirt{f,1}(:,Result.motionReject>0)=NaN;
-    NormalizedTrace_ch(f,:)=cellfun(@(x) x./Result.F0_PCA,Result.norm_trace_check,'UniformOutput',false);
+    NormalizedTrace_ch(f,:)=cellfun(@(x) x./dFFrobust.ScaleFactor,Result.norm_trace_check,'UniformOutput',false);
     NormalizedTrace_ch{f,1}(:,Result.motionReject>0)=NaN; NormalizedTrace_ch{f,2}(:,Result.motionReject>0)=NaN;
     if ifdirtRemov(f)
         NormalizedTrace_dirt{f,1}(Result.dirtTrace>0)=NaN;
@@ -315,7 +320,7 @@ xlabel('Global axis')
 figure(306); clf;
 for f=[20 21 22 25 26 27]
 [nROI nTime]=size(Subthreshold{f});
-[SubV SubD subTrace]=get_eigvector(Subthreshold{f}(:,sum(isnan(Subthreshold{f}),1)==0)',nROI);
+[SubV SubD subTrace]=get_eigvector(Subthreshold{f}(:,sum(isnan(Subthreshold{f}),1)==0),nROI);
 subTrace_onFrame=NaN(nROI,nTime);
 subTrace_onFrame(:,sum(isnan(Subthreshold{f}),1)==0)=subTrace';
 perispike_time=[-2:20]; 
@@ -372,18 +377,22 @@ nexttile([1 1])
 SSisolated=sum(SpClassSSmat(:,:,1:-nTau2show(1)),[1 3])==0; CSisolated=sum(SpClassCSmat(:,:,1:-nTau2show(1)),[1 3])==0;
 NormTraceSS=mean(NormTraceSSmat(:,SSisolated,:),2,'omitnan'); NormTraceSS_sem=std(NormTraceSSmat(:,SSisolated,:),0,2,'omitnan')/sum(SSisolated);
 NormTraceSS=permute(NormTraceSS,[1 3 2]); NormTraceSS_sem=permute(NormTraceSS_sem,[1 3 2]);
-NormTraceCS=mean(NormTraceCSmat(:,CSisolated,:),2,'omitnan'); NormTraceCS_sem=std(NormTraceSSmat(:,CSisolated,:),0,2,'omitnan')/sum(CSisolated);
+NormTraceCS=mean(NormTraceCSmat(:,CSisolated,:),2,'omitnan'); NormTraceCS_sem=std(NormTraceCSmat(:,CSisolated,:),0,2,'omitnan')/sum(CSisolated);
 NormTraceCS=permute(NormTraceCS,[1 3 2]); NormTraceCS_sem=permute(NormTraceCS_sem,[1 3 2]);
 hold all
+if ~isempty(SSframe)
 scatter(subTraceSSmat(1,:),subTraceSSmat(2,:),10,[1 0 1],'filled');
+end
+if ~isempty(CSframe)
 scatter(subTraceCSmat(1,:),subTraceCSmat(2,:),10,[0 1 1],'filled')
+end
 xlabel('Basal'); ylabel('Apical'); legend({'SS','CS'})
 colormap('bone')
 
-nexttile([1 1]);
-imagesc(NormTraceSS);
-nexttile([1 1]);
-imagesc(NormTraceCS);
+% nexttile([1 1]);
+% imagesc(NormTraceSS);
+% nexttile([1 1]);
+% imagesc(NormTraceCS);
 
 title(ax1,['Neuron ID# ' num2str(f)])
 end
@@ -488,8 +497,9 @@ for f=foi
     plot(cumsumD{f}(:,2),'color',[0.7 0.7 0.7]); hold all
     drawnow;
 end
-[M S x]=binning_data(cumsumD,[0.5:1:10.5]);
-errorbar(x,M,S,'color','k');
+VarianceResult=binning_data(cumsumD(foi),[0.5:1:50.5]);
+errorbar(VarianceResult.centers,VarianceResult.mean,VarianceResult.std,'color','k');
+set(gca,'xscale','log');
 xlabel('PC component #'); box off;
 ylabel('Fraction of variance')
 
@@ -808,8 +818,15 @@ for dc=1:size(dClass2plot,1) %region class
         dax2=[dax2; dax]; cax2=[cax2; cax]; nax2=[nax2; ones(length(cax),1)*f];
         N_points(f,dc)=length(dax);
         if N_points(f,dc)>5
-            [M(f,:,dc) S(f,:,dc) corr_xbin indicies]=binning_data({[dax cax]},dendbin);
-            [M1d(f,:,dc) S1d(f,:,dc) corr_xbin1d indicies]=binning_data({[dax1d cax]},dendbin);
+            Corrbinresult=binning_data({[dax cax]},dendbin);
+            M(f,:,dc)=Corrbinresult.mean;
+            S(f,:,dc)=Corrbinresult.std;
+            corr_xbin=Corrbinresult.centers;
+
+            Corrbinresult1d=binning_data({[dax1d cax]},dendbin);
+            M1d(f,:,dc)=Corrbinresult1d.mean;
+            S1d(f,:,dc)=Corrbinresult1d.std;
+            corr_xbin1d=Corrbinresult1d.centers;
             [y_fit, params, Rsquare(f,dc)] = fitExpDecay(dax,cax,[0:500]');
             [y_fit1d, params1d, Rsquare1d(f,dc)] = fitExpDecay(dax1d,cax,[0:500]');
             l_const(f,[dc dc+size(dClass2plot,1)])=[params(2) range(dax)];
@@ -939,7 +956,7 @@ M_b=mean(param(param(:,1)~=100,1)); S_b=std(param(param(:,1)~=100,1));
 M_a=mean(param(param(:,2)~=100,2)); S_a=std(param(param(:,2)~=100,2));
 fprintf(['1/e const. of autocorrelogram, basal = %2.0f ± %2.0f, apical = %2.0f ± %2.0f \n'],M_b,S_b,M_a,S_a);
 
-figure(124); clf; tiledlayout(1,4);
+figure(124); clf; tiledlayout(2,2);
 cmap_temp   = gen_colormap(Plasma,4);
 
 title_str = { ...
@@ -1046,7 +1063,7 @@ for dc=1:size(dClass2plot,1)
     end
 end
 
-figure(124); clf; tiledlayout(2,3);
+figure(126); clf; tiledlayout(2,3);
 for dc=1:3
     nexttile([1 1])
 l_const_show=permute(l_const_PF(foi,dc,:),[1 3 2]);
@@ -1104,7 +1121,7 @@ PeakTroughMat=[]; PeakSTASpClass=[]; TroughSTASpClass=[];
 for f=foi
     StopFreq=[12 200]; %filter high frequency
     [nROI nTime]=size(Subthreshold{f});
-    Subthreshold_int=interpolateNaN(Subthreshold{f});
+    Subthreshold_int=interpolateNaN(Subthreshold{f}/SpikeHeight(f));
     FilterTr=[]; 
     for n=1:nROI
         %[PhaseTrace BasalSubFilt BasalthetaPower] = get_phase(Subthreshold_int(n,:), 1000, FilterFreq);
@@ -1112,9 +1129,9 @@ for f=foi
         perispikefrm(perispikefrm<1 | perispikefrm>nTime)=[];
         FilterTr(n,:)=get_bandstop(Subthreshold_int(n,:),1000,StopFreq);
         FilterTr(n,:)=FilterTr(n,:)-movmedian(FilterTr(n,:),300,2);
-        [pks, locs] = findpeaks(FilterTr(n,:),'MinPeakHeight', 0.35,'MinPeakDistance',50, ...
+        [pks, locs] = findpeaks(FilterTr(n,:),'MinPeakHeight', 0.3,'MinPeakDistance',50, ...
             'MinPeakProminence', 0.15);  % Prominence can also be tuned
-        [trough, loc_trgh] = findpeaks(-FilterTr(n,:),'MinPeakHeight', 0.4,'MinPeakDistance',50, ...
+        [trough, loc_trgh] = findpeaks(-FilterTr(n,:),'MinPeakHeight', 0.3,'MinPeakDistance',50, ...
             'MinPeakProminence', 0.15);  % Prominence can also be tuned
         % Turn to 0 during blue Stim and peri-spike frame
         peakvec{f}(n,:)=ind2vec(nTime,locs,1); 

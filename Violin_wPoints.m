@@ -72,7 +72,8 @@ for i = 1:numGroups
         xi = X{i}(~isnan(X{i}));
         xj = X{j}(~isnan(X{j}));
         if numel(xi) > 1 && numel(xj) > 1
-            [~, p] = ttest2(xi, xj);
+            %[~, p] = ttest2(xi, xj);
+            [p] = ranksum(xi, xj);
         else
             p = NaN;
         end

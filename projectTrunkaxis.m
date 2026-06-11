@@ -1,4 +1,4 @@
-function coord1D = projectTrunkaxis(X)
+function [coord1D principal_axis]= projectTrunkaxis(X)
 % PROJECT_TO_NEURONAL_AXIS - Projects 2D subcellular coordinates onto a 
 % 1D principal axis, with soma at 0, apical dendrite positive, basal negative.
 %

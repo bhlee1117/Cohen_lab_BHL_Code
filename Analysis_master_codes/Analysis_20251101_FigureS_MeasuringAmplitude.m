@@ -1520,7 +1520,7 @@ cb=colorbar;
 cb.Label.String='Z score';
 set_fontsize(13);
 %% Show neuron image and example (figure 3)
-f=18;
+f=20;
 load(fullfile(fpath{f}, 'PC_Result.mat'), 'Result')
 omitROI=[3]; scaleoffset=14; cmap_spclass=[0 0 0; 1 0.57 0.11; 1 0.57 0.11; 0.9 0.46 0.1];
 [nROI nTime]=size(PCresult{f}.NormalizedTrace_dirt);

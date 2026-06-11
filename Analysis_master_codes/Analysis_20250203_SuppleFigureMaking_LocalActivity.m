@@ -30,15 +30,14 @@ set(0,'DefaultFigureWindowStyle','docked')
 %% Load data
 f=26;
 load(fullfile(fpath{f},'PC_Result.mat'))
-   f
-load(fullfile(fpath{f},'PC_Result.mat'))
+dFFRobust=importdata(fullfile(fpath{f},'RobustdFFfit.mat'));
 Corrmat=[]; normTrace=[];
-normTr=Result.normTraces./Result.F0_PCA;
+normTr=Result.normTraces./dFFRobust.ScaleFactor;
 normTr=normTr(Result.dist_order,:);
 SubTr=get_subthreshold(normTr,Result.spike(1,:),7,17);
 
-normTrace{1}=Result.norm_trace_check{1}./Result.F0_PCA;
-normTrace{2}=Result.norm_trace_check{2}./Result.F0_PCA;
+normTrace{1}=Result.norm_trace_check{1}./dFFRobust.ScaleFactor;
+normTrace{2}=Result.norm_trace_check{2}./dFFRobust.ScaleFactor;
 normTrace=cellfun(@(x) x(Result.dist_order,:),normTrace,'UniformOutput',false);
 SubTrace=cellfun(@(x) get_subthreshold(x,Result.spike(1,:),7,17),normTrace,'UniformOutput',false);
 
@@ -77,40 +76,43 @@ show_lap=unique(Result.VR(8,Show_t));
 figure(11); clf; tiledlayout(3,4);
 cmap=[0. 0.1 0.5; 0.5 0.1 0]; cmap_line=[0.2 0.6 1; 1 0.6 0.2]; h=[];
 nexttile([2 4])
-plot([Show_t-Show_t(1)]/1000,normTr(11,Show_t),'color',cmap_line(1,:)); hold all
-plot([Show_t-Show_t(1)]/1000,SubTr(11,Show_t),'color',cmap(1,:))
+plot([Show_t-Show_t(1)]/1000,normTr(11,Show_t)+0.3,'color',cmap_line(1,:)); hold all
+plot([Show_t-Show_t(1)]/1000,SubTr(11,Show_t)+0.3,'color',cmap(1,:))
 sp=Result.spike(1,Show_t);
 %plot(find(sp)/1000,normTr(11,Show_t(find(sp))),'r.')
-plot(find(sp)/1000,9,'r.')
+plot(find(sp)/1000,0.6,'r.')
 
-plot([Show_t-Show_t(1)]/1000,normTr(19,Show_t)-10,'color',cmap_line(2,:)); hold all
-plot([Show_t-Show_t(1)]/1000,SubTr(19,Show_t)-10,'color',cmap(2,:))
+plot([Show_t-Show_t(1)]/1000,normTr(19,Show_t),'color',cmap_line(2,:)); hold all
+plot([Show_t-Show_t(1)]/1000,SubTr(19,Show_t),'color',cmap(2,:))
 
-plot([Show_t-Show_t(1)]/1000,Result.VR(5,Show_t)/20-22,'color',[0.2 0.7 0])
+plot([Show_t-Show_t(1)]/1000,Result.VR(5,Show_t)/500-0.5,'color',[0.2 0.7 0])
+drawScaleBar(115/500,'vertical','color','k','position',[142 -0.5])
+drawScaleBar(10,'horizontal','color','k','position',[142 -0.5])
+drawScaleBar(0.15,'vertical','color','k','position',[142 0.3])
 axis off
+xlim([0 143]);
 
 PFcenter=75; nVRbin=[-50:150];
 nexttile([1 1])
 L=repmat(ringmovMean(LapFR(show_lap,:),7),1,3);
 imagesc((PFcenter-150+nVRbin)/150*200,[1:length(show_lap)],L(:,PFcenter+150+nVRbin)); 
 cb=colorbar;
-cb.Label.String='Firing rate (Hz)';
-xlabel('VR position (cm)');
+cb.Label.String='Firing rate (Hz)'; 
+xlabel('VR position (cm)'); ylabel('Laps')
 
 nexttile([1 1])
 L=repmat(ringmovMean(LapSub(show_lap,:,11),7),1,3);
-imagesc((PFcenter-150+nVRbin)/150*200,[1:length(show_lap)],L(:,PFcenter+150+nVRbin),[-2 5])
-xlabel('VR position (cm)');
+imagesc((PFcenter-150+nVRbin)/150*200,[1:length(show_lap)],L(:,PFcenter+150+nVRbin),[-2 5]/50)
+xlabel('VR position (cm)'); ylabel('Laps')
 cb=colorbar;
-cb.Label.String='Z score';
+cb.Label.String='∆F/F';
 
 nexttile([1 1])
 L=repmat(ringmovMean(LapSub(show_lap,:,19),7),1,3);
-imagesc((PFcenter-150+nVRbin)/150*200,[1:length(show_lap)],L(:,PFcenter+150+nVRbin),[-2 5])
+imagesc((PFcenter-150+nVRbin)/150*200,[1:length(show_lap)],L(:,PFcenter+150+nVRbin),[-2 5]/50)
 colormap(turbo);
-xlabel('VR position (cm)');
-cb=colorbar;
-cb.Label.String='Z score';
+xlabel('VR position (cm)'); ylabel('Laps')
+cb=colorbar; cb.Label.String='∆F/F';
 
 nexttile([1 1])
 L=repmat(ringmovMean(cat(3,LapFR(show_lap,:),LapSub(show_lap,:,11),LapSub(show_lap,:,19)),7),1,3);
@@ -122,9 +124,35 @@ yyaxis right
 plot((PFcenter-150+nVRbin)/150*200,mean(L(:,PFcenter+150+nVRbin,3),1,'omitnan'),'color',cmap_line(2,:),'linestyle','-','linewidth',1);
 axis tight; box off;
 set(gca,'YColor','k')
-ylabel('Z score');
+ylabel('∆F/F');
 xlabel('VR position (cm)');
 
+set_font('Arial');
+set_fontsize(16);
+set_figsize(400,200)
+%%
+figure(13); clf;
+cmap=[0. 0.1 0.5; 0.5 0.1 0]; cmap_line=[0.2 0.6 1; 1 0.6 0.2]; h=[];
+nexttile([2 4])
+plot([Show_t-Show_t(1)]/1000,normTr(11,Show_t)+0.3,'color',cmap_line(1,:)); hold all
+plot([Show_t-Show_t(1)]/1000,SubTr(11,Show_t)+0.3,'color',cmap(1,:))
+sp=Result.spike(1,Show_t);
+%plot(find(sp)/1000,normTr(11,Show_t(find(sp))),'r.')
+plot(find(sp)/1000,0.6,'r.')
+
+plot([Show_t-Show_t(1)]/1000,normTr(19,Show_t),'color',cmap_line(2,:)); hold all
+plot([Show_t-Show_t(1)]/1000,SubTr(19,Show_t),'color',cmap(2,:))
+
+plot([Show_t-Show_t(1)]/1000,Result.VR(5,Show_t)/500-0.5,'color',[0.2 0.7 0])
+drawScaleBar(115/500,'vertical','color','k','position',[133 -0.5])
+drawScaleBar(1,'horizontal','color','k','position',[133 -0.5])
+drawScaleBar(0.1,'vertical','color','k','position',[133 0.45])
+axis off
+xlim([121 133.5]);
+set_font('Arial');
+set_fontsize(16);
+set_figsize(180,150)
+%%
 figure(12); clf;
 calframe=ismember(Result.VR(8,:),show_lap) & Result.VR(end,:)>0.002;
 [p_map, z_map] = position_selectivity(SubTr(19,calframe), Result.VR(5,calframe), Result.VR(8,calframe),'nBins',150,'nShuffles',100000,'Show','on','Smoothing',7);

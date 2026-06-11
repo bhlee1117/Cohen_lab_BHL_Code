@@ -98,7 +98,8 @@ end
         [~, CS_spike_time] = unique(CS_spike);
         for b = 1:max(bwCS)
             bfrm = find(bwCS == b);
-            CS_trace(bfrm(1):CS_spike_time(bwCS(CS_spike_time) == b) - 5) = 0;
+            bfrm2 = find(bwCS(CS_spike_time) == b);
+            CS_trace(bfrm(1):CS_spike_time(bfrm2(end)) - 5) = 0;
         end
 
         tr_hi_CS = NaN(1,nTime);

@@ -1,6 +1,5 @@
 function h = drawScaleBar(barLength, direction, varargin)
 % drawScaleBar - Draws a simple scale bar on the current axes.
-
 % h = drawScaleBar(barLength, direction)
 % 
 % Inputs:
@@ -16,7 +15,7 @@ function h = drawScaleBar(barLength, direction, varargin)
 p = inputParser;
 addParameter(p, 'Position', []);
 addParameter(p, 'Color', 'w');
-addParameter(p, 'LineWidth', 2);
+addParameter(p, 'LineWidth', 3);
 parse(p, varargin{:});
 opts = p.Results;
 

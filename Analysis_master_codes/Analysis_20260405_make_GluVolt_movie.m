@@ -110,21 +110,6 @@ n=input("PCs to regress out\n");
 mov_glu2 =SeeResiduals(mov_glu ,V(:,n));
 mov_glu2 =SeeResiduals(mov_glu2 ,GluResult.mc([frm2read_g],:));
 
-% % Glu dF/F
-% mov_glu2=imgaussfilt(mov_glu2,glu_smooth_sigma);
-% glu_F0      = movmedian(mov_glu, 200, 3);
-% mov_glu_dFF = (mov_glu2 - glu_F0) ./ (glu_F0 + 1);
-% mov_glu_dFF = mov_glu_dFF-median(mov_glu_dFF,3);
-% glu_ref_im  = mean(mov_glu, 3);
-% GluMask=(max(GluResult.S_glu>0,[],3)>0);
-% GluMask= imdilate(GluMask, strel('disk', 2));
-% mov_glu_dFF_masked=mov_glu_dFF.*(max(GluResult.S_glu>0,[],3)>0);
-% 
-% % Reshape to (T x XY), interpolate, reshape back
-% mov2d       = tovec(mov_glu_dFF_masked)';          % T  x XY
-% mov2d_interp = interp1(t_glu(frm2read_g), mov2d, t_show, 'linear','extrap');  % T2 x XY
-% mov_glu_dFF_interp= reshape(mov2d_interp', size(mov_glu_dFF,1), size(mov_glu_dFF,2), []); % X x Y x T2
-
 % Glu dF/F — per-ROI masked, median-filtered, and normalized
 n_kernel = 2.5;   % median filter kernel size in pixels (set as needed)
 dil_rad  = 2;   % dilation radius in pixels
@@ -138,44 +123,52 @@ mov_glu_dFF_masked = zeros(size(mov_glu2), 'double');
     % Compute per-pixel mean over time within the (undilated) ROI
     F0_roi=tovec(mean(mov_glu,3))'* tovec(GluResult.S_glu)./squeeze(sum(tovec(GluResult.S_glu),[1 2]));
 
-for i = 1:N_roi
-
-    %-- (i) Build dilated mask for this ROI
-    roi_mask     = GluResult.S_glu(:,:,i) > 0;               % X x Y binary
+    roi_mask     = max(GluResult.S_glu> 0,[],3);               % X x Y binary
     roi_mask_dil = imdilate(roi_mask, strel('disk', dil_rad));% dilated mask
-
-    %-- Extract movie pixels within dilated mask, set outside to NaN
-    % Apply Gaussian smooth first (same as before), then mask
-    mov_roi = mov_glu2;               
-    mov_roi=maskBinary(mov_roi,roi_mask_dil==0,NaN);
-
-    %-- (ii) 2D median filter within masked area, per frame
+    mov_roi=maskBinary(mov_glu2,roi_mask_dil==0,NaN);
     mov_roi= imgaussfiltnan(mov_roi, n_kernel); 
-
-    % dF/F per pixel: (filtered - F0) / F0
-    dFF_roi = (mov_roi) ./ (F0_roi(i));
-
-    % Zero-centre per pixel by subtracting median over time
-    %dFF_roi = dFF_roi - median(dFF_roi, 3, 'omitnan');
-
-    % Accumulate into full movie (only within dilated mask)
-    for t = 1:size(dFF_roi, 3)
-        frame = dFF_roi(:,:,t);
-        frame(~roi_mask_dil) = 0;
-        mov_glu_dFF_masked(:,:,t) = mov_glu_dFF_masked(:,:,t) + frame;
+    F0_roi_img=zeros(size(mov_glu2), 'double');
+    for i=1:N_roi
+        roi_mask     = GluResult.S_glu(:,:,i) > 0;               % X x Y binary
+        F0_roi_img_tmp=maskBinary(zeros(size(mov_glu2), 'double'),roi_mask,F0_roi(i));
+        F0_roi_img=F0_roi_img+F0_roi_img_tmp;
     end
-
-    if mod(i, 10) == 0
-        fprintf('\r  ROI %d / %d  (%.0f%% complete)', i, N_roi, 100*i/N_roi);
-        drawnow;
-    end
-end
-fprintf('\n');
+    dFF_roi = (mov_roi) ./ F0_roi_img;
+% 
+% for i = 1:N_roi
+% 
+%     %-- (i) Build dilated mask for this ROI
+%     roi_mask     = GluResult.S_glu(:,:,i) > 0;               % X x Y binary
+%     roi_mask_dil = imdilate(roi_mask, strel('disk', dil_rad));% dilated mask
+% 
+%     %-- Extract movie pixels within dilated mask, set outside to NaN
+%     % Apply Gaussian smooth first (same as before), then mask
+%     mov_roi = mov_glu2;               
+%     mov_roi=maskBinary(mov_roi,roi_mask_dil==0,NaN);
+% 
+%     %-- (ii) 2D median filter within masked area, per frame
+%     mov_roi= imgaussfiltnan(mov_roi, n_kernel); 
+% 
+%     % dF/F per pixel: (filtered - F0) / F0
+%     dFF_roi = (mov_roi) ./ (F0_roi(i));
+% 
+%     % Zero-centre per pixel by subtracting median over time
+%     %dFF_roi = dFF_roi - median(dFF_roi, 3, 'omitnan');
+% 
+%     % Accumulate into full movie (only within dilated mask)
+%     mov_glu_dFF_masked = mov_glu_dFF_masked + maskBinary(dFF_roi,~roi_mask_dil,0);
+% 
+%     if mod(i, 10) == 0
+%         fprintf('\r  ROI %d / %d  (%.0f%% complete)', i, N_roi, 100*i/N_roi);
+%         drawnow;
+%     end
+% end
+% fprintf('\n');
 
 %-- Glu time axis for per-frame interpolation in render loop
 t_glu_show = t_glu(frm2read_g);   % time axis of mov_glu_dFF_masked (T_glu x 1)
 
-%% ===================== VOLTAGE F0 IMAGE =================================
+%% ===================== Read segment of voltage movie =================================
 % Load first complete segment to build a pixel-wise F0
 fprintf('Building voltage F0 image from mc01.bin...\n');
 mov_volt=readBinMov_BHL_multiple(fpath{f},3,frm2read_v,framesPerSeg,'mc');
@@ -312,7 +305,7 @@ Glu_coord=get_coord(GluResult.S_glu);
 %% Show representative synaptic event case.
 
 VoltLag=1000; %ms
-Syn2show=309;
+Syn2show=7;
 caxis=[-0.005 0.01];
 GluTimeGap=min(diff(GluResult.t_ax));
 GluLag=ceil(VoltLag/(GluTimeGap*1000));
@@ -507,219 +500,4 @@ p=Boxplot_wPoints2({IsolatedSubthreshold(IsolatedlikeSyn,3) IsolatedSubthreshold
 drawPValueLines(p,0,'StepHeight',0.005,'TextYOffset',0.002); box off;
 ylim([-8 14]*0.001); ylabel(sprintf('Subthreshold at isolated \n glutamate event (∆F/F)'))
 set(gca,'XTickLabel',{'Isolated-like synapse','Cluster-like synapse'})
-%% Glu-triggered voltage movie
-% For each glutamate event time, extract N frames before and M frames after
-% from the voltage movie, apply all artefact regressions, average across
-% events, and save as a 3-panel video (Glu frame | single-event Volt | STA Volt).
-%
-% REQUIRES in workspace (from make_GluVolt_movie setup block):
-%   fpath, f, Device_Data, VoltResult, GluResult, tformReg
-%   framesPerSeg, Fs_volt, volt_smooth_sigma
-%   mov_glu_dFF_masked, t_glu_show   (processed Glu movie + its time axis)
-%   cmap_volt, cmap_glu, volt_dFF_range, glu_dFF_range
-%   DendriteMask, GluResult.AvgGluImg
 
-% ===================== USER SETTINGS ====================================
-
-% Trigger times: glutamate event times in SECONDS (same scale as t_glu_show)
-% Example: use peak frames from GluResult or manual selection
-Syn2look=7;
-glu_event_times_s = GluResult.t_ax(find(GluSpike(Syn2look,:)>0));
-
-N_pre  = 250;    % voltage frames BEFORE each trigger  (ms at 1000 Hz)
-M_post = 250;    % voltage frames AFTER  each trigger  (ms at 1000 Hz)
-
-output_STA_filename = fullfile(fpath{f}, 'GluTriggered_VoltSTA.mp4');
-frame_rate          = 30;
-quality             = 95;
-
-%% ===================== CONVERT GLU TIMES -> VOLT FRAME INDICES ==========
-% t_glu_show is in seconds; volt frames are 1-based at Fs_volt = 1000 Hz
-
-nWin      = N_pre + M_post;          % total window length in volt frames
-tau_axis  = (-N_pre : M_post-1);     % frame offset axis (0 = trigger)
-t_axis_ms = tau_axis;                % ms at 1000 Hz
-
-[glu_event_volt_frames , dist] = match_nearest(gsp_time, VoltResult.tax);
-
-% Remove events too close to edges
-valid = glu_event_volt_frames > N_pre & ...
-        glu_event_volt_frames <= (framesPerSeg * 99) - M_post;  % 99 = safe upper bound
-glu_event_volt_frames = glu_event_volt_frames(valid);
-nEvents = numel(glu_event_volt_frames);
-fprintf('Using %d / %d events after edge exclusion.\n', nEvents, numel(glu_event_times_s));
-
-%% ===================== PRE-COMPUTE VOLT REGRESSION REGRESSORS ===========
-% These are the same regressors used in make_GluVolt_movie voltage block.
-% We build them globally so we can slice the right segment per window.
-fprintf('Preparing voltage regressors...\n');
-
-% Exponential bleaching fit — compute on a reference segment (seg 1)
-mov_ref_seg = readBinMov_BHL_multiple(fpath{f}, 3, 1:framesPerSeg, framesPerSeg, 'mc');
-meanF_ref   = squeeze(mean(mov_ref_seg, [1 2]));
-y_fit_ref   = expfitDM_2((1:framesPerSeg)', meanF_ref, (1:framesPerSeg)', 10000);
-% Normalise so it can be scaled to any segment
-bleach_ref  = y_fit_ref / mean(y_fit_ref);   % unit-mean bleach profile
-clear mov_ref_seg
-
-%% ===================== STA ACCUMULATOR ==================================
-sz_volt  = [double(Device_Data{3}.ROI(4)), double(Device_Data{3}.ROI(2))];
-nRow1    = sz_volt(1);  nCol1 = sz_volt(2);
-
-STA_volt     = zeros(nRow1, nCol1, nWin, 'double');
-STA_volt_sub = zeros(nRow1, nCol1, nWin, 'double');
-nContrib     = zeros(1, nWin);
-
-%% ===================== LOAD + PROCESS EACH EVENT ========================
-cached_seg_idx  = -1;
-cached_seg_data = [];
-
-for ei = 1:nEvents
-
-    trig_fr = glu_event_volt_frames(ei);   % global volt frame of trigger
-    win_fr  = trig_fr + tau_axis;          % global volt frames in window
-
-    %-- Identify which segments the window spans
-    seg_indices = unique(ceil(win_fr / framesPerSeg));
-
-    %-- Collect raw frames across (possibly multiple) segments
-    mov_win = zeros(nRow1, nCol1, nWin, 'single');
-
-    for fi = 1:nWin
-        g  = win_fr(fi);
-        si = ceil(g / framesPerSeg);           % bin file index
-        lf = mod(g - 1, framesPerSeg) + 1;    % local frame within file
-
-        if si ~= cached_seg_idx
-            binfile = [fpath{f} '/mc' num2str(si,'%02d') '.bin'];
-            cached_seg_data = single(readBinMov(binfile, nRow1, nCol1));
-            cached_seg_idx  = si;
-            fprintf('  Loaded %s\n', binfile);
-        end
-        mov_win(:,:,fi) = cached_seg_data(:,:,lf);
-    end
-    mov_win = double(mov_win);
-
-    %-- Artefact regression (same pipeline as make_GluVolt_movie)
-    % 1. Remove mean
-    mov_res_win = mov_win - mean(mov_win, 3);
-
-    % 2. Exponential bleaching (scaled bleach profile for this window)
-    meanF_win   = squeeze(mean(mov_win, [1 2]));
-    y_fit_win   = expfitDM_2((1:nWin)', meanF_win, (1:nWin)', 10000);
-    bkg_win     = zeros(1, nWin);
-    bkg_win(1,:) = y_fit_win;
-
-    % 3. Blood vessel trace
-    bkg_win = [bkg_win; VoltResult.bvTrace(:, win_fr)];
-
-    % 4. Motion traces
-    mc_win = VoltResult.mc(win_fr, :);
-    mov_res_win = SeeResiduals(mov_res_win, mc_win);
-    mov_res_win = SeeResiduals(mov_res_win, mc_win.^2);
-    mov_res_win = SeeResiduals(mov_res_win, mc_win(:,1) .* mc_win(:,end));
-
-    % 5. Bleaching + blood vessel
-    mov_res_win = SeeResiduals(mov_res_win, bkg_win, 1);
-
-    % 6. dF/F and slow-trend subtraction
-    ref_im_sm   = imgaussfilt(VoltResult.ref_im, volt_smooth_sigma);
-    dFF_win     = -imgaussfilt(mov_res_win, volt_smooth_sigma) ./ ref_im_sm;
-    dFF_win_sub = movmean(dFF_win, 20, 3);
-
-    % 7. Subtract pre-trigger baseline per pixel
-    baseline     = mean(dFF_win(:,:, 1:N_pre), 3);
-    dFF_win      = dFF_win     - baseline;
-    dFF_win_sub  = dFF_win_sub - mean(dFF_win_sub(:,:, 1:N_pre), 3);
-
-    %-- Accumulate into STA
-    STA_volt     = STA_volt     + dFF_win;
-    STA_volt_sub = STA_volt_sub + dFF_win_sub;
-    nContrib     = nContrib     + 1;
-
-    fprintf('  Event %d / %d done.\n', ei, nEvents);
-end
-
-%-- Normalise STA
-STA_volt     = STA_volt     ./ reshape(nContrib, 1, 1, []);
-STA_volt_sub = STA_volt_sub ./ reshape(nContrib, 1, 1, []);
-
-%% ===================== WARP STA INTO GLU SPACE ==========================
-% Transform one test frame to get output dimensions
-test_warp = transformCamera_O2B(Device_Data, tformReg, STA_volt(:,:,1), GluResult.AvgGluImg);
-[H_out, W_out] = size(test_warp);
-
-%% ===================== FIND GLU FRAME NEAREST EACH VOLT FRAME ===========
-% t_glu_show : time axis of mov_glu_dFF_masked
-% For each tau offset, find the closest Glu frame to display alongside
-
-t_trig_s     = glu_event_times_s(valid);   % trigger times in seconds
-t_win_s_base = tau_axis / Fs_volt;         % relative time in seconds
-
-%% ===================== VIDEO WRITER =====================================
-v = VideoWriter(output_STA_filename, 'MPEG-4');
-v.FrameRate = frame_rate;
-v.Quality   = quality;
-open(v);
-fig = figure('Color','k','Units','normalized','Position',[0 0 1 0.45]);
-
-%% ===================== RENDER LOOP ======================================
-fprintf('Rendering STA movie...\n');
-
-for fi = 1:nWin
-
-    %-- Warp STA volt frames into Glu space
-    sta_frame     = STA_volt(:,:,fi);
-    sta_frame_sub = STA_volt_sub(:,:,fi);
-
-    alignedSTA     = transformCamera_O2B(Device_Data, tformReg, sta_frame,     GluResult.AvgGluImg);
-    alignedSTA_sub = transformCamera_O2B(Device_Data, tformReg, sta_frame_sub, GluResult.AvgGluImg);
-
-    volt_rgb     = grs2rgb(alignedSTA,     cmap_volt, volt_dFF_range(1), volt_dFF_range(2));
-    volt_sub_rgb = grs2rgb(alignedSTA_sub, cmap_volt, volt_dFF_range(1), volt_dFF_range(2));
-
-    volt_rgb     = volt_rgb     .* DendriteMask;
-    volt_sub_rgb = volt_sub_rgb .* DendriteMask;
-
-    %-- Get corresponding Glu frame (use mean trigger time as reference)
-    t_abs_s   = mean(glu_event_times_s(valid)) + t_win_s_base(fi);
-    gi_frac   = interp1(t_glu_show, 1:numel(t_glu_show), t_abs_s, 'linear', 'extrap');
-    gi_frac   = min(max(gi_frac, 1), size(mov_glu_dFF_masked, 3));
-    gi_lo     = max(floor(gi_frac), 1);
-    gi_hi     = min(ceil(gi_frac),  size(mov_glu_dFF_masked, 3));
-    alpha_g   = gi_frac - gi_lo;
-    glu_frame = (1-alpha_g) * mov_glu_dFF_masked(:,:,gi_lo) + alpha_g * mov_glu_dFF_masked(:,:,gi_hi);
-    glu_rgb   = grs2rgb(glu_frame, cmap_glu, glu_dFF_range(1), glu_dFF_range(2));
-
-    %-- Overlay
-    overlay = glu_rgb + volt_sub_rgb;
-    overlay = min(overlay, 1);
-
-    %-- Render
-    clf(fig);
-    set(fig, 'Color','k');
-    tl = tiledlayout(fig, 1, 3, 'TileSpacing','compact', 'Padding','compact');
-
-    ax1 = nexttile(tl, 1);
-    imshow(glu_rgb, 'Parent', ax1);
-    title(ax1, sprintf('Glutamate  (%+.0f ms)', t_axis_ms(fi)), 'Color','w', 'FontSize',11);
-
-    ax2 = nexttile(tl, 2);
-    imshow(volt_rgb, 'Parent', ax2);
-    title(ax2, sprintf('Volt STA  n=%d  (%+.0f ms)', nEvents, t_axis_ms(fi)), 'Color','w', 'FontSize',11);
-
-    ax3 = nexttile(tl, 3);
-    imshow(overlay, 'Parent', ax3);
-    title(ax3, 'Overlay (G=Glu, R=Volt STA)', 'Color','w', 'FontSize',11);
-
-    drawnow;
-    writeVideo(v, getframe(fig));
-
-    if mod(fi, 50) == 0
-        fprintf('  Frame %d / %d  (%.1f%%)\n', fi, nWin, 100*fi/nWin);
-    end
-end
-
-close(v);
-close(fig);
-fprintf('Done. STA movie saved to:\n  %s\n', output_STA_filename);

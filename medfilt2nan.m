@@ -16,18 +16,20 @@ end
 % pad with NaNs so window stays full at edges
 padm = floor(kernelSize(1)/2);
 padn = floor(kernelSize(2)/2);
-Apad = padarray(A,[padm padn],NaN,'both');
 
 out = NaN(size(A));
-for i = 1:size(A,1)
-    for j = 1:size(A,2)
-        window = Apad(i:i+kernelSize(1)-1, j:j+kernelSize(2)-1);
-        % take median ignoring NaNs
-        vals = window(~isnan(window));
-        if ~isempty(vals)
-            out(i,j) = median(vals);
-        else
-            out(i,j) = NaN;
+for z=1:size(A,3);
+    Apad = padarray(A(:,:,z),[padm padn],NaN,'both');
+    for i = 1:size(A,1)
+        for j = 1:size(A,2)
+            window = Apad(i:i+kernelSize(1)-1, j:j+kernelSize(2)-1);
+            % take median ignoring NaNs
+            vals = window(~isnan(window));
+            if ~isempty(vals)
+                out(i,j,z) = median(vals);
+            else
+                out(i,j,z) = NaN;
+            end
         end
     end
 end

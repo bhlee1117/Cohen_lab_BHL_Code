@@ -1,0 +1,555 @@
+%% Set the path
+clear
+clc;
+cd '/Users/bhlee1117/Documents/GitHub/Cohen_lab_BHL_Code/Analysis_master_codes';
+[~, ~, raw] = xlsread(['/Volumes/cohen_lab/Lab/Labmembers/Byung Hun Lee/Data/' ...
+    'Prism_OptopatchData_Arrangement.xlsx'], 'Sheet1', 'C5:R196');
+
+save_to='/Volumes/BHL18TB_D2/Arranged_Data/Prism_OptopatchResult';
+fpath=raw(:,1);
+Mouse=cell2mat(raw(:,2));
+NeuronInd=cell2mat(raw(:,5));
+CamType=raw(:,3);
+StructureData=raw(:,10);
+TimeSegFrame=cell2mat(cellfun(@(x) (str2num(num2str(x))),raw(:,11),'UniformOutput',false));
+PixelSize=cell2mat(cellfun(@(x) (str2num(num2str(x))),raw(:,12),'UniformOutput',false));
+set(0,'DefaultFigureWindowStyle','docked')
+
+%foi=[94 96 97 98 99 102 104:110 123 144 145 151:156 164 165 172:175 185 186 190 191 192];
+foi_somDend=[1 22 14 18 10 26 25 32 46 47 48 43 34 35 2:4 6:8 12 13 17 20 29 31 39 41 42 44 49 50 53 58];
+foi=[7,58,63,68,93,94,96,97,98,99,101,102,103,104,105,106,107,108,109,110,112,113,114,115,116,117,118,119,120,121,122,123,124,144,151,152,153,154,155,156,157,158,164 165 172:175 185 186 190 191 192];
+foi=unique([foi foi_somDend]);
+[a, unqInd] = unique([Mouse(foi) NeuronInd(foi)] ,'row');
+
+%% Movie saving
+nTauSTA=[20 50];
+Referencefile=[];
+for i=unqInd(36)'
+
+    SameCellInd=find(Mouse==Mouse(foi(i)) & NeuronInd==NeuronInd(foi(i)));
+    fprintf('Processing mouse #%2.0f, Neuron #%2.0f \n',Mouse(foi(i)),NeuronInd(foi(i)));
+    figure(i); clf;
+
+    nspike=[]; nStim=[]; g=1;
+    for f=SameCellInd'
+        VoltResulttmp=importdata(fullfile(fpath{f},'OP_Result.mat'));
+        if isfield(VoltResulttmp,'spike')
+            nspike(g)=sum(VoltResulttmp.spike(1,:));
+            nStim(g)=sum(diff(VoltResulttmp.Blue>0)==1);
+        else
+            nspike(g)=0;
+            nStim(g)=sum(diff(VoltResulttmp.Blue>0)==1);
+        end
+        g=g+1;
+    end
+    [maxspN, f2sta]=max(nspike);
+    [maxstimN, f2staStim]=max(nStim);
+    isStimTA=0;
+    if maxspN==0
+        disp('No Spike detected, do Stim-triggered-average');
+        f2sta=f2staStim;
+        isStimTA=1;
+    end
+
+    for f=SameCellInd(f2sta)'
+
+        fprintf('Processing file # %2.0f... \n',f);
+        VoltResult=importdata(fullfile(fpath{f},'OP_Result.mat'));
+        imshow2(VoltResult.ref_im,[]); title(f); drawnow;
+
+        fields = {'frameStacked','Transition'};
+        for ii = 1:length(fields)
+            STAinfo.(fields{ii}) = []; % Clear the specified field for the given stype
+        end
+        STAinfo.StackedMovieN=0;
+
+        [nROI frm_end]=size(VoltResult.normTraces);
+        sz=size(VoltResult.ref_im);
+        time_segment=TimeSegFrame(f);
+        f_seg=[[1:time_segment:frm_end] frm_end+1];
+        readFrame=diff(f_seg);
+        f_seg_real=[1:time_segment:frm_end];
+        Nfile=ceil(frm_end/time_segment);
+        f_seg_real=[0:time_segment:frm_end];
+        f_seg_real(end+1)=frm_end;
+        f_seg_real=f_seg_real';
+
+        if isfield(VoltResult,'spike')
+            perispike_time=unique(find(VoltResult.spike(1,:)>0)'+[-5:30]); perispike_time(perispike_time<1 | perispike_time>frm_end)=[];
+        else
+            perispike_time=[];
+        end
+        periblue_time=unique(find(VoltResult.Blue>0)'+[-5:30]); periblue_time(periblue_time<1 | periblue_time>frm_end)=[];
+        t_fit= (ind2vec(frm_end,periblue_time,1)==0) & (ind2vec(frm_end,perispike_time,1)==0);
+
+        if ~isStimTA
+            SpikeTimeVec=ind2vec(frm_end,find(VoltResult.spike(1,:)>0),1);
+        else
+            Btr=diff(VoltResult.Blue>0)==1;
+            SpikeTimeVec=ind2vec(frm_end,find(Btr),1);
+        end
+        disp(['N = ' num2str(sum(SpikeTimeVec)) ' spikes are averaging'])
+        if isfield(VoltResult,'dirtTrace')
+            DirtTrace=sum(VoltResult.dirtTrace>0,1)>0;
+        else
+            DirtTrace=zeros(1,frm_end);
+        end
+        BlueTrace=VoltResult.Blue>0;
+
+        Mov_PeakTA=[];
+        F0img=[]; c=1;
+        STAinfo.frameStacked{c}=[];
+        STAinfo.isStimTA=isStimTA;
+        CatAddSpikeTime=[];
+
+        for j=1:Nfile
+
+            fprintf('Processing %2.0f/%2.0f movie chunk \n',j,Nfile);
+            Readframeaxis=[f_seg_real(j,1)+1:f_seg_real(j+1,1)];
+            [fInd]=find(SpikeTimeVec(:,Readframeaxis));
+            fIndVec=SpikeTimeVec(:,Readframeaxis);
+            if ~isempty(fInd)
+                mov_path=[fpath{f} '/mc_ShutterReg' num2str(j,'%02d') '.bin'];
+                mc_path=[fpath{f} '/mcTrace' num2str(j,'%02d') '.mat'];
+                if ~isfile(mov_path)
+                    pathOut = convertDrivePath(mov_path, "BHL18TB_D2");
+                    mcpathnew=convertDrivePath(mc_path, "BHL18TB_D2");
+                    if ~isfile(pathOut)
+                        pathOut = convertDrivePath(mov_path, "BHL18TB_D1");
+                        mcpathnew=convertDrivePath(mc_path, "BHL18TB_D1");
+                    end
+                    mov_path=pathOut;
+                    mc_path=mcpathnew;
+                end
+                t2read=[1:f_seg_real(j+1,1)-f_seg_real(j,1)];
+                try
+                    mov_mc=double(readBinMov(mov_path,sz(1),sz(2)));
+                    disp('readBinMov error, trying readBinMov_times.')
+                catch
+                    mov_mc=double(readBinMov_times(mov_path,sz(1),sz(2),t2read));
+                end
+                mov_mc=mov_mc(:,:,t2read);
+                load(mc_path);
+
+                meanF=squeeze(mean(mov_mc,[1 2]));
+                mc=movmean(mcTrace.xymean(t2read,:),3,1);
+                bkg = zeros(1, size(mov_mc,3));
+
+                frame2fit=find(t_fit(Readframeaxis))';
+                [bleaching_fit] = expfitDM_2(frame2fit,meanF(frame2fit),[1:size(mov_mc,3)]',[10000 1000]);
+                bkg(1,:) = bleaching_fit;  % bleaching regress out
+                bkg=bkg./mean(bkg);
+
+                mov_mc = mov_mc./reshape(bkg,1,1,[]);
+                mov_res= mov_mc-median(mov_mc,3);
+                mov_res = SeeResiduals(mov_res,mc);
+                mov_res = SeeResiduals(mov_res,mc.^2);
+                mov_res = SeeResiduals(mov_res,mc(:,1).*mc(:,end));
+                mov_res=tovec(mov_res);
+                clear mov_mc
+
+                [~, AddMov, AddSpikeTime]=get_STA(mov_res,fIndVec,nTauSTA(1),nTauSTA(2));
+                AddSpikeTime=(AddSpikeTime)+f_seg_real(j);
+                Mov_PeakTA=cat(3,Mov_PeakTA,permute(AddMov,[1 3 2]));
+                CatAddSpikeTime=[CatAddSpikeTime AddSpikeTime];
+
+                MovtoWrite=vm(double(Mov_PeakTA)+10000);
+                Movinfo=whos('MovtoWrite');
+                if Movinfo.bytes > 3.0*10^9 | j==(length(f_seg)-1)
+                    disp('Saving STA movies...');
+                    if Movinfo.bytes >10^10
+
+                        N2divide=ceil(Movinfo.bytes/(4*10^9));
+                        events2divide=round(size(MovtoWrite,3)/N2divide);
+                        inddivide=[0:events2divide:size(MovtoWrite,3)];
+                        inddivide(end+1)=size(MovtoWrite,3);
+
+                        for jj=1:N2divide
+                            ind2save=[inddivide(jj)+1:inddivide(jj+1)];
+                            MovtoWrite_sub=MovtoWrite(:,:,ind2save);
+                            MovtoWrite_sub.transpose.savebin(fullfile(fpath{f},['SpikeTrigger_movie_20260518_' num2str(c) '.bin']))
+                            STAinfo.StackedMovieN=STAinfo.StackedMovieN+length(ind2save);
+                            STAinfo.frameStacked{c}=[CatAddSpikeTime(ind2save)];
+                            STAinfo.Transition(c)=CatAddSpikeTime(ind2save(end));
+                            c=c+1;
+                            disp('Move on to the next bin bcs of big size.')
+                            clear MovtoWrite_sub;
+                        end
+                        STAinfo.frameStacked{c}=[];
+                        CatAddSpikeTime=[];
+                        clear Mov_PeakTA MovtoWrite
+                        Mov_PeakTA=[];
+                    else
+                        MovtoWrite.transpose.savebin(fullfile(fpath{f},['SpikeTrigger_movie_20260518_' num2str(c) '.bin']))
+                        disp('Move on to the next bin')
+                        STAinfo.frameStacked{c}=CatAddSpikeTime;
+                        STAinfo.Transition(c)=CatAddSpikeTime(end);
+                        c=c+1;
+                        STAinfo.frameStacked{c}=[];
+                        CatAddSpikeTime=[];
+                        clear Mov_PeakTA MovtoWrite
+                        Mov_PeakTA=[];
+                    end
+                end
+            else
+                disp([num2str(j) ' has no valid index']);
+            end
+            clear mov_res mov_mc
+        end
+        disp('Stacking finished and STA info saved');
+        save(fullfile(fpath{f},'STAinfo'),'STAinfo','-v7.3');
+
+        %load
+        % load(fullfile(fpath{f},'STAinfo'));
+        % load(fullfile(fpath{f},"output_data.mat"));
+
+        % sz=double(Device_Data{1, 3}.ROI([2 4]));
+        %
+        % SS_list=find(VoltResult.spike(1,:)>0);
+        % SS2search=cellfun(@(x) find(ismember(x,SS_list)),STAinfo.frameStacked,'UniformOutput',false);
+        % SSadded_frame=cellfun(@(x,y) x(y),STAinfo.frameStacked,SS2search,'UniformOutput',false);
+        %
+        % AlignMov=zeros(sz(2)*sz(1),sum(nTauPeak)+1);
+        % for c=1:sum(~cellfun(@isempty,STAinfo.frameStacked))
+        %     fprintf('Reading %2.0f th file out of %2.0f stacked \n',c,length(STAinfo.frameStacked));
+        %     fname=['SpikeTrigger_movie_20260518_' num2str(c) '.bin'];
+        %     Movreadsub=(double(readBinMov_times(fullfile(fpath{f},fname),sz(2)*sz(1),sum(nTauPeak)+1,SS2search{c}))-10000);
+        %     %AlignMov=cat(3,AlignMov,Movreadsub);
+        %     AlignMov=AlignMov+sum(Movreadsub,3);
+        %     MovreadsubCS=(double(readBinMov_times(fullfile(fpath{f},fname),sz(2)*sz(1),sum(nTauPeak)+1,CS2search{c}))-10000);
+        %     %AlignCSMov=cat(3,AlignCSMov,MovreadsubCS);
+        %     AlignCSMov=AlignCSMov+sum(MovreadsubCS,3);
+        % end
+        % AlignMov=AlignMov./sum(cellfun(@length,SS2search));
+        % AlignCSMov=AlignCSMov./sum(cellfun(@length,CS2search));
+        %
+        % STAmovieIsolatedSS=reshape(mean(AlignMov,3,'omitnan'),sz(2),sz(1),[]);
+        % STAmovieIsolatedCS=reshape(mean(AlignCSMov,3,'omitnan'),sz(2),sz(1),[]);
+        % save(fullfile(fpath{f},'STAmovieSSCS_20260523.mat'),'STAmovieIsolatedSS','nTauPeak','CSadded_frame','SSadded_frame','STAmovieIsolatedCS','-v7.3');
+    end
+end
+
+%% Load STA movies and set the scaling factor
+nTauSTA=[20 50];
+for i=unqInd(36)'
+    SameCellInd=find(Mouse==Mouse(foi(i)) & NeuronInd==NeuronInd(foi(i)));
+    fprintf('Processing mouse #%2.0f, Neuron #%2.0f \n',Mouse(foi(i)),NeuronInd(foi(i)));
+    figure(i); clf;
+
+    nspike=[]; nStim=[]; g=1;
+    for f=SameCellInd'
+        VoltResulttmp=importdata(fullfile(fpath{f},'OP_Result.mat'));
+        if isfield(VoltResulttmp,'spike')
+            nspike(g)=sum(VoltResulttmp.spike(1,:));
+            nStim(g)=sum(diff(VoltResulttmp.Blue>0)==1);
+        else
+            nspike(g)=0;
+            nStim(g)=sum(diff(VoltResulttmp.Blue>0)==1);
+        end
+        g=g+1;
+    end
+    [maxspN, f2sta]=max(nspike);
+    [maxstimN, f2staStim]=max(nStim);
+    isStimTA=0;
+    if maxspN==0
+        disp('No Spike detected, do Stim-triggered-average');
+        f2sta=f2staStim;
+        isStimTA=1;
+    end
+
+    f=SameCellInd(f2sta);
+    load(fullfile(fpath{f},'STAinfo'))
+    if STAinfo.isStimTA==1
+        disp('dFF estimation from Stimulation-triggered average...');
+    end
+    if ~isfile(fullfile(fpath{f},"output_data.mat"))
+        load(convertDrivePath(fullfile(fpath{f},"output_data.mat"),'BHL18TB_D2'));
+    else
+        load(fullfile(fpath{f},"output_data.mat"))
+    end
+    VoltResult=importdata(fullfile(fpath{f},'OP_Result.mat'));
+    sz=size(VoltResult.ref_im);
+
+    ftprint2cal=VoltResult.ftprnt;
+    if ~STAinfo.isStimTA
+        SS_list=find(VoltResult.spike(1,:)>0);
+        t2integrate=[-2:4];
+        SPlist2AVE=SS_list;
+    else
+        SS_list=find(diff(VoltResult.Blue>0)==1);
+        t2integrate=[0:45];
+        SPlist2AVE=SS_list;
+    end
+
+    SP2search=cellfun(@(x) find(ismember(x,SPlist2AVE)),STAinfo.frameStacked,'UniformOutput',false);
+    SPadded_frame=cellfun(@(x,y) x(y),STAinfo.frameStacked,SP2search,'UniformOutput',false);
+    AlignMov=zeros(sz(2)*sz(1),sum(nTauSTA)+1);
+
+    for c=1:sum(~cellfun(@isempty,STAinfo.frameStacked))
+        fprintf('Reading %2.0f th file out of %2.0f stacked \n',c,length(STAinfo.frameStacked));
+        fname=['SpikeTrigger_movie_20260518_' num2str(c) '.bin'];
+        Movreadsub=(double(readBinMov_times(fullfile(fpath{f},fname),sz(2)*sz(1),sum(nTauSTA)+1,SP2search{c}))-10000);
+        AlignMov=AlignMov+sum(Movreadsub,3);
+    end
+    AlignMov=AlignMov./sum(cellfun(@length,SP2search));
+    STAmovie=reshape(AlignMov,sz(1),sz(2),[]);
+    STAmovie=STAmovie-median(STAmovie(:,:,1:nTauSTA(1)/2),3);
+
+    clear opt opt2
+    opt.pct_low=50; opt.pct_high=99.9; opt.slope_ub=[inf inf];
+    opt2.pct_low=50; opt2.pct_high=99.9; opt2.slope_ub=[inf inf];
+    figure(1); clf;
+    imshow2(VoltResult.ref_im,[]); hold all;
+    try
+        bp=cell2mat(VoltResult.bluePatt);
+        scatter(bp(:,2),bp(:,1),10,[0 0.6 1],'filled');
+    catch
+        if iscell(VoltResult.BlueDMD)
+        bp=cell2mat(VoltResult.BlueDMD);
+        else
+        bp=bwboundaries(VoltResult.BlueDMDimg>0);    
+        bp=cell2mat(bp);
+        end
+        scatter(bp(:,2),bp(:,1),10,[0 0.6 1],'filled');
+    end
+
+    if STAinfo.isStimTA==0
+        dFFresults = interactive_get_robustdFF(max(-STAmovie(:,:,nTauSTA(1)+t2integrate),[],3), ftprint2cal, VoltResult.ref_im-100, opt);
+    else
+        dFFresults = interactive_get_robustdFF(sum(-STAmovie(:,:,nTauSTA(1)+t2integrate),3), ftprint2cal, VoltResult.ref_im-100, opt);
+    end
+    R2=vertcat(dFFresults.Rsq);
+
+    dFFrobustbAP=vertcat(dFFresults(:).Fslope)';
+    disp('Interactive dFF done');
+
+    normTrace2Ave=VoltResult.normTraces;
+    if isfield(VoltResult,'dirtTrace')
+        normTrace2Ave(VoltResult.dirtTrace > 0) = NaN;
+    end
+    [STAtrace]=get_STA(normTrace2Ave,SPlist2AVE,nTauSTA(1),nTauSTA(2));
+    STAtrace=STAtrace-median(STAtrace(:,1:nTauSTA(1)/2),2);
+    if STAinfo.isStimTA==0
+        ScaleFactor=max(STAtrace(:,nTauSTA(1)+t2integrate),[],2)./dFFrobustbAP';
+    else
+        ScaleFactor=sum(STAtrace(:,nTauSTA(1)+t2integrate),2)./dFFrobustbAP';
+    end
+
+    STAtrace_pcanorm=STAtrace./VoltResult.F0_PCA;
+    STAtrace_norm=STAtrace./ScaleFactor;
+
+    figure(i); clf;
+    tiledlayout(2,2,'Padding','tight')
+    nexttile([1 1]);
+    scatter(VoltResult.interDendDist(1,:)',dFFrobustbAP',30,vec2cmap(R2,'turbo',[0 1]),'filled'); hold all;
+    text(VoltResult.interDendDist(1,:)',dFFrobustbAP',num2str([1:length(dFFrobustbAP)]'))
+    title('Based on interactive dF/F');
+
+    nexttile([1 1]);
+    scatter(ScaleFactor,VoltResult.F0_PCA,30,vec2cmap(R2,'turbo',[0 1]),'filled')
+    text(ScaleFactor,VoltResult.F0_PCA,num2str([1:length(dFFrobustbAP)]'))
+    colormap(turbo(256))
+    xlabel('Scale factor'); ylabel('Fstd');
+
+    nexttile([1 1]);
+    [~, dsort]=sort(VoltResult.interDendDist(1,:));
+    imagesc(STAtrace_pcanorm(dsort,:));
+
+    nexttile([1 1]);
+    imagesc(STAtrace_norm(dsort,:));
+    set(gca,'ytick',[1:length(dFFrobustbAP)],'YTickLabel',dsort)
+    colormap(turbo(256));
+    drawnow;
+
+    clear RobustdFFfit
+    %save RobustdFF fit to each file
+    for f2=SameCellInd'
+        RobustdFFfit.dFFresultsInteractive=dFFresults;
+        RobustdFFfit.fit=vertcat(dFFresults.Fslope);
+        RobustdFFfit.R2=R2;
+        RobustdFFfit.ScaleFactor=ScaleFactor;
+        RobustdFFfit.dFFrobustbAP=dFFrobustbAP;
+        save(fullfile(fpath{f2},'RobustdFFfit'),'RobustdFFfit','-v7.3');
+        disp(['Saved RobustdFF fit to ' fullfile(fpath{f2},'RobustdFFfit')])
+    end
+end
+
+%% Load STA movies and set the scaling factor (for split ftprint cases)
+nTauSTA=[20 50];
+for i=unqInd(36)'
+    SameCellInd=find(Mouse==Mouse(foi(i)) & NeuronInd==NeuronInd(foi(i)));
+    fprintf('Processing mouse #%2.0f, Neuron #%2.0f \n',Mouse(foi(i)),NeuronInd(foi(i)));
+    figure(i); clf;
+
+    nspike=[]; nStim=[]; issplitexist=[]; g=1;
+    for f=SameCellInd'
+        VoltResulttmp=importdata(fullfile(fpath{f},'OP_Result.mat'));
+        if isfield(VoltResulttmp,'spike')
+            nspike(g)=sum(VoltResulttmp.spike(1,:));
+            nStim(g)=sum(diff(VoltResulttmp.Blue>0)==1);
+        else
+            nspike(g)=0;
+            nStim(g)=sum(diff(VoltResulttmp.Blue>0)==1);
+        end
+        if isfield(VoltResulttmp,'ftprntSplit')
+            issplitexist(g)=1;
+        else
+            issplitexist(g)=0;
+        end
+        g=g+1;
+    end
+    [maxspN, f2sta]=max(nspike.*issplitexist);
+    [maxstimN, f2staStim]=max(nStim.*issplitexist);
+    isStimTA=0;
+    if maxspN==0
+        disp('No Spike detected, do Stim-triggered-average');
+        f2sta=f2staStim;
+        isStimTA=1;
+    end
+
+    f=SameCellInd(f2sta);
+    load(fullfile(fpath{f},'STAinfo.mat'))
+    if STAinfo.isStimTA==1
+        disp('dFF estimation from Stimulation-triggered average...');
+    end
+    if ~isfile(fullfile(fpath{f},"output_data.mat"))
+        load(convertDrivePath(fullfile(fpath{f},"output_data.mat"),'BHL18TB_D2'));
+    else
+        load(fullfile(fpath{f},"output_data.mat"))
+    end
+    VoltResult=importdata(fullfile(fpath{f},'OP_Result.mat'));
+    sz=size(VoltResult.ref_im);
+
+    ftprint2cal=VoltResult.ftprntSplit;
+    if ~STAinfo.isStimTA
+        SS_list=find(VoltResult.spike(1,:)>0);
+        t2integrate=[-2:4];
+        SPlist2AVE=SS_list;
+    else
+        SS_list=find(diff(VoltResult.Blue>0)==1);
+        t2integrate=[0:45];
+        SPlist2AVE=SS_list;
+    end
+
+    SP2search=cellfun(@(x) find(ismember(x,SPlist2AVE)),STAinfo.frameStacked,'UniformOutput',false);
+    SPadded_frame=cellfun(@(x,y) x(y),STAinfo.frameStacked,SP2search,'UniformOutput',false);
+    AlignMov=zeros(sz(2)*sz(1),sum(nTauSTA)+1);
+
+    for c=1:sum(~cellfun(@isempty,STAinfo.frameStacked))
+        fprintf('Reading %2.0f th file out of %2.0f stacked \n',c,length(STAinfo.frameStacked));
+        fname=['SpikeTrigger_movie_20260518_' num2str(c) '.bin'];
+        Movreadsub=(double(readBinMov_times(fullfile(fpath{f},fname),sz(2)*sz(1),sum(nTauSTA)+1,SP2search{c}))-10000);
+        AlignMov=AlignMov+sum(Movreadsub,3);
+    end
+    AlignMov=AlignMov./sum(cellfun(@length,SP2search));
+    STAmovie=reshape(AlignMov,sz(1),sz(2),[]);
+    STAmovie=STAmovie-median(STAmovie(:,:,1:nTauSTA(1)/2),3);
+
+    clear opt opt2
+    opt.pct_low=50; opt.pct_high=99.9; opt.slope_ub=[inf inf];
+    opt2.pct_low=50; opt2.pct_high=99.9; opt2.slope_ub=[inf inf];
+    figure(1); clf;
+    imshow2(VoltResult.ref_im,[]); hold all;
+    try
+        bp=cell2mat(VoltResult.bluePatt);
+        scatter(bp(:,2),bp(:,1),10,[0 0.6 1],'filled');
+    catch
+        if iscell(VoltResult.BlueDMD)
+        bp=cell2mat(VoltResult.BlueDMD);
+        else
+        bp=bwboundaries(VoltResult.BlueDMDimg>0);    
+        bp=cell2mat(bp);
+        end
+        scatter(bp(:,2),bp(:,1),10,[0 0.6 1],'filled');
+    end
+
+    if STAinfo.isStimTA==0
+        dFFresults = interactive_get_robustdFF(max(-STAmovie(:,:,nTauSTA(1)+t2integrate),[],3), ftprint2cal, VoltResult.ref_im-100, opt);
+    else
+        dFFresults = interactive_get_robustdFF(sum(-STAmovie(:,:,nTauSTA(1)+t2integrate),3), ftprint2cal, VoltResult.ref_im-100, opt);
+    end
+    R2=vertcat(dFFresults.Rsq);
+
+    dFFrobustbAP=vertcat(dFFresults(:).Fslope)';
+    disp('Interactive dFF done');
+
+    normTrace2Ave=VoltResult.tracesSplit;
+    if isfield(VoltResult,'dirtTrace')
+        normTrace2Ave(VoltResult.dirtTrace > 0) = NaN;
+    end
+    [STAtrace]=get_STA(normTrace2Ave,SPlist2AVE,nTauSTA(1),nTauSTA(2));
+    STAtrace=STAtrace-median(STAtrace(:,1:nTauSTA(1)/2),2);
+    if STAinfo.isStimTA==0
+        ScaleFactor_split=max(STAtrace(:,nTauSTA(1)+t2integrate),[],2)./dFFrobustbAP';
+    else
+        ScaleFactor_split=sum(STAtrace(:,nTauSTA(1)+t2integrate),2)./dFFrobustbAP';
+    end
+
+    [F0PCA]=get_F0PCA(normTrace2Ave,1:10);
+    STAtrace_pcanorm=STAtrace./F0PCA;
+    STAtrace_norm=STAtrace./ScaleFactor_split;
+
+    figure(i); clf;
+    tiledlayout(2,2,'Padding','tight')
+    nexttile([1 1]);
+    scatter(VoltResult.interDendDistSplit(1,:)',dFFrobustbAP',30,vec2cmap(R2,'turbo',[0 1]),'filled'); hold all;
+    text(VoltResult.interDendDistSplit(1,:)',dFFrobustbAP',num2str([1:length(dFFrobustbAP)]'))
+    title('Based on interactive dF/F');
+
+    nexttile([1 1]);
+    scatter(ScaleFactor_split,F0PCA,30,vec2cmap(R2,'turbo',[0 1]),'filled')
+    text(ScaleFactor_split,F0PCA,num2str([1:length(dFFrobustbAP)]'))
+    colormap(turbo(256))
+    xlabel('Scale factor'); ylabel('Fstd');
+
+    nexttile([1 1]);
+    [~, dsort]=sort(VoltResult.interDendDistSplit(1,:));
+    imagesc(STAtrace_pcanorm(dsort,:));
+
+    nexttile([1 1]);
+    imagesc(STAtrace_norm(dsort,:));
+    set(gca,'ytick',[1:length(dFFrobustbAP)],'YTickLabel',dsort)
+    colormap(turbo(256));
+    drawnow;
+
+    clear RobustdFFfitsplit
+    %save RobustdFF fit to each file
+    for f2=SameCellInd'
+        RobustdFFfitsplit.dFFresultsInteractive=dFFresults;
+        RobustdFFfitsplit.fit=vertcat(dFFresults.Fslope);
+        RobustdFFfitsplit.R2=R2;
+        RobustdFFfitsplit.ScaleFactor=ScaleFactor_split;
+        RobustdFFfitsplit.dFFrobustbAP=dFFrobustbAP;
+        save(fullfile(fpath{f2},'RobustdFFfitsplit'),'RobustdFFfitsplit','-v7.3');
+        disp(['Saved RobustdFFsplit fit to ' fullfile(fpath{f2},'RobustdFFfitsplit')])
+    end
+end
+
+
+%  %%
+% for f=190
+%     SameCellInd=find(Mouse==Mouse(f) & NeuronInd==NeuronInd(f));
+%     VoltResult=importdata([fpath{f} '/OP_Result.mat']);
+%     robustdFFresult=importdata(fullfile(fpath{f},'RobustdFFfit.mat'));
+%     load(fullfile(fpath{f},'STAinfo'));
+% 
+%     if ~STAinfo.isStimTA
+%         SS_list=find(VoltResult.spike(1,:)>0);
+%         t2integrate=[-2:4];
+%         SPlist2AVE=SS_list;
+%     else
+%         SS_list=find(diff(VoltResult.Blue>0)==1);
+%         t2integrate=[0:45];
+%         SPlist2AVE=SS_list;
+%     end
+% 
+%     STAsplit=get_STA(VoltResult.traces)
+% 
+%     ScaleFactor_split=interp_two_nearest(get_coord(Result.ftprnt),robustdFFresult.ScaleFactor./squeeze(sum(Result.ftprnt,[1 2])),get_coord(Result.ftprntSplit));
+%     ScaleFactor_split=ScaleFactor_split./squeeze(sum(Result.ftprntSplit,[1 2]));
+% 
+%     normTr=Result.tracesSplit./ScaleFactor_split;
+% 
+%     load
+% 
+% end

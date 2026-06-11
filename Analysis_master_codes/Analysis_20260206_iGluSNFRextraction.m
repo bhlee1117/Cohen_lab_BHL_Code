@@ -7,9 +7,9 @@ fpath=raw(:,1)';
 V2moviemaxTime=15000;
 GlumoviemaxTime=5000;
 Endframe=cell2mat(raw(:,5));
-foi=[3 5 6 8 9 10 11 12 13];
+foi=[3 5 6 8 9 10 12 13];
 %% Load movie and find the footprints
-f=3;
+f=13;
 Devicedata_filename=fullfile(fpath{f},'output_data.mat');
 Vdata_filename=fullfile(fpath{f},'frames1.bin');
 Gludata_filename=fullfile(fpath{f},'frames2.bin');
@@ -40,38 +40,34 @@ t_vol = (0:nFrame2analyze-1)*exposuretime1;
 
 cam2_vsyn = Device_Data{1, 2}.Counter_Inputs(1, 2).data;
 cam2_vsyn_trig = find (diff(cam2_vsyn) == 1)+1;
-segment_size = cam2_vsyn_trig (10) - cam2_vsyn_trig(9);
+segment_size2 = cam2_vsyn_trig (10) - cam2_vsyn_trig(9);
 start_idx = min(find(cam2_vsyn ==max (cam2_vsyn)));
 end_idx = length(Device_Data{1, 2}.buffered_tasks(1, 2).channels(1, 2).data);
 last_val = cam2_vsyn(start_idx - 1);
 n_to_add = end_idx - start_idx + 1;
-n_segments = ceil(n_to_add / segment_size);
-added_part = repelem((last_val + 1 : last_val + n_segments)', segment_size);
+n_segments = ceil(n_to_add / segment_size2);
+added_part = repelem((last_val + 1 : last_val + n_segments)', segment_size2);
 added_part = added_part(1:n_to_add);
 cam2_vsyn(start_idx:end_idx) = added_part;
 
 mod488 = 200001;
 mod607 = 200001;
-cam2_trig = find (diff(cam2_vsyn) ==1)+1;
-cam2_trig = cam1_vsyn (cam2_trig);
-cam2_trig = cam2_trig (cam2_vsyn(mod488)+2:cam2_vsyn(end))'- (cam1_vsyn(mod607)+2);
-if isnan(Endframe(f))
-    GluImg_readendframe=cam2_vsyn(end);
-else
-    GluImg_readendframe=Endframe(f)+(cam2_vsyn(mod488)+1);
-end
+
+cam2_trig = find (diff(cam2_vsyn) ==1)+1; %DAQ frame
+%cam2_trig = cam1_vsyn (cam2_trig); %Cam1 frame
+t_start= cam2_trig (cam2_vsyn(mod488)+2)-mod488+1;
 if cam2_vsyn(end)<GlumoviemaxTime
-    GluemovTimesegments=[(cam2_vsyn(mod488)+2) GluImg_readendframe];
+    GluemovTimesegments=[(cam2_vsyn(mod488)+2) cam2_vsyn(end)];
 else
     GluemovTimesegments=[(cam2_vsyn(mod488)+2):GlumoviemaxTime:cam2_vsyn(end)];
-    GluemovTimesegments(end+1)=GluImg_readendframe;
+    GluemovTimesegments(end+1)=cam2_vsyn(end);
 end
+nFrame2analyze2=GluemovTimesegments(end)-GluemovTimesegments(1);
+t_glu=[t_start:segment_size2:(t_start+segment_size2*nFrame2analyze2)]/DAQ_rate;
 
 Blue_Nframe = Device_Data{4}.frames_requested;
 nCol2 = double(Device_Data{4}.ROI([2]));  % ROI on the camera
 nRow2 = double(Device_Data{4}.ROI([4]));  % ROI on the camera
-exposuretime2 = Device_Data{4}.exposuretime;
-t_cal = (cam2_trig-1)*exposuretime2*0.01;
 
 Vmov_read_tmp=double(readBinMov_times([fpath{f} '/mc' num2str(1,'%02d') '.bin'], nRow1, nCol1,[2000:3000]));
 AvgVoltageImg=mean(Vmov_read_tmp,3);
@@ -82,7 +78,7 @@ opts.doPlot = true;
 T=GluemovTimesegments(end)-GluemovTimesegments(1);
 GluResult = struct();
 
-%%
+%% Extract GluResult
 % ---------- PASS 1: detect per chunk ----------
 tileResults = cell(Ntile,1);
 RegressComponentTile=cell(Ntile,1);
@@ -118,16 +114,24 @@ for k = 1:Ntile
     mov_sub=mov_sub.*(max(GluResult.bvMask,[],3)==0);
 
     if ~isfield(tileResults{1},'opts') %first trial
-    opts.smoothSigma=1;
-    opts.zSeedMin=5.5; opts.minEventsSyn = 1;
+        opts.diagSaveDir       = fpath{f};  % where PNGs are saved
+        opts.diagPrefix        = 'exp01';                 % filename prefix
+        opts.diagZoom_pad      = 15;                      % px around centroid for zoomed plots
+        opts.diagMaxSyn        = 16;
+        opts.eventMaxArea    = 30;   % px² threshold for NMF split
+        opts.nmfReps         = 5;
+        opts.nmfDiagMaxEvent = 6;
+        opts.showNMFDiag     = true;
+        
     else
-    opts=tileResults{1}.opts; 
-    opts.uiClusterSize=0;
-    opts.plotCentroids=0;
-    opts.uiSynFilter=1;
-    opts.uiSeedThresh=1;
+        opts=tileResults{1}.opts;
+        opts.uiClusterSize=0;
+        opts.plotCentroids=0;
+        opts.uiSynFilter=1;
+        opts.uiSeedThresh=1;
     end
-    tileResults{k} = extractGluSNFR(mov_sub, mov2_mc_filt2, exposuretime2, opts);  % detect mode default
+
+    tileResults{k} = extractGluSNFR3(mov_sub, mov2_mc_filt2, exposuretime2, opts);  % detect mode default
     drawnow;
 end
 
@@ -153,7 +157,7 @@ for k = 1:Ntile
     [V, D, u_sub] = get_eigvector(tovec(imgaussfilt(mov_sub,1))',40);
     mov_sub=SeeResiduals(mov_sub,V(:,RegressComponentTile{k}));
     mov2_mc_filt2=mov_sub+mov2_mc_filt_lw;
-    Rproj{k} = extractGluSNFR(mov_sub, mov2_mc_filt2, exposuretime2, opts2, S_full);
+    Rproj{k} = extractGluSNFR3(mov_sub, mov2_mc_filt2, exposuretime2, opts2, S_full);
 end
 else
     Rproj=tileResults;
@@ -203,7 +207,7 @@ GluResult.F0_glu = F0_all;
 GluResult.dFF_glu = dFF_all;
 GluResult.frameRate = frameRate;
 GluResult.AvgGluImg = mean(mov2_mc,3);
-GluResult.t_ax=[1:size(GluResult.dFF_glu,2)]*exposuretime2;
+GluResult.t_ax=t_glu;
 
 % Save and show
 if exist('fpath','var') && exist('f','var')

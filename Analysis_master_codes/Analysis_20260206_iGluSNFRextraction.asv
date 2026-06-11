@@ -82,9 +82,11 @@ opts.doPlot = true;
 T=GluemovTimesegments(end)-GluemovTimesegments(1);
 GluResult = struct();
 
+%%
 % ---------- PASS 1: detect per chunk ----------
 tileResults = cell(Ntile,1);
 RegressComponentTile=cell(Ntile,1);
+mcTrace_glu=[];
 for k = 1:Ntile
     fprintf('Reading %1.0f out of %1.0f movie...\n', k,length(GluemovTimesegments)-1)
 
@@ -110,20 +112,33 @@ for k = 1:Ntile
 
     mov_sub=SeeResiduals(mov_sub,V(:,n));
     mov_sub=SeeResiduals(mov_sub,mcTrace2.xymean([1:(GluemovTimesegments(k +1)-GluemovTimesegments(k))],:));
+
+    mcTrace_glu=[mcTrace_glu; mcTrace2.xymean([1:(GluemovTimesegments(k +1)-GluemovTimesegments(k))],:)];
     mov2_mc_filt2=mov_sub+mov2_mc_filt_lw;
     mov_sub=mov_sub.*(max(GluResult.bvMask,[],3)==0);
 
     if ~isfield(tileResults{1},'opts') %first trial
-    opts.smoothSigma=1;
-    opts.zSeedMin=5.5; opts.minEventsSyn = 1;
+        opts.diagSaveDir       = 'fpath{f}';  % where PNGs are saved
+        opts.diagPrefix        = 'exp01';                 % filename prefix
+        opts.nmfReps           = 5;                       % NMF replicates (robustness)
+        opts.diagZoom_pad      = 15;                      % px around centroid for zoomed plots
+        opts.diagMaxSyn        = 16;
+        opts.smoothSigma=1;
+        opts.zSeedMin=5.5; opts.minEventsSyn = 1;
+opts.eventMaxArea    = 30;   % px² threshold for NMF split
+opts.nmfReps         = 5;
+opts.nmfDiagMaxEvent = 6;
+opts.showNMFDiag     = true;
+% Remove: splitBySpatialNMF, nmfRecurse, nmfMaxDepth, nmfDiagMaxClust, nmfMinEvents
     else
-    opts=tileResults{1}.opts; 
-    opts.uiClusterSize=0;
-    opts.plotCentroids=0;
-    opts.uiSynFilter=1;
-    opts.uiSeedThresh=1;
+        opts=tileResults{1}.opts;
+        opts.uiClusterSize=0;
+        opts.plotCentroids=0;
+        opts.uiSynFilter=1;
+        opts.uiSeedThresh=1;
     end
-    tileResults{k} = extractGluSNFR(mov_sub, mov2_mc_filt2, exposuretime2, opts);  % detect mode default
+
+    tileResults{k} = extractGluSNFR3(mov_sub, mov2_mc_filt2, exposuretime2, opts);  % detect mode default
     drawnow;
 end
 
@@ -192,6 +207,7 @@ for k = 1:numel(Rproj)
     end
 end
 
+GluResult.mc= mcTrace_glu;
 GluResult.S_glu = S_full;
 GluResult.T_glu = T_all;
 GluResult.F0_glu = F0_all;

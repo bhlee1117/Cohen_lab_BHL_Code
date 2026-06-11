@@ -1,85 +1,123 @@
-function [crossCorr, lags] = nanXCorr(x, y, maxLag, normalized)
-% NANCrossCorr Calculates the cross-correlation between two vectors, optionally normalized, ignoring NaN values.
+function [crossCorr, lags, nPairs] = nanXCorr(x, y, maxLag, normalized, minPairs)
+% nanXCorr Calculates cross-correlation between two vectors while ignoring NaNs.
 %
-% [crossCorr, lags] = nanCrossCorr(x, y, maxLag, normalized)
+% Convention:
+%   positive lag k means y is delayed relative to x:
+%
+%       crossCorr(k) = corr( x(t), y(t+k) )
 %
 % INPUT:
-%   x          - First input vector
-%   y          - Second input vector
-%   maxLag     - Maximum lag to consider (optional, default: length of the vectors - 1)
-%   normalized - Boolean to indicate whether to normalize (optional, default: true)
+%   x          - First input vector, e.g. neuron i
+%   y          - Second input vector, e.g. neuron j
+%   maxLag     - Maximum lag in samples, optional
+%   normalized - true: Pearson correlation at each lag
+%                false: mean product at each lag
+%   minPairs   - minimum number of valid non-NaN pairs required, optional
 %
 % OUTPUT:
-%   crossCorr - Cross-correlation values
-%   lags      - Lags corresponding to the cross-correlation values
+%   crossCorr  - Cross-correlation values
+%   lags       - Lags in samples
+%   nPairs     - Number of valid pairs used at each lag
 
-% Ensure inputs are column vectors
+% Ensure column vectors
 x = x(:);
 y = y(:);
 
 % Validate lengths
-if length(x) ~= length(y)
+n = numel(x);
+
+if numel(y) ~= n
     error('Input vectors must be of the same length.');
 end
 
-% Default maxLag if not provided
-if nargin < 3
-    maxLag = length(x) - 1;
+if n == 0
+    error('Input vectors must not be empty.');
 end
 
-% Default normalization if not provided
-if nargin < 4
+% Defaults
+if nargin < 3 || isempty(maxLag)
+    maxLag = n - 1;
+end
+
+if nargin < 4 || isempty(normalized)
     normalized = true;
 end
 
-% Initialize output
-lags = -maxLag:maxLag;
-crossCorr = zeros(size(lags));
+if nargin < 5 || isempty(minPairs)
+    minPairs = 3;
+end
 
-% Calculate cross-correlation
-for i = 1:length(lags)
-    lag = lags(i);
+% Validate parameters
+if ~isscalar(maxLag) || maxLag < 0 || maxLag ~= floor(maxLag)
+    error('maxLag must be a nonnegative integer.');
+end
 
-    if lag < 0
-        % Shift x forward
-        validIdx = ~isnan(x(1:end+lag)) & ~isnan(y(-lag+1:end));
-        xValid = x(1:end+lag);
-        yValid = y(-lag+1:end);
-        if isempty(find(validIdx, 1))
-            crossCorr(i) = NaN;
-        else
-            if normalized
-                crossCorr(i) = corr(xValid(validIdx), yValid(validIdx));
-            else
-                crossCorr(i) = sum(xValid(validIdx) .* yValid(validIdx))/length(validIdx);
-            end
-        end
-    elseif lag > 0
-        % Shift y forward
-        validIdx = ~isnan(x(lag+1:end)) & ~isnan(y(1:end-lag));
-        xValid = x(lag+1:end);
-        yValid = y(1:end-lag);
-        if isempty(find(validIdx, 1))
-            crossCorr(i) = NaN;
-        else
-            if normalized
-                crossCorr(i) = corr(xValid(validIdx), yValid(validIdx));
-            else
-                crossCorr(i) = sum(xValid(validIdx) .* yValid(validIdx))/length(validIdx);
-            end
-        end
+if ~isscalar(minPairs) || minPairs < 1 || minPairs ~= floor(minPairs)
+    error('minPairs must be a positive integer.');
+end
+
+% Avoid impossible lags
+maxLag = min(maxLag, n - 1);
+
+% Initialize outputs
+lags = (-maxLag:maxLag).';
+crossCorr = NaN(size(lags));
+nPairs = zeros(size(lags));
+
+for ii = 1:numel(lags)
+
+    lag = lags(ii);
+
+    if lag > 0
+        % positive lag: y occurs after x
+        % compare x(t) with y(t + lag)
+        xLag = x(1:end-lag);
+        yLag = y(1+lag:end);
+
+    elseif lag < 0
+        % negative lag: y occurs before x
+        k = -lag;
+        xLag = x(1+k:end);
+        yLag = y(1:end-k);
+
     else
-        % No shift
-        validIdx = ~isnan(x) & ~isnan(y);
-        if isempty(find(validIdx, 1))
-            crossCorr(i) = NaN;
+        % zero lag
+        xLag = x;
+        yLag = y;
+    end
+
+    % Keep only pairs where both values are observed
+    validIdx = ~isnan(xLag) & ~isnan(yLag);
+
+    xValid = xLag(validIdx);
+    yValid = yLag(validIdx);
+
+    nPairs(ii) = numel(xValid);
+
+    % Require enough valid samples
+    if nPairs(ii) < minPairs
+        crossCorr(ii) = NaN;
+        continue;
+    end
+
+    if normalized
+        % Pearson correlation at this lag.
+        % Mean subtraction is done separately for each lag/window.
+        xCentered = xValid - mean(xValid);
+        yCentered = yValid - mean(yValid);
+
+        denom = sqrt(sum(xCentered.^2) * sum(yCentered.^2));
+
+        if denom > 0
+            crossCorr(ii) = sum(xCentered .* yCentered) / denom;
         else
-            if normalized
-                crossCorr(i) = corr(x(validIdx), y(validIdx));
-            else
-                crossCorr(i) = sum(x(validIdx) .* y(validIdx))/length(validIdx);
-            end
+            crossCorr(ii) = NaN;
         end
+
+    else
+        % Raw mean product at this lag, ignoring NaNs
+        crossCorr(ii) = sum(xValid .* yValid) / nPairs(ii);
     end
 end
+
 end

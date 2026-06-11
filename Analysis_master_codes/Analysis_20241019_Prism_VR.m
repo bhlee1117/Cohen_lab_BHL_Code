@@ -20,7 +20,7 @@ alignedMovFN = {'STA_Mat_SS','STA_Mat_CS','STA_Mat_dSP'};
 set(0,'DefaultFigureWindowStyle','docked')
 %% Motion correction
 
-for f=[17]% 15 4 5 7]%length(fpath)
+for f=[20]% 15 4 5 7]%length(fpath)
     f
     load(fullfile(fpath{f},"output_data.mat"))
     sz=double(Device_Data{1, 3}.ROI([2 4]));
@@ -48,7 +48,7 @@ for f=[17]% 15 4 5 7]%length(fpath)
     mov_test = movmean(mov_test,10,3);
     mov_ref = squeeze(median(mov_test,3));
 
-    for j=1:length(f_seg)-1
+    for j=1:2%length(f_seg)-1
         try
             mov=double(readBinMov_times([fpath{f} '/frames1.bin'],sz(2),sz(1),[f_seg(j):f_seg(j+1)+overlap]));
         catch % when the image ends
@@ -62,10 +62,9 @@ for f=[17]% 15 4 5 7]%length(fpath)
         end
 
         [mov_mc,xyField]=optical_flow_motion_correction_LBH(mov,mov_ref,'normcorre');
-
         ave_im=mean(mov_mc,3);
         mov_mc=vm(mov_mc);
-        mov_mc.transpose.savebin([fpath{f} '/mc_ShutterReg' num2str(j,'%02d') '.bin'])
+        mov_mc.transpose.savebin([fpath{f} '/mc2_ShutterReg' num2str(j,'%02d') '.bin'])
 
         %        mcTrace = squeeze(mean(xyField,[1 2])); %optic flow
         mcTrace=xyField; % Normcorre

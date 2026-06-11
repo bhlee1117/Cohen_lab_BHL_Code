@@ -29,9 +29,9 @@ set(0,'DefaultFigureWindowStyle','docked')
 % StimROI_Ind={'Soma','Distal Dend','WF'};
 % StimWfn_Ind={'Ramp Stim','Short Pulse'};
 % OpResult=[];
-% %foi_somDend=[1 22 14 18 10 26 25 32 46];
-% %foi_somDend=[1 22 14 18 10 26 25 32 46 47 48 43 34 37 35];
-% foi_somDend=[1 22 14 18 10 26 25 32 46 47 48 43 34 37 35 2:4 6:8 12 13 17 20 29 31 39 41 42 44 49 50 53 58];
+%foi_somDend=[1 22 14 18 10 26 25 32 46];
+%foi_somDend=[1 22 14 18 10 26 25 32 46 47 48 43 34 37 35];
+foi_somDend=[1 22 14 18 10 26 25 32 46 47 48 43 34 37 35 2:4 6:8 12 13 17 20 29 31 39 41 42 44 49 50 53 58];
 % g2=1;
 % for i=unqInd(foi_somDend)' %Neuron Index
 % 

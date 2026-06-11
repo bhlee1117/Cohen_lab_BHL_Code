@@ -9,7 +9,7 @@ if length(binaryMatrix)==T
     truePoints = find(binaryMatrix == 1);
 else
     truePoints = binaryMatrix;
-    disp('Treat binaryMatrix as index vector');
+    %disp('Treat binaryMatrix as index vector');
 end
 
 if ~isempty(truePoints)

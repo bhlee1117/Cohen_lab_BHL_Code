@@ -1,4 +1,5 @@
 function modifiedMarkerMatrix = interactiveFrameCheck_vector(dataVector, markerMatrix, windowSize)
+%modifiedMarkerMatrix = interactiveFrameCheck_vector(dataVector, markerMatrix, windowSize)
 % interactiveFrameCheck_vector - Interactive viewer for 1xT vector data with N-class markers.
 %
 % Inputs:

@@ -60,7 +60,7 @@ switch method
 
         try
             options_rigid = NoRMCorreSetParms('d1',d1-bound,'d2',d2-bound,'bin_width',300, ...
-                'grid_size',[360,360],'mot_uf',4,'correct_bidir',false, ...
+                'grid_size',[200,200],'mot_uf',4,'correct_bidir',false, ...
                 'overlap_pre',64,'overlap_post',64,'max_shift',50,'upd_template',false);
 
             % tic;
@@ -75,8 +75,16 @@ switch method
         end
         tic;
         %[mov_mc,shifts2,template2] = normcorre(Y(bound/2+1:end-bound/2,bound/2+1:end-bound/2,:),options_rigid,mov_temp(bound/2+1:end-bound/2,bound/2+1:end-bound/2,:));
-        [mov_mc,shifts2,template2] = normcorre_batch(Y(bound/2+1:end-bound/2,bound/2+1:end-bound/2,:),options_rigid,mov_tempY(bound/2+1:end-bound/2,bound/2+1:end-bound/2,:));
-        toc
+        Y_crop = Y(bound/2+1:end-bound/2, bound/2+1:end-bound/2, :);
+        T_crop = mov_tempY(bound/2+1:end-bound/2, bound/2+1:end-bound/2, :);
+
+        % Force even dimensions
+        [nr, nc, ~] = size(Y_crop);
+        Y_crop  = Y_crop(1:2*floor(nr/2), 1:2*floor(nc/2), :);
+        T_crop  = T_crop(1:2*floor(nr/2), 1:2*floor(nc/2), :);
+
+        [mov_mc, shifts2, template2] = normcorre_batch(Y_crop, options_rigid, T_crop);
+        toc;
 
         try
             tic; mov_mc = apply_shifts(mov,shifts2,options_rigid,bound/2,bound/2); toc

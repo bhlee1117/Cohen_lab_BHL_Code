@@ -19,7 +19,7 @@ function GluResult = extractGluSNFR(mov2_sub, mov2_mc_filt, exposuretime2, opts,
 %   .S_glu            : H×W×Nsyn normalized synapse footprints (after boundary removal)
 %   .synCentroid      : Nsyn×2 centroid positions [x y]
 %   .synEventCount    : Nsyn×1 number of events per synapse
-%   .synEventRate_Hz  : Nsyn×1 event rates
+%   .synEventRate_Hz  : Nsyn×1 event rates  
 %   .keep             : keep mask (before remap)
 %   .T_glu            : Nsyn×T temporal projection traces
 %   .F0_glu           : Nsyn×T baseline projection traces (empty if mov2_mc_filt==[])

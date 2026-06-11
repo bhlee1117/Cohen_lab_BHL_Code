@@ -161,23 +161,23 @@ nKept = numel(events);
 nClust = sum(strcmp({events.type}, 'clustered'));
 nIso   = sum(strcmp({events.type}, 'isolated'));
 
-fprintf('\n=== Spatiotemporal Events  (Tol=±%d fr | MaxDist=%.0f µm) ===\n', ...
-    tol, maxDist);
-fprintf('Total: %d events  (%d clustered, %d isolated)\n\n', ...
-    nKept, nClust, nIso);
-fprintf('%-6s  %-12s  %-10s  %-6s  %-20s  %-15s  %s\n', ...
-    'Event','Type','Time (fr)','Size','ROIs','Time each','Centroid [x y]');
-fprintf('%s\n', repmat('-', 1, 95));
+% fprintf('\n=== Spatiotemporal Events  (Tol=±%d fr | MaxDist=%.0f µm) ===\n', ...
+%     tol, maxDist);
+% fprintf('Total: %d events  (%d clustered, %d isolated)\n\n', ...
+%     nKept, nClust, nIso);
+% fprintf('%-6s  %-12s  %-10s  %-6s  %-20s  %-15s  %s\n', ...
+%     'Event','Type','Time (fr)','Size','ROIs','Time each','Centroid [x y]');
+% fprintf('%s\n', repmat('-', 1, 95));
 
-for e = 1:nKept
-    ev      = events(e);
-    roi_str = sprintf('%d ', ev.rois);
-    t_str   = sprintf('%d ', ev.time_each);
-    cen_str = sprintf('%.1f %.1f', ev.centroid(1), ev.centroid(2));
-    fprintf('%-6d  %-12s  %-10d  %-6d  %-20s  %-15s  %s\n', ...
-        e, ev.type, ev.time, ev.size, ...
-        strtrim(roi_str), strtrim(t_str), cen_str);
-end
+% for e = 1:nKept
+%     ev      = events(e);
+%     roi_str = sprintf('%d ', ev.rois);
+%     t_str   = sprintf('%d ', ev.time_each);
+%     cen_str = sprintf('%.1f %.1f', ev.centroid(1), ev.centroid(2));
+%     fprintf('%-6d  %-12s  %-10d  %-6d  %-20s  %-15s  %s\n', ...
+%         e, ev.type, ev.time, ev.size, ...
+%         strtrim(roi_str), strtrim(t_str), cen_str);
+% end
 fprintf('\n');
 end
 

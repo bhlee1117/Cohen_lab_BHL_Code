@@ -539,8 +539,8 @@ for sc=1:3
     if sc==2
     %ev2show([5 6])=[];
     end
-    PeakAmp_spclass{sc}=[EventPropsMat{foi2show}.PostPeak_Soma(ev2show) EventPropsMat{foi2show}.PostPeak_Distal(ev2show) ev2show];
-    PeakAUC_spclass{sc}=[EventPropsMat{foi2show}.PostAUC_Soma(ev2show) EventPropsMat{foi2show}.PostAUC_Distal(ev2show) ev2show];
+    PeakAmp_spclass{sc}=[EventPropsMat{foi2show}.PostPeak_Soma(ev2show) EventPropsMat{foi2show}.PostPeak_Distal(ev2show) ev2show ones(length(ev2show),1)*sc];
+    PeakAUC_spclass{sc}=[EventPropsMat{foi2show}.PostAUC_Soma(ev2show) EventPropsMat{foi2show}.PostAUC_Distal(ev2show) ev2show ones(length(ev2show),1)*sc];
 
     nexttile(1,[1 1])
     scatter(PeakAmp_spclass{sc}(:,1),PeakAmp_spclass{sc}(:,2),20,cmap_sc(sc,:),'filled'); hold all;
@@ -585,7 +585,62 @@ tiledlayout(1, 2, 'TileSpacing', 'compact', 'Padding', 'compact');
         title(['Distal dendrite voltage (mean ± SEM)'])
     end
 legend(l,{'SS','CS','BS'})
-set_fontsize(15);
+set_fontsize(15)%%
+figure(24); clf;
+PeakAmpBin=[-0.5 0.5 1 5]*5;
+PeakAUCBin=[-30 30 100];
+clear CSProbhist
+CSProbhist{1}=NaN(max(foi),length(PeakAmpBin)-1);
+CSProbhist{2}=NaN(max(foi),length(PeakAUCBin)-1);
+probcmap=copper(length(PeakAmpBin)-1); probcmapAUC=copper(length(PeakAUCBin)-1);
+PeakAmpAUC_Cat=cell(3,1);
+for f=foi(1:end-1)
+    for sc=1:3
+        ev2show=find(EventPropsMat{f}.SpClass==sc);
+        PeakAmp_spclass{sc}=[EventPropsMat{f}.PostPeak_Soma(ev2show) EventPropsMat{f}.PostPeak_Distal(ev2show) ev2show ones(length(ev2show),1)*sc];
+        PeakAUC_spclass{sc}=[EventPropsMat{f}.PostAUC_Soma(ev2show) EventPropsMat{f}.PostAUC_Distal(ev2show) ev2show ones(length(ev2show),1)*sc];
+        PeakAmpAUC_Cat{sc}=[PeakAmpAUC_Cat{sc}; [EventPropsMat{f}.PostPeak_Distal(ev2show) EventPropsMat{f}.PostAUC_Distal(ev2show)]./PCresult{f}.SpikeHeight];
+    end
+
+    PeakAmpCat=cell2mat(PeakAmp_spclass');
+    PeakAmpAll=PeakAmpCat(:,2);%./PCresult{f}.SpikeHeight;
+    SpikeClassAll=PeakAmpCat(:,4);
+    [~,~,~,bin_ind]=binning_data({repmat(PeakAmpAll,1,2)},PeakAmpBin);
+    CSProbhist{1}(f,:)=cellfun(@(x) sum(x & SpikeClassAll==2)./sum(x),bin_ind);
+    CSProbhist{1}(f,cellfun(@sum,bin_ind)'<11)=NaN;
+
+    PeakAUCCat=cell2mat(PeakAUC_spclass');
+    PeakAUCpAll=PeakAUCCat(:,2)./PCresult{f}.SpikeHeight;
+    [~,~,~,bin_ind]=binning_data({repmat(PeakAUCpAll,1,2)},PeakAUCBin);
+    CSProbhist{2}(f,:)=cellfun(@(x) sum(x & SpikeClassAll==2)./sum(x),bin_ind);
+    CSProbhist{2}(f,cellfun(@sum,bin_ind)'<4)=NaN;
+end
+nexttile(1,[1 1])
+Boxplot_wPoints2(CSProbhist{1},probcmap);
+ylim([0 1.2]);
+set(gca,'XTick',[1:length(PeakAmpBin)-1],'XTickLabel',edge2bin(PeakAmpBin));
+nexttile(2,[1 1])
+Boxplot_wPoints2(CSProbhist{2},probcmapAUC);
+set(gca,'XTick',[1:length(PeakAUCBin)-1],'XTickLabel',edge2bin(PeakAUCBin));
+ylim([0 1.2]);
+
+Ampbin=[-0.5:0.1:2.5]; AUCbin=[-30:4:90];
+for sc=1:3
+    nexttile(3,[1 1])
+    histogram(PeakAmpAUC_Cat{sc}(:,1),Ampbin,'FaceColor',cmap_sc(sc,:),'FaceAlpha',0.7,'Normalization','probability'); hold all
+    box off;
+    nexttile(4,[1 1])
+    histogram(PeakAmpAUC_Cat{sc}(:,2),AUCbin,'FaceColor',cmap_sc(sc,:),'FaceAlpha',0.7,'Normalization','probability'); hold all
+    box off;
+end
+nexttile(3,[1 1])
+xlabel('Distal peak amplitude (somatic spike height)'); ylabel('Probability');
+legend({'SS','CS','BS'});
+nexttile(4,[1 1])
+xlabel('Distal AUC (A.U.)'); ylabel('Probability');
+
+
+
 
 % %% 
 % %

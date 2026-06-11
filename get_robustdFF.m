@@ -1,47 +1,126 @@
-function dff_robust_constant = get_robustdFF(STAmov,ftprnt,F0image)
+function [Fslope Rsq Stds] = get_robustdFF(STAmov, ftprnt, F0image, doPlot, opt)
+% get_robustdFF - Compute robust dF/F using a linear F0-slope normalization.
+%
+% For each footprint (cell), finds the peak response frame, fits a linear
+% relationship between F0 and dF across pixels, and uses the slope to
+% normalize the weighted dF sum into a robust dF/F estimate.
+%
+% Usage:
+%   [Fslope, Rsq] = get_robustdFF(STAmov, ftprnt, F0image)
+%   [Fslope, Rsq] = get_robustdFF(STAmov, ftprnt, F0image, doPlot)
+%   [Fslope, Rsq] = get_robustdFF(STAmov, ftprnt, F0image, doPlot, opt)
+%
+% Inputs:
+%   STAmov    - 3D STA movie [Y x X x T]
+%   ftprnt    - 3D footprint array [Y x X x nCells]
+%   F0image   - 2D baseline fluorescence image [Y x X]
+%   doPlot    - (optional) logical, plot F0 vs dF scatter per cell (default: false)
+%   opt       - (optional) struct with fitting options:
+%                 .pct_low   lower percentile cutoff for F0 pixel selection (default: 2)
+%                 .pct_high  upper percentile cutoff for F0 pixel selection (default: 80)
+%                 .input_px  cell array of pixel indices per cell {results.px2}
+%                            from interactive_get_robustdFF; overrides percentile
+%                            selection for any cell where it is non-empty
+%
+% Outputs:
+%   Fslope    - [1 x nCells] slope of dF vs F0 fit per cell
+%   Rsq       - [1 x nCells] R-squared of the fit per cell
 
-F0=tovec(F0image);
-STAmovVec=tovec(STAmov);
+% --- Input handling ---
+if nargin < 4 || isempty(doPlot)
+    doPlot = false;
+end
+if nargin < 5 || isempty(opt)
+    opt = struct();
+end
+if ~isfield(opt, 'pct_low'),   opt.pct_low   = 2;        end
+if ~isfield(opt, 'pct_high'),  opt.pct_high  = 80;       end
+if ~isfield(opt, 'slope_lb'),  opt.slope_lb  = [-Inf -Inf]; end
+if ~isfield(opt, 'slope_ub'),  opt.slope_ub  = [Inf Inf];   end
+if ~isfield(opt, 'input_px'),  opt.input_px  = {};        end  % cell array {results.px2} from interactive_get_robustdFF
 
-clf;
-for n=1:size(ftprnt,3)
-    
-px=find(tovec(ftprnt(:,:,n)>0));
-[~, maxfrm]=max(mean(STAmovVec(px,:),1,'omitnan'));
+% --- Vectorize inputs ---
+F0          = tovec(F0image);       % [nPix x 1]
+STAmovVec   = tovec(STAmov);        % [nPix x T]
+nCells      = size(ftprnt, 3);
+ftprntVec   = tovec(ftprnt);
 
-dF=STAmovVec(:,maxfrm);
+% --- Preallocate outputs ---
+dff_robust_constant = nan(1, nCells);
+Fslope              = nan(1, nCells);
+Fslope_weight       = nan(1, nCells);
+Rsq                 = nan(1, nCells);
+Intercept           = nan(1, nCells);
+Stds                = nan(1, nCells);
 
-F0_weight=F0.*(tovec(ftprnt(:,:,n)));
-dF_weight=dF.*(tovec(ftprnt(:,:,n)));
+% --- Set up figure if plotting ---
+if doPlot
+    clf;
+end
 
-px2=px(find(F0(px)>prctile(F0(px),30) & F0(px)<prctile(F0(px),95)));
-px2_weight=px(find(F0_weight(px)>prctile(F0_weight(px),40) & F0_weight(px)<prctile(F0_weight(px),80)));
+% --- Main loop over cells ---
+for n = 1:nCells
 
-nexttile([1 1])
-%plot(F0(px),dF(px),'.'); hold all
-[p]=polyfit(F0(px2), dF(px2), 1);
-[p_weight]=polyfit(F0_weight(px2_weight), dF_weight(px2_weight), 1);
-% Get fitted values
-y_fit = polyval(p, F0(px2));
-y_fit_weight = polyval(p_weight, F0_weight(px2_weight));
+    % -- Find peak response frame for this cell --
+    px = find(tovec(ftprnt(:,:,n)) > 0);
+    %[~, maxfrm] = max(mean(STAmovVec(px,:), 1, 'omitnan'));
+    dF = STAmovVec;                      % [nPix x 1] dF at peak frame
 
-scatter(F0(px),dF(px),10,'filled'); hold all
-plot(F0(px2),y_fit,'r')
-SS_res = sum((dF(px2) - y_fit).^2);
-SS_tot = sum((dF(px2) - mean(dF(px2))).^2);
-R_squared = 1 - (SS_res / SS_tot);
+    % -- Select pixels: use interactive result if provided, else auto percentile --
+    if numel(opt.input_px) >= n && ~isempty(opt.input_px{n})
+        px2 = opt.input_px{n};
+    else
+        px2 = px(F0(px) > prctile(F0(px), opt.pct_low) ...
+               & F0(px) < prctile(F0(px), opt.pct_high));
+    end
 
-SS_res = sum((dF_weight(px2_weight) - y_fit_weight).^2);
-SS_tot = sum((dF_weight(px2_weight) - mean(dF(px2_weight))).^2);
-R_squared_weight = 1 - (SS_res / SS_tot);
+    % -- Linear fits: dF ~ slope * F0 + intercept --
+    w=(F0(px2)).^0.3;
+    % %w = ones(length(px2),1);
+    % mdl = fitlm(F0(px2), dF(px2), 'linear', 'Weights', w);
+    % p = [mdl.Coefficients.Estimate(2) mdl.Coefficients.Estimate(1)];
 
-title(['d(\DeltaF)/dF0 : ' num2str(p(1),2) ', R^2 : ' num2str(R_squared,2)])
-Fslope(n)=p(1);
-Fslope_weight(n)=p_weight(1);
-Rsq(n)=R_squared;
+    % Build design matrix [slope, intercept]
+    C  = [F0(px2), ones(length(px2), 1)];
+    d  = dF(px2);
 
-%dff(n)=sum((dF).*(tovec(Result.ftprnt(:,:,n))>0),1,'omitnan')./sum((F0_filter).*(tovec(Result.ftprnt(:,:,n))>0),1,'omitnan');
-%dff_weight(n)=sum((dF).*(tovec(ftprnt(:,:,n))),1,'omitnan')./sum(F0_weight,1,'omitnan');
-weighted_dFSum=dF'*(tovec(ftprnt(:,:,n)));
-dff_robust_constant(n)=(weighted_dFSum)/p(1);
+    % Apply weights (equivalent to fitlm 'Weights')
+    sw = sqrt(w);
+    Cw = sw .* C;
+    dw = sw .* d;
+
+    % Set bounds: [slope_lb, intercept_lb] / [slope_ub, intercept_ub]
+    lb = opt.slope_lb;
+    ub = opt.slope_ub;
+
+    p_vec = lsqlin(Cw, dw, [], [], [], [], lb, ub);
+    p     = [p_vec(1), p_vec(2)];   % [slope, intercept] — same format as before
+
+    % -- R-squared for unweighted fit --
+    y_fit   = polyval(p, F0(px2));
+    SS_res  = sum((dF(px2)   - y_fit).^2);
+    SS_tot  = sum((dF(px2)   - mean(dF(px2))).^2);
+    R_squared = 1 - SS_res / SS_tot;
+
+    % -- Store results --
+    Fslope(n)        = p(1);
+    Intercept(n) = p(2);
+    Rsq(n)           = R_squared;
+
+    Stds(n)= std((dF(px2)   - y_fit));
+
+    %weighted_dFSum          = dF' * tovec(ftprnt);
+    %dff_robust_constant(n)  = weighted_dFSum / p(1);
+
+    % -- Optional plot --
+    if doPlot
+        nexttile([1 1]);
+        scatter(F0(px), dF(px), 10, 'filled'); hold on;
+        plot(F0(px2), y_fit, 'r');
+        title(sprintf('ROI#%2.0f, R^2 : %.2g \n ∆F = %.2g * F0 + %.2g', n, R_squared,p(1), p(2)));
+        xlabel('F0'); ylabel('dF');
+        hold off;
+    end
+
+end
 end

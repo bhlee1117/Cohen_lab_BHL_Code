@@ -1,4 +1,5 @@
 function mask=roi2mask(roi,r,c)
+
 mask=zeros(r,c);
 [x, y] = meshgrid(1:c, 1:r);
 for i=1:length(roi) 
