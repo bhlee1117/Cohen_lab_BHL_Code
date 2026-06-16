@@ -6,7 +6,7 @@ function [grad_mag, grad_dir, grad_vec] = get_gradient(val, coord, r_neighbor)
 
 % r_neighbor: radius to define local neighbourhood (tune to your data scale)
 
-N = size(coord, 1);
+N = size(coord, 1);s
 grad_vec = nan(N, 2);
 D2 = pdist2(coord, coord, 'squaredeuclidean');
 sigma2 = (r_neighbor/2)^2;

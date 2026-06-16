@@ -205,8 +205,8 @@ for f=[20]%:length(fpath)
         end
         linkaxes(ax2,'xy')
         n_take = input('#components to take: ', 's');
-        n_take = str2num(n_take);
-        coeff=subMov*mean(eigTrace(:,n_take)*V(:,n_take)',2);
+        n_take = str2num(n_take);mashi77**
+                coeff = V(:, n_take) * D(n_take);
         ftprnt(pixelList,p)=coeff;
     end
     close(figure(4));

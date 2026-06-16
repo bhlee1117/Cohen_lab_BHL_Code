@@ -28,8 +28,8 @@ PlaceFieldList=cellfun(@(x) (str2num(num2str(x))),raw(:,21),'UniformOutput',fals
 PlaceFieldBin=cellfun(@(x) (str2num(num2str(x))),raw(:,22),'UniformOutput',false);
 set(0,'DefaultFigureWindowStyle','docked')
 %foi=[1 4 5 6 8 10 11 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27];
-%foi=[1 4 5 6 8 10 11 15 16 17 18 19 20 21 22 23 24 25 26 27];
-foi=26;
+foi=[1 4 5 6 8 10 11 15 16 17 18 19 20 21 22 23 24 25 26 27];
+%foi=26;
 
 %% Load parameter
 win_pre = 30; win_post = 20;
@@ -38,7 +38,7 @@ nTauPeak=[50 150];
 %%
 clear PCresult
 
-for f = [foi(end)]
+for f = [foi]
     f
     load(fullfile(fpath{f}, 'PC_Result.mat'), 'Result')
 
@@ -357,7 +357,7 @@ end
 
 %% Load STA movies and set the scaling factor
 nTauPeak=[50 150];
-for f=foi(1)
+for f=20
     load(fullfile(fpath{f},'STAinfo'))
     load(fullfile(fpath{f},"output_data.mat"))
     sz=double(Device_Data{1, 3}.ROI([2 4]));
@@ -402,6 +402,7 @@ for f=foi(1)
     %[dFFrobustbAP R2bAP Stds]=get_robustdFF(max(-STAmovie(:,:,nTauPeak(1)+[-2:4]),[],3),ftprint2cal,PCresult{f}.ref_im-100,1,opt);
 
     dFFresults = interactive_get_robustdFF(max(-STAmovie(:,:,nTauPeak(1)+[-2:4]),[],3), ftprint2cal, PCresult{f}.ref_im-100, opt);
+    %dFFresults = interactive_get_robustdFF(sum(-STAmovie(:,:,nTauPeak(1)+t2integrate),3), ftprint2cal, PCresult{f}.ref_im-100, opt);
     
     %load(fullfile(fpath{f},'RobustdFFfit.mat'));
     %opt.input_px = {RobustdFFfit.dFFresultsInteractive.px2};
@@ -421,12 +422,13 @@ for f=foi(1)
     normTrace2Ave(:, PCresult{f}.motionReject > 0) = NaN;
     [STAtrace]=get_STA(normTrace2Ave,SPlist2AVE,nTauPeak(1),nTauPeak(2));
     STAtrace=STAtrace-median(STAtrace(:,1:nTauPeak(1)/2),2);
-    %ScaleFactor=sum(STAtrace(:,nTauPeak(1)+t2integrate),2)./dFFrobust';
-    ScaleFactor=max(STAtrace(:,nTauPeak(1)+[-2:4]),[],2)./dFFrobustbAP';
+    ScaleFactor=sum(STAtrace(:,nTauPeak(1)+t2integrate),2)./dFFrobust';
+    %ScaleFactor=max(STAtrace(:,nTauPeak(1)+[-2:4]),[],2)./dFFrobustbAP';
     STAtrace_pcanorm=STAtrace./PCresult{f}.F0_PCA;
     STAtrace_norm=STAtrace./ScaleFactor;
 
-    figure(222); clf
+
+    figure(223); clf;
     tiledlayout(2,2,'Padding','tight')
     nexttile([1 1]);
     scatter(PCresult{f}.dendaxis',dFFrobustbAP',30,vec2cmap(R2,'turbo',[0 1]),'filled'); hold all;
@@ -434,26 +436,27 @@ for f=foi(1)
     title('Based on interactive dF/F');
 
     nexttile([1 1]);
-    scatter(PCresult{f}.dendaxis,max(STAtrace_norm(:,nTauPeak(1)+[-2:4]),[],2),30,vec2cmap(R2,'turbo',[0 1]),'filled')
-    text(PCresult{f}.dendaxis',max(STAtrace_norm(:,nTauPeak(1)+[-2:4]),[],2)',num2str([1:length(dFFrobustbAP)]'))
+    scatter(ScaleFactor,PCresult{f}.F0_PCA,30,vec2cmap(R2,'turbo',[0 1]),'filled')
+    text(ScaleFactor,PCresult{f}.F0_PCA,num2str([1:length(dFFrobustbAP)]'))
     colormap(turbo(256))
-    title('Based on STA dF/F');
+    xlabel('Scale factor'); ylabel('Fstd');
 
     nexttile([1 1]);
     [~, dsort]=sort(PCresult{f}.dendaxis);
-    imagesc(STAtrace_pcanorm(dsort,:))
+    imagesc(STAtrace_pcanorm(dsort,:));
 
-    nexttile([1 1]);  
-    imagesc(STAtrace_norm(dsort,:))
+    nexttile([1 1]);
+    imagesc(STAtrace_norm(dsort,:));
+    set(gca,'ytick',[1:length(dFFrobustbAP)],'YTickLabel',dsort)
     colormap(turbo(256));
     drawnow;
 
-    clear RobustdFFfit
-    RobustdFFfit.dFFresultsInteractive=dFFresults;
-    RobustdFFfit.fit=dFFrobust;
-    RobustdFFfit.R2=R2;
-    RobustdFFfit.ScaleFactor=ScaleFactor;
-    RobustdFFfit.dFFrobustbAP=dFFrobustbAP;
-    save(fullfile(fpath{f},'RobustdFFfit'),'RobustdFFfit','-v7.3');
-    disp('Saved RobustdFF fit')
+    % clear RobustdFFfit
+    % RobustdFFfit.dFFresultsInteractive=dFFresults;
+    % RobustdFFfit.fit=dFFrobust;
+    % RobustdFFfit.R2=R2;
+    % RobustdFFfit.ScaleFactor=ScaleFactor;
+    % RobustdFFfit.dFFrobustbAP=dFFrobustbAP;
+    % save(fullfile(fpath{f},'RobustdFFfit'),'RobustdFFfit','-v7.3');
+    % disp('Saved RobustdFF fit')
 end

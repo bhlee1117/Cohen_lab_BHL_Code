@@ -57,7 +57,7 @@ function scatter_density(x, y, mksz, cmap, rnge, facealpha)
     Cmap_density = vec2cmap(density, cmap, rnge);
 
     % ---- Plot ----
-    scatter(data(:,1), data(:,2), mksz, Cmap_density, 'filled','MarkerFaceAlpha',facealpha);
     hold on;
+    scatter(data(:,1), data(:,2), mksz, Cmap_density, 'filled','MarkerFaceAlpha',facealpha);
     colorbar; % optional: to show the density scale
 end

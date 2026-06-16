@@ -22,11 +22,13 @@ function [coord1D principal_axis]= projectTrunkaxis(X)
     % Project onto principal axis
     projections = X_centered * principal_axis;
 
-    % Determine correct polarity (apical is further than basal)
-    maxProj = max(projections);
-    minProj = min(projections);
-    if abs(minProj) > abs(maxProj)
-        projections = -projections;
+    % Fix polarity: principal axis must point soma → dendrite.
+    % Soma is at origin (projection = 0); dendrite points should be positive.
+    % Use the mean projection of all non-soma points to determine direction.
+    dendrite_mean_proj = mean(projections(2:end));
+    if dendrite_mean_proj < 0
+        principal_axis = -principal_axis;
+        projections    = -projections;
     end
 
     % Soma should be zero

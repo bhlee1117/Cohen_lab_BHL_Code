@@ -218,6 +218,9 @@ for f = [foi]
     for ch=1:2
         PCresult{f}.Subthreshold_larger_ch{ch}= get_subthreshold(PCresult{f}.NormalizedTrace_ch{ch}, ActivityTr, 40, 500);
         PCresult{f}.Subthreshold_larger_ch{ch}(isnan(NormalizedTrace_dirt)) = NaN;
+
+        PCresult{f}.Subthreshold_ch{ch}= get_subthreshold(PCresult{f}.NormalizedTrace_ch{ch}, max(Result.spike(1,:), [], 1) > 0, 7, 17);
+        PCresult{f}.Subthreshold_ch{ch}(isnan(NormalizedTrace_dirt)) = NaN;
     end
 
     PCresult{f}.BlueStim = Result.Blue;
@@ -564,10 +567,14 @@ ylabel('Correlation');
 %% Peak triggered average (Figure 2F–G)
 
 PeakSTA=[]; peakvec=[]; TroughSTA=[]; troughvec=[]; PeakTrough_FR=[];
+PeakSTA_ch=[];
 nTauPeak=[1000 1000];
 PeakTroughMat=[]; PeakSTASpClass=[]; TroughSTASpClass=[];
 for f=[foi]
-    PeakSTA{f}=[];
+    PeakSTA{f}=[]; 
+    for ch=1:2
+        PeakSTA_ch{f,ch}=[];
+    end
     TroughSTA{f}=[];
     StopFreq=[12 200]; %filter high frequency
     [nROI nTime]=size(PCresult{f}.Subthreshold);
@@ -592,8 +599,14 @@ for f=[foi]
         if ~isempty(find(peakvec{f}(n,:)>0))
             [PeakSTA{f}(:,:,n), peakMat, peakloc]=get_STA(PCresult{f}.Subthreshold,peakvec{f}(n,:),nTauPeak(1),nTauPeak(2));
             [~, PeakSTASpClass{f,n}]=get_STA(PCresult{f}.SpikeClassMat,peakvec{f}(n,:),nTauPeak(1),nTauPeak(2));
+            for ch=1:2
+                [PeakSTA_ch{f,ch}(:,:,n), ~, ~]=get_STA(PCresult{f}.Subthreshold_ch{ch},peakvec{f}(n,:),nTauPeak(1),nTauPeak(2));
+            end
         else
             PeakSTA{f}(:,:,n)=NaN(nROI,sum(nTauPeak)+1);
+            for ch=1:2
+                PeakSTA_ch{f,ch}(:,:,n)=NaN(nROI,sum(nTauPeak)+1);
+            end
             peakMat=NaN(nROI,sum(nTauPeak)+1);
             peakloc=[];
             PeakSTASpClass{f,n}=NaN(nROI,sum(nTauPeak)+1);
@@ -619,7 +632,7 @@ showInd=[3 8 39];
 showSTA=PeakSTA{showf}-median(PeakSTA{showf}(:,1:1000,:),2);
 for i=[1 3]
     nexttile([1 1]);
-    [dendaxissorted, dsort]=sort(PCresult{f}.dendaxis);
+    [dendaxissorted, dsort]=sort(PCresult{showf}.dendaxis);
     imagesc([-nTauPeak(1):nTauPeak(2)],[1:nROI],showSTA(dsort,:,showInd(i)),cax);
     set_kymoYtick(dendaxissorted);
     xlabel('Time (ms)'); %ylabel('Distance from soma (µm)');
@@ -631,10 +644,10 @@ colormap(turbo);
 set_fontsize(18); set_font('Arial');
 set_figsize(120,220);
 
-SWCpoints=zeros(size(PCresult{f}.swc,1),4);
-SWCpoints(:,1:3)=PCresult{f}.swc;
+SWCpoints=zeros(size(PCresult{showf}.swc,1),4);
+SWCpoints(:,1:3)=PCresult{showf}.swc;
 SWCpoints(:,4)=SWCpoints(:,4)+6; SWCpoints(1,4)=30;
-ftprints=PCresult{f}.Ftprnts(:,:,PCresult{f}.sortDist);
+ftprints=PCresult{showf}.Ftprnts(:,:,PCresult{showf}.sortDist);
 [H, W, T] = size(ftprints);
 t2show=[-120:60:120]; shift_x=180;
 
@@ -642,7 +655,7 @@ figure(133); clf;
 tiledlayout(2,1,'TileSpacing','tight');
 for i=[1 3]
     nexttile([1 1]);
-    [dendaxissorted, dsort]=sort(PCresult{f}.dendaxis);
+    [dendaxissorted, dsort]=sort(PCresult{showf}.dendaxis);
     tax=[-nTauPeak(1):nTauPeak(2)];
     g=1;
     for t=1:length(t2show)
@@ -662,7 +675,6 @@ set_figsize(230,200);
 
 %% Peak triggering average by ROIs (Figure 2G)
 PeakTraceROI=[];
-cmap_errorbar=[0.5 0 1; 0.3 0.3 1; 1 0.4 0.1; 1 0 0];
 figure(134); clf; tiledlayout(2,2,'TileSpacing','compact'); cmap_temp=gen_colormap(Plasma,4); 
 title_str={'Basal peak, Basal voltage','Apical peak, Apical voltage','Apical peak, Basal voltage','Basal peak, Apical voltage'};
 dClass2temporal = [[{1},{1}];[{[3 5]} {[3 5]}];[{[1]} {[5]}];[{[5]} {[1]}]]; % Reading and triggering
@@ -709,20 +721,28 @@ set_figsize(300,270)
 
 
 %% Peak decay over distance (figure 2)
-%dClass2plot=[[{1},{1}];[{[3 5]} {[3 5]}];[{[4]} {[4]}]];
-dClass2plot=[[{[1 2 3 4 5]},{[1 2 3 4 5]}]]; % Trigger, Read
-pair_str=[]; Length_PeakMat=[]; %neuronInd, Trigger Pair i, Trigger Label, Measure Label, Length C, R^2, Legnth C dX, R^2 dX
+dClass2plot=[[{1},{1}];[{[3 5]} {[3 5]}];[{[4]} {[4]}];[{[3 5]} {[1 2 3 4 5]}]; [{[1 2 3 4 5]},{[1 2 3 4 5]}]];
+%dClass2plot=[[{[1 2 3 4 5]},{[1 2 3 4 5]}]]; % Trigger, Read
+pair_str=[];
 cmap_corrscatter=[0.5 0.8 1; 1 0.5 0.5];
 cmap_neuron=hsv(max(foi));
 M=[]; S=[]; M1d=[]; S1d=[]; dendbin=[0 15:45:450 500 600];
 PeakDecayData_Pair=[]; PeakDecayData_Cat=[];
+BadROIs={[26 3 19 20 24 25 26 36],[24 23 24 22 26 25 29]};
 for f=foi
     DistMat=PCresult{f}.interDendDist(PCresult{f}.sortDist,PCresult{f}.sortDist);
     DistMat=max(cat(3,DistMat,DistMat'),[],3);
     DistMat1d = abs(PCresult{f}.dendaxis1d - PCresult{f}.dendaxis1d');
-    PeakZeroMat=squeeze(PeakSTA{f}(:,nTauPeak(1)+1,:)); %row: Read, column: Trigger
+    PTA_tmp=PeakSTA{f};
+    PTA_tmp=PTA_tmp-prctile(PTA_tmp(:,nTauPeak(1)+[-500:500],:),30,2);
+    PeakZeroMat=squeeze(PTA_tmp(:,nTauPeak(1)+1,:)); %row: Read, column: Trigger
+    PeakZeroMat_ch=cellfun(@(x) squeeze(x(:,nTauPeak(1)+1,:)),PeakSTA_ch(f,:),'UniformOutput',false); %row: Read, column: Trigger
     ft=PCresult{f}.Ftprnts(:,:,PCresult{f}.sortDist);
     ftcoord=get_coord(ft);
+    BadFs=(cellfun(@(x) x(1),BadROIs));
+    if any(ismember(BadFs,f))
+    PCresult{f}.labelvec(BadROIs{find(ismember(BadFs,f))}(2:end))=NaN;
+    end
 
     for dc=1:size(dClass2plot,1) %region class to plot
 
@@ -733,40 +753,130 @@ for f=foi
             dax=DistMat(ReadROIs,tr);
             dax1d=DistMat1d(ReadROIs,tr);
             Volt=PeakZeroMat(ReadROIs,tr);
+            Voltodd=PeakZeroMat_ch{1}(ReadROIs,tr);
+            Volteven=PeakZeroMat_ch{2}(ReadROIs,tr);
             [~, trInd_inReadROI]=min(dax);            
-            [grad_mag, grad_dir, grad_vec] = get_gradient(Volt, ftcoord(ReadROIs,:), 5000);
-            PeakDecayData_Cat=[PeakDecayData_Cat; {f, dClass2plot{dc,1}, dClass2plot{dc,2}, tr, ReadROIs, dax, dax1d, Volt, grad_mag(trInd_inReadROI),grad_dir(trInd_inReadROI), grad_vec(trInd_inReadROI,:), ftcoord(tr,:)}];
+            PeakDecayData_Cat=[PeakDecayData_Cat; {f, dClass2plot{dc,1}, dClass2plot{dc,2}, tr, ReadROIs, dax, dax1d, Volt, ...
+                                                   ftcoord(tr,:)}, Voltodd, Volteven];
         end
 
-        uppertri_ind=triu(ones(size(DistMat)))';
-        label_ind=ismember(PCresult{f}.labelvec,dClass2plot{dc,2})'*ismember(PCresult{f}.labelvec,dClass2plot{dc,1});
-        daxpair=tovec(DistMat(uppertri_ind & label_ind));
-        dax1dpair=tovec(DistMat1d(uppertri_ind & label_ind));
-        peakdat2fit=tovec(PeakZeroMat(uppertri_ind & label_ind));
-        peakVoltage=mean(peakdat2fit(daxpair==0),'omitnan');
+        %uppertri_ind=triu(ones(size(DistMat)))';
+        label_ind=ismember(PCresult{f}.labelvec,dClass2plot{dc,2})'*ismember(PCresult{f}.labelvec,dClass2plot{dc,1})>0;
+        daxpair=tovec(DistMat(label_ind));
+        dax1dpair=tovec(DistMat1d(label_ind));
+        peakdat2fit=tovec(PeakZeroMat(label_ind));
+        peakVoltage=mean(peakdat2fit(daxpair<20),'omitnan');
         N_points=sum(~isnan(peakdat2fit));
         prc_triggeringpoint=sum(peakdat2fit<peakVoltage)./N_points;
 
         if N_points>5
-            [fitted_exp params R2]=expfit_wBd(daxpair,peakdat2fit,[0:500],[peakVoltage -500],[peakVoltage*0.7 -max(daxpair)*2],[peakVoltage*1.2 -100]);
-            [fitted_exp1d params1d R21d]=expfit_wBd(dax1dpair,peakdat2fit,[0:500],[peakVoltage -500],[peakVoltage*0.7 -max(dax1dpair)*2],[peakVoltage*1.5 -100]);
+            [fitted_exp params R2]=expfit_wBd(daxpair,peakdat2fit,[0:500],[peakVoltage -500],[peakVoltage*0.9 -485],...
+                                                                           [peakVoltage*1.2 -50],1./(daxpair+1).^.2);
+            [fitted_exp1d params1d R21d]=expfit_wBd(dax1dpair,peakdat2fit,[0:500],[peakVoltage -500],[peakVoltage*0.7 -max(dax1dpair)*2],[peakVoltage*1.5 -50]);
             PeakDecayData_Pair=[PeakDecayData_Pair; {f, dClass2plot{dc,1}, dClass2plot{dc,2}, TrigROIs, ReadROIs, -params(2), R2, -params1d(2), R21d, N_points, ...
                 prc_triggeringpoint,daxpair, dax1dpair,peakdat2fit, fitted_exp, fitted_exp1d}];
         end
     end
 end
 
-fieldName={'NeuronID','TriggerClass','ReadClass','TriggerROI','ReadROIs','dax','dax1d','TriggerVoltage','Gradient_mag','Gradient_dir','Gradient_vec','Trigger_coord'};
+fieldName={'NeuronID','TriggerClass','ReadClass','TriggerROI','ReadROIs','dax','dax1d','TriggerVoltage','Trigger_coord','TriggerVoltageodd','TriggerVoltageeven'};
 PeakDecayData_Cat=array2table(PeakDecayData_Cat,'VariableNames',fieldName);
 
 fieldName={'NeuronID','TriggerClass','ReadClass','TriggerROI','ReadROIs','LengthConstant','Rsquare','LengthConstant1d','Rsquare1d','NFitpoints','Percentile','dax','dax1d','TriggerVoltage','Expfit','Expfit1d'};
 PeakDecayData_Pair=array2table(PeakDecayData_Pair,'VariableNames',fieldName);
-%%
-figure(131); clf; tiledlayout(1,3);
-f2show=18;
-showInd=cell2mat(PeakDecayData_Cat.NeuronID)==f2show;
-nexttile([1 1]);
-for j=find(showInd)'
+
+CorrDistMat=[];
+ClassInd=cellfun(@(x,y) isequal(x,dClass2plot{5,1}) & isequal(y,dClass2plot{5,2}),PeakDecayData_Cat.TriggerClass,PeakDecayData_Cat.ReadClass,'UniformOutput',0);
+for f=foi
+    CorrDistMat{f}=[];
+    showInd=find(cell2mat(PeakDecayData_Cat.NeuronID)==f & cell2mat(ClassInd))';
+    DistMat=PCresult{f}.interDendDist(PCresult{f}.sortDist,PCresult{f}.sortDist);
+    DistMat=max(cat(3,DistMat,DistMat'),[],3);
+    DistMat1d = abs(PCresult{f}.dendaxis1d - PCresult{f}.dendaxis1d');
+
+    for j=1:length(showInd)
+        for jj=j:length(showInd)
+            if isequal(PeakDecayData_Cat.TriggerClass{showInd(j)},PeakDecayData_Cat.TriggerClass{showInd(jj)}) &...
+               isequal(PeakDecayData_Cat.ReadClass{showInd(j)},PeakDecayData_Cat.ReadClass{showInd(jj)}) % If read and trigger class is same for both paris,
+                if j==jj
+                    CorrDistMat{f}=[CorrDistMat{f}; [DistMat(PeakDecayData_Cat.TriggerROI{showInd(j)},PeakDecayData_Cat.TriggerROI{showInd(jj)}) ...
+                        DistMat1d(PeakDecayData_Cat.TriggerROI{showInd(j)},PeakDecayData_Cat.TriggerROI{showInd(jj)}) ...
+                        corr(PeakDecayData_Cat.TriggerVoltageeven{showInd(j)},PeakDecayData_Cat.TriggerVoltageodd{showInd(jj)})...
+                        PeakDecayData_Cat.TriggerROI{showInd(j)} PeakDecayData_Cat.TriggerROI{showInd(jj)}]];
+                else
+                    CorrDistMat{f}=[CorrDistMat{f}; [DistMat(PeakDecayData_Cat.TriggerROI{showInd(j)},PeakDecayData_Cat.TriggerROI{showInd(jj)}) ...
+                        DistMat1d(PeakDecayData_Cat.TriggerROI{showInd(j)},PeakDecayData_Cat.TriggerROI{showInd(jj)}) ...
+                        corr(PeakDecayData_Cat.TriggerVoltage{showInd(j)},PeakDecayData_Cat.TriggerVoltage{showInd(jj)})...
+                        PeakDecayData_Cat.TriggerROI{showInd(j)} PeakDecayData_Cat.TriggerROI{showInd(jj)}]];
+                end
+            end
+        end
+    end
+    if ~isempty(CorrDistMat{f})
+        fieldName={'ContourDist','LaminarDist','Correlation','Pair_i','Pair_j'};
+        CorrDistMat{f}=array2table(CorrDistMat{f},'VariableNames',fieldName);
+    end
+end
+
+%% Show example of contour decay and PTA correlation 
+f2show=26;
+ClassInd=cellfun(@(x,y) isequal(x,dClass2plot{5,1}) & isequal(y,dClass2plot{5,2}),PeakDecayData_Cat.TriggerClass,PeakDecayData_Cat.ReadClass,'UniformOutput',0);
+showInd=find(cell2mat(PeakDecayData_Cat.NeuronID)==f2show & cell2mat(ClassInd))';
+Ftcoord=get_coord(PCresult{f2show}.Ftprnts(:,:,PCresult{f2show}.sortDist));
+skelDend=point2img(PCresult{f2show}.swc,2,size(PCresult{f2show}.ref_im));
+idx=SelectFromScatter(CorrDistMat{f2show}.LaminarDist,CorrDistMat{f2show}.ContourDist);
+pth=[]; g=1;
+for ss=idx'
+    [~, pp]= geodesic_distance(skelDend,Ftcoord(CorrDistMat{f2show}.Pair_i(ss),:),Ftcoord(CorrDistMat{f2show}.Pair_j(ss),:));
+    bw_skel = bwskel(pp);       % or bwmorph(bw, 'skel', Inf)
+    [r, c]  = find(bw_skel);
+    pth{g}=[r c];
+    pth{g}(1,:)=Ftcoord(CorrDistMat{f2show}.Pair_i(ss),[2 1]);
+    pth{g}(end+1,:)=Ftcoord(CorrDistMat{f2show}.Pair_j(ss),[2 1]);
+g=g+1;
+end
+figure(131); clf; tiledlayout(2,12);
+ax2=nexttile(1,[1 4]);
+dendaxis1d=PCresult{f2show}.dendaxis1d;
+PTA2show=PeakDecayData_Cat.TriggerVoltage(showInd);
+ReadROI2show=PeakDecayData_Cat.ReadROIs(showInd);
+distcmap=vec2cmap(dendaxis1d(cell2mat(PeakDecayData_Cat.TriggerROI(showInd))),'turbo');
+drange1d=round([min(dendaxis1d(cell2mat(PeakDecayData_Cat.TriggerROI(showInd)))) max(dendaxis1d(cell2mat(PeakDecayData_Cat.TriggerROI(showInd))))]);
+[~, dsort]=cellfun(@(x) sort(dendaxis1d(x)),ReadROI2show,'UniformOutput',false);
+hold all;
+l=cellfun(@(x,y,z) plot(dendaxis1d(y(z)),x(z),'linewidth',1),PTA2show,ReadROI2show,dsort,'UniformOutput',false);
+cellfun(@(x,y) set(x,'Color',y),l,num2cell(distcmap,2));
+xlabel('Somatodendritic coordinate (µm)'); ylabel('∆F/F');
+title('Peak-triggered average (PTA) voltage');
+cb=colorbar; colormap(ax2,turbo); 
+cb.Label.String=sprintf('Somatodendritic location \n of triggering ROI (µm)');
+cb.Ticks=cb.Limits; cb.TickLabels=[drange1d];
+box off; axis tight;
+
+ax1=nexttile([1 4]);
+scatter(CorrDistMat{f2show}.LaminarDist,CorrDistMat{f2show}.ContourDist,10,vec2cmap(CorrDistMat{f2show}.Correlation,'turbo',[-1 1]),'filled'); hold all
+scatter(CorrDistMat{f2show}.LaminarDist(idx),CorrDistMat{f2show}.ContourDist(idx),60,hsv(length(idx)),'linewidth',2); hold all
+xlabel('Somatodendritic distance (µm)'); ylabel('Contour distance (µm)'); 
+title('PTA correlation');
+cb=colorbar; colormap(ax1,turbo); 
+cb.Label.String='Correlation';
+cb.Ticks=cb.Limits; cb.TickLabels=[-1 1];
+
+nexttile([1 4]);
+cmap_line=hsv(length(pth));
+%imshow2(PCresult{f2show}.ref_im,[600 3500]); hold all
+scatter(PCresult{f2show}.swc(:,1),PCresult{f2show}.swc(:,2),7,[0.6 0.6 0.6],'filled'); hold all;
+for g=1:length(pth)
+scatter(pth{g}(:,2),pth{g}(:,1),5,cmap_line(g,:),'filled');
+scatter(pth{g}([1 end],2),pth{g}([1 end],1),70,cmap_line(g,:),'linewidth',2);
+end
+quiver(Ftcoord(dendaxis1d==0,1), Ftcoord(dendaxis1d==0,2), PCresult{f2show}.principal_axis(1)*300, 300*PCresult{f2show}.principal_axis(2), 0, 'Color', 'k', 'LineWidth', 2, 'MaxHeadSize', 0.5);
+drawScaleBar(100/Pixelsize(f2show),'Horizontal','color','k','position',[100 160]);
+axis equal tight off;
+title('Example contour paths between ROI pairs')
+
+nexttile([1 3]);
+for j=showInd
     d2show=PeakDecayData_Cat.dax{j};
     v2show=PeakDecayData_Cat.TriggerVoltage{j};
     [d2show, dsort]=sort(d2show);
@@ -774,9 +884,14 @@ for j=find(showInd)'
     %v2show=v2show./v2show(1);
     plot(d2show,v2show,'color',[0.5 0.5 0.5]); hold all;
 end
+v2showCat=cellfun(@(x,y) [x y],PeakDecayData_Cat.dax(showInd),PeakDecayData_Cat.TriggerVoltage(showInd),'UniformOutput',false)';
+v2showCat_binned=binning_data(v2showCat,[0:30:450]);
+errorbar_shade(v2showCat_binned.centers,v2showCat_binned.mean,v2showCat_binned.std,[1 0 0]);
+xlabel('Contour distance from triggering ROI (µm)'); ylabel('Peak-triggered ∆F/F');
+xlim([0 400]); box off;
 
-nexttile([1 1]);
-for j=find(showInd)'
+nexttile([1 3]);
+for j=showInd
     d2show=PeakDecayData_Cat.dax1d{j};
     v2show=PeakDecayData_Cat.TriggerVoltage{j};
     [d2show, dsort]=sort(d2show);
@@ -784,100 +899,188 @@ for j=find(showInd)'
     %v2show=v2show./v2show(1);
     plot(d2show,v2show,'color',[0.5 0.5 0.5]); hold all;
 end
+v2showCat=cellfun(@(x,y) [x y],PeakDecayData_Cat.dax1d(showInd),PeakDecayData_Cat.TriggerVoltage(showInd),'UniformOutput',false)';
+v2showCat_binned=binning_data(v2showCat,[0:30:450]);
+errorbar_shade(v2showCat_binned.centers,v2showCat_binned.mean,v2showCat_binned.std,[1 0 0]);
+xlabel('Somatodendritic distance from triggering ROI (µm)'); ylabel('Peak-triggered ∆F/F');
+xlim([0 400]); box off;
 
-%%
-f2show=26;
-ftcoord=get_coord(PCresult{f2show}.Ftprnts(:,:,PCresult{f2show}.sortDist));
-showInd=find(cell2mat(PeakDecayData_Cat.NeuronID)==f2show);
-figure(142); clf;
-for j=showInd(1:3:30)'
-    nexttile([1 1]);
-Coord2show=PeakDecayData_Cat.Trigger_coord{j};
-Gradvec2show=PeakDecayData_Cat.Gradient_vec{j}*700000;
-Volt2show=PeakDecayData_Cat.TriggerVoltage{j};
-% Arrow plot — scale arrow length by magnitude
-imshow2(PCresult{f2show}.ref_im,[]); hold all;
-scatter(ftcoord(PeakDecayData_Cat.ReadROIs{j},1), ftcoord(PeakDecayData_Cat.ReadROIs{j},2), 40, vec2cmap(Volt2show,'turbo'),'filled')
-quiver(Coord2show(:,1), Coord2show(:,2), Gradvec2show(:,1), Gradvec2show(:,2), 0.5, 'w', 'LineWidth', 1);
-end
+nexttile([1 3]);
+scatter_density(CorrDistMat{f2show}.ContourDist,CorrDistMat{f2show}.Correlation,40);
+xlabel('Contour distance (µm)'); ylabel('PTA Correlation');
+xlim([0 600]); box off; delete(colorbar);
 
+nexttile([1 3]);
+scatter_density(CorrDistMat{f2show}.LaminarDist,CorrDistMat{f2show}.Correlation,40);
+xlabel('Somatodendritic distance (µm)'); ylabel('PTA Correlation');
+xlim([0 500]); box off; delete(colorbar);
+set_font('Arial'); set_fontsize(16);
+set_figsize(450,200);
 
+figure(132); clf;
+shortbd_L=[1 100]; longbd_L=[100 200]; shortbd_C=[1 100]; longbd_C=[100 200];
+Ratiothreshold=1.7;
+% ShortCLongL_ind=cellfun(@(x) x.ContourDist > shortbd_C(1) & x.ContourDist < shortbd_C(2) & x.LaminarDist > longbd_L(1) & x.LaminarDist < longbd_L(2),CorrDistMat(foi),'UniformOutput',false);
+% LongCShortL_ind=cellfun(@(x) x.ContourDist > longbd_C(1) & x.ContourDist < longbd_C(2) & x.LaminarDist > shortbd_L(1) & x.LaminarDist < shortbd_L(2),CorrDistMat(foi),'UniformOutput',false);
 
-%%
+ShortCLongL_ind=cellfun(@(x) x.ContourDist./x.LaminarDist<Ratiothreshold & x.LaminarDist<200 & x.LaminarDist>0,CorrDistMat(foi),'UniformOutput',false);
+LongCShortL_ind=cellfun(@(x) x.ContourDist./x.LaminarDist>Ratiothreshold & x.LaminarDist<200 & x.LaminarDist>0,CorrDistMat(foi),'UniformOutput',false);
 
-x=ftcoord(ReadROIs,1); y=ftcoord(ReadROIs,2);
-d = [0; cumsum(sqrt(diff(x).^2 + diff(y).^2))];
+Corr_SCLL=cellfun(@(x,y) mean(x.Correlation(y),'omitnan'),CorrDistMat(foi),ShortCLongL_ind,'UniformOutput',false);
+Corr_LCSL=cellfun(@(x,y) mean(x.Correlation(y),'omitnan'),CorrDistMat(foi),LongCShortL_ind,'UniformOutput',false);
 
-f2show=26;
-imshow2(PCresult{f2show}.ref_im,[]); hold all;
-scatter(x, y, 40, vec2cmap(Volt,'turbo'),'filled')
+p=Boxplot_wPoints2(cell2mat([Corr_SCLL' Corr_LCSL']),hsv(2));
+set(gca,'xtick',[1 2],'xticklabel',{['Long contour ,short laminar'], 'Short contour, long laminar'});
+drawPValueLines(p,0.05,'TextYOffset',0.05);
+ylabel('Mean correlation'); box off;
+set_font('Arial'); set_fontsize(16); 
+set_figsize(130,230)
 
-% Activity at one time point
-A = volt;
-
-% Create regular grid
-[xq,yq] = meshgrid(linspace(min(x),max(x),100), ...
-                   linspace(min(y),max(y),100));
-
-% Interpolate activity
-Agrid = griddata(x,y,A,xq,yq,'natural');
-
-% Compute gradient
-[Ax,Ay] = gradient(Agrid);
-
-% Gradient magnitude
-grad_mag = sqrt(Ax.^2 + Ay.^2);
-
-% Plot
-figure
-imagesc(grad_mag)
-colorbar
-
-
-
-
-%%
-%linkaxes([ax1, ax2]);
-xlim([0 400])
-%NeuronInd, Pair class, Length Cst, R^2, Legnth Cst dX, R^2 dX, N fit points, range of distance, range dx, peak zscore
-
-
-% Plot local stimulation data
-LocalStimResult=importdata(['/Volumes/cohen_lab/Lab/Labmembers/Byung Hun Lee/Data/Statistics_Optopatch_Prism/LocalStimulationResult_20260609.mat']);
+%% Plot local stimulation data, figure 2J, K
+%load(['/Volumes/cohen_lab/Lab/Labmembers/Byung Hun Lee/Data/Statistics_Optopatch_Prism/LocalStimulationResult_20260609.mat']);
 t2show=[-5:5:60];
-% tInd=Lstaall.OnsetTime>=20 & Lstaall.OnsetTime<=40;
-% path2show=find(Lstaall.StimROI_percentile>0.5 & Lstaall.Fit_R2>0.52 & tInd & Lstaall.Fit_length<Lstaall.Max_distance*0.5); % Percentile, R^2
-% Stim2show=unique(Lstaall.StimInd(path2show));
-% Lsta2show=ismember(Lstaall.StimInd,Stim2show) & Lstaall.Fit_length<240 & Lstaall.Fit_length>20;
+cmap_errorbar=[0.3 0.3 0.3; 0.5 0.5 0.5; 0.7 0.7 0.7; 0 0.6 1];
+tInd=cell2mat(Lstaall.ReadBlueTime)>=20 & cell2mat(Lstaall.ReadBlueTime)<=40;
+path2show=find(cell2mat(Lstaall.StimROI_percentile)>0.9 & cell2mat(Lstaall.Fit_R2)>0.2 & tInd & cell2mat(Lstaall.Fit_length)>20 & cell2mat(Lstaall.Fit_length)<300); % Percentile, R^2
+Stim2show=unique(cell2mat(Lstaall.StimInd(path2show)));
 
-tInd2show=find(t2show>=20 & t2show<=40);
-tInd=LocalStimResult.Lstaall.OnsetTime>=20 & LocalStimResult.Lstaall.OnsetTime<=40;
-path2show=find(LocalStimResult.Lstaall.StimROI_percentile>0.5 & LocalStimResult.Lstaall.Fit_R2>0.52 & tInd); % Percentile, R^2
-Stim2show=unique(LocalStimResult.Lstaall.StimInd(path2show));
-Lsta2show=ismember(LocalStimResult.Lstaall.StimInd,Stim2show) & LocalStimResult.Lstaall.Fit_length<240 & LocalStimResult.Lstaall.Fit_length>20;
-
-data2show=LocalStimResult.STADistmat(Stim2show,tInd2show);
-[deltax, dsort]=cellfun(@(x) sort(x(:,1)),data2show(:,1),'UniformOutput',false);
-[~, dsort1d]=cellfun(@(x) sort(x(:,3)),data2show1d(:,1),'UniformOutput',false);
-data2show_ave=[]; data2show_ave1d=[];
-volt2show=cellfun(@(x) x(:,2),data2show,'UniformOutput',false);
-for ss=1:size(data2show,1)
-data2show_ave{ss,1}=[data2show{ss,1}(:,1) mean(cell2mat(volt2show(ss,:)),2) data2show{ss,1}(:,3) ];
+DecayLengthCat=[]; DecayCurveCat=[];
+for i=1:length(Stim2show)
+    Dat2showInd=find(ismember(cell2mat(Lstaall.StimInd),Stim2show(i)));
+    [dax, dd]=cellfun(@(x) sort(x(:,1)), Lstaall.dendaxis(Dat2showInd),'UniformOutput',0);
+    SortedVoltageSTA=cellfun(@(x,y) x(y), Lstaall.VoltageSTA(Dat2showInd),dd,'UniformOutput',0);
+    t2read=cell2mat(cellfun(@(x) sort(x(:,1)), Lstaall.ReadBlueTime(Dat2showInd),'UniformOutput',0));
+    [t2read, tsort]=sort(t2read);
+    KymoSta=cell2mat(SortedVoltageSTA(tsort)');
+    Lc2print=[]; g=1;
+    ind2print=ismember(Dat2showInd,find(ismember(cell2mat(Lstaall.ReadBlueTime),[15:35]))); %StimInd + Time
+    Dat2showInd_sub=Dat2showInd(ind2print);
+    [maxR2, mi]=max(cell2mat(Lstaall.Fit_R2(Dat2showInd_sub)));
+    DecayLengthCat= [DecayLengthCat; [Stim2show(i) Lstaall.Fit_length{Dat2showInd_sub(mi)} maxR2]];
+    DecayCurveCat = [DecayCurveCat {[Lstaall.dendaxis{Dat2showInd_sub(mi)}, Lstaall.VoltageSTA{Dat2showInd_sub(mi)}]}];
 end
 
-data2show_ave2=cellfun(@(x,y) [x(y,1) x(y,2)/x(x(:,1)==0,2)],data2show_ave,dsort,'UniformOutput',false); %normalize
-data2show_ave1d=cellfun(@(x,y) [(x(y,3)) x(y,2)/x(x(:,1)==0,2)],data2show_ave,dsort1d,'UniformOutput',false);
+[~, dsort]=cellfun(@(x) sort(x(:,1)),DecayCurveCat,'UniformOutput',0);
+data2show_ave2=cellfun(@(x,y) [x(y,1) x(y,2)/mean(x(x(:,1)<10,2))],DecayCurveCat,dsort,'UniformOutput',false); %normalize
 LocalstimVoltage_bin=binning_data(data2show_ave2,dendbin);
 
-l(4)=errorbar_shade(LocalstimVoltage_bin.centers,LocalstimVoltage_bin.mean,LocalstimVoltage_bin.sem,cmap_errorbar(4,:));
-xlim([0 200]); box off;
+figure(158); clf; %check PTAs
+ClassInd=cellfun(@(x,y) isequal(x,dClass2plot{4,1}) & isequal(y,dClass2plot{4,2}),PeakDecayData_Pair.TriggerClass,PeakDecayData_Pair.ReadClass,'UniformOutput',0);
+ClassInd=find(cell2mat(ClassInd));
+for c=ClassInd'
+    nexttile([1 1]);
+    scatter(PeakDecayData_Pair.dax{c},PeakDecayData_Pair.TriggerVoltage{c},10,'filled'); hold all;
+    plot(PeakDecayData_Pair.Expfit{c},'r');
+    title(PeakDecayData_Pair.LengthConstant{c});
+end
 
-nexttile([1 2])
+figure(156); clf; tiledlayout(1,2);
+nexttile([1 1]);
+PTA2show=[]; PTA2show_all=[];
+for d=1:3%size(dClass2plot,1)
+    ClassInd=cellfun(@(x,y) isequal(x,dClass2plot{d,1}) & isequal(y,dClass2plot{d,2}),PeakDecayData_Cat.TriggerClass,PeakDecayData_Cat.ReadClass,'UniformOutput',0);
+    f2show=unique(cell2mat(PeakDecayData_Cat.NeuronID(find(cell2mat(ClassInd)))));
+    for f=f2show'
+        idx=cell2mat(PeakDecayData_Cat.NeuronID)==f & cell2mat(ClassInd);
+        voltdat_tmp=cellfun(@(x,y) [x y],PeakDecayData_Cat.dax(idx), PeakDecayData_Cat.TriggerVoltage(idx),'UniformOutput',0)';
+        voltdat_tmp_bin=binning_data(voltdat_tmp,dendbin);
+        PTA2show{d,f}=[voltdat_tmp_bin.centers' voltdat_tmp_bin.mean'./voltdat_tmp_bin.mean(1)];
+    end
+
+    ss=cell2mat(cellfun(@(x) x(:,2),PTA2show(d,cellfun(@(x) ~isempty(x),PTA2show(d,:))),'UniformOutput',0));
+    PTA2show_all{d}=[voltdat_tmp_bin.centers' mean(ss,2,'omitnan') sem(ss,2)];
+    errorbar_shade(PTA2show_all{d}(:,1),PTA2show_all{d}(:,2),PTA2show_all{d}(:,3),cmap_errorbar(d,:)); hold all;
+end
+l=errorbar_shade(LocalstimVoltage_bin.centers,LocalstimVoltage_bin.mean,LocalstimVoltage_bin.sem,cmap_errorbar(4,:));
+xlim([0 250]); box off;
+ylabel('Normalized voltage'); xlabel('Distance from triggering ROI (µm)');
+
+nexttile([1 1])
 cmap=[0 0.6 1;0 0 0; 0.7 0 0.9];
-%SponLength2show=find(Length_PeakMat.Rsquare>0.2 & Length_PeakMat.peak_zscore>1);
-SponLength2show=find(Length_PeakMat.MaxDistance>0);
-LengthC2show={LocalStimResult.Lstaall.Fit_length(path2show), Length_PeakMat.LengthConstant(SponLength2show)};
-p=Boxplot_wPoints2(LengthC2show,cmap([1 2],:)); axis tight; hold all
-drawPValueLines(p,300,'TextYOffset',0.1,'StepHeight',0.1)
-set(gca,'yscale','log','xtick',[1 2],'xticklabel',{'Opto. Stim.','Spontaneous'},'ytick',[10 100 1000])
-ylabel('Decay length (\mum)'); ylim([10 1700]); xlim([0.5 2.5]); box off;
+ClassInd=cellfun(@(x,y) isequal(x,dClass2plot{4,1}) & isequal(y,dClass2plot{4,2}),PeakDecayData_Pair.TriggerClass,PeakDecayData_Pair.ReadClass,'UniformOutput',0);
+Lc2Spont=cell2mat(PeakDecayData_Pair.LengthConstant(cell2mat(ClassInd)));
+LengthC2show={cell2mat(Lstaall.Fit_length(path2show)), Lc2Spont};
+p=Violin_wPoints(LengthC2show,cmap([1 2],:)); axis tight; hold all
+line([1 2],[400 400],'LineWidth',2,'color','k');
+text([1.5],[415],'N.S.','HorizontalAlignment','center','FontSize',16);
+set(gca,'xtick',[1 2],'xticklabel',{'Opto. Stim.','Spontaneous'})
+ylabel('Decay length (µm)'); ylim([0 440]); xlim([0.5 2.5]); box off;
+set_font('Arial'); set_fontsize(20);
+set_figsize(300,180);
+
+%% Plot decay length over time (Figure S10 H, I)
+path2show=find(cell2mat(Lstaall.StimROI_percentile)>0.9 & cell2mat(Lstaall.Fit_R2)>0.2 & tInd); % Percentile, R^2
+Stim2show=unique(cell2mat(Lstaall.StimInd(path2show)));
+Lsta2show=ismember(cell2mat(Lstaall.StimInd),Stim2show) & cell2mat(Lstaall.Fit_length)<300 & cell2mat(Lstaall.Fit_length)>20;
+fprintf('# of sample: %2.0f\n',length(Stim2show));
+
+figure(155); clf;
+for i=1:length(Stim2show)
+    Dat2showInd=find(ismember(cell2mat(Lstaall.StimInd),Stim2show(i)));
+    [dax, dd]=cellfun(@(x) sort(x(:,1)), Lstaall.dendaxis(Dat2showInd),'UniformOutput',0);
+    SortedVoltageSTA=cellfun(@(x,y) x(y), Lstaall.VoltageSTA(Dat2showInd),dd,'UniformOutput',0);
+    t2read=cell2mat(cellfun(@(x) sort(x(:,1)), Lstaall.ReadBlueTime(Dat2showInd),'UniformOutput',0));
+    [t2read, tsort]=sort(t2read);
+    KymoSta=cell2mat(SortedVoltageSTA(tsort)');
+    Lc2print=[]; g=1;
+    for t2print=15:10:35
+        ind2print=ismember(Dat2showInd,find(cell2mat(Lstaall.ReadBlueTime)==t2print));
+        Lc2print=[Lc2print Lstaall.Fit_length{Dat2showInd(ind2print)}];
+    end
+    nexttile([1 1]);
+    imagesc(t2read,[1:size(KymoSta,1)],KymoSta);
+    set_kymoYtick(dax{1});
+    title(sprintf('StimInd: %2.0f, Lc: %3.0f %3.0f %3.0f',Stim2show(i),Lc2print(1),Lc2print(2),Lc2print(3)));
+end
+
+data2showall=[];
+for i=1:length(Stim2show)
+    Dat2showInd=find(ismember(cell2mat(Lstaall.StimInd),Stim2show(i)));
+    [dax, dd]=cellfun(@(x) sort(x(:,1)), Lstaall.dendaxis(Dat2showInd),'UniformOutput',0);
+    SortedVoltageSTA=cellfun(@(x,y) x(y), Lstaall.VoltageSTA(Dat2showInd),dd,'UniformOutput',0);
+    t2read=cell2mat(cellfun(@(x) sort(x(:,1)), Lstaall.ReadBlueTime(Dat2showInd),'UniformOutput',0));
+    [t2read, tsort]=sort(t2read);
+    KymoSta=cell2mat(SortedVoltageSTA(tsort)');
+    Lc2print=[]; g=1;
+    for t=1:length(t2read)
+        ind2print=ismember(Dat2showInd,find(cell2mat(Lstaall.ReadBlueTime)==t2read(t)));
+        Lc2print=[Lc2print Lstaall.Fit_length{Dat2showInd(ind2print)}];
+        data2showall{i,t}=[dax{1} KymoSta(:,t)];
+    end
+end
+
+timeevolutionMat=[];
+for t=1:size(data2showall,2)
+    localstim_binResult=binning_data(data2showall(:,t),dendbin);
+    timeevolutionMat=[timeevolutionMat localstim_binResult.mean'];
+end
+
+figure(154); clf;
+tiledlayout(2,1,'TileSpacing','loose')
+cmap_t2=gen_colormap([0 0.6 1; 1 0 0; 0 0 0],length(t2read));
+cb=colorbar; cb.Label.String='Time after blue onset (ms)';
+cb.Ticks=cb.Limits; cb.TickLabels=[t2read(1) t2read(end)];
+
+ax2=nexttile([1 1]);
+pcolor(t2show,localstim_binResult.centers,timeevolutionMat);
+ylim([0 500]); xlim([-5 45]); axis tight;
+cb=colorbar; cb.Label.String='∆F/F';
+xlabel('Time after blue onset (ms)')
+ylabel('Distance from stimulation ROI (µm)')
+set(gca,'ydir','reverse'); colormap(turbo);
+
+d2show=[cell2mat(Lstaall.ReadBlueTime(Lsta2show)) cell2mat(Lstaall.Fit_length(Lsta2show))];
+LcData_binning=binning_data({d2show},[-7.5:5:60]);
+d2showCell=[];
+for m=1:length(LcData_binning.membership)
+    d2showCell{m}=[d2show(LcData_binning.membership{m},2)];
+end
+ax3=nexttile([1 1]);
+showtInd=[4:8]; cmap_t=hsv(length(showtInd));
+p=Violin_wPoints(d2showCell(showtInd),cmap_t);
+line([1 5],[305 305],'LineWidth',2,'color','k');
+text([3],[325],'N.S.','HorizontalAlignment','center','FontSize',20);
+set(gca,'xtick',[1:length(showtInd)],'XTickLabel',LcData_binning.centers(showtInd))
+ylabel('Decay length (µm)'); xlabel('Time after blue onset (ms)'); ylim([0 325]);
+set_font('Arial'); set_fontsize(22);
+set_figsize(170,320)

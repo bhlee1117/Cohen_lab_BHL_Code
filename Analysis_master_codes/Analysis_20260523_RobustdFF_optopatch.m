@@ -17,14 +17,14 @@ set(0,'DefaultFigureWindowStyle','docked')
 
 %foi=[94 96 97 98 99 102 104:110 123 144 145 151:156 164 165 172:175 185 186 190 191 192];
 foi_somDend=[1 22 14 18 10 26 25 32 46 47 48 43 34 35 2:4 6:8 12 13 17 20 29 31 39 41 42 44 49 50 53 58];
-foi=[7,58,63,68,93,94,96,97,98,99,101,102,103,104,105,106,107,108,109,110,112,113,114,115,116,117,118,119,120,121,122,123,124,144,151,152,153,154,155,156,157,158,164 165 172:175 185 186 190 191 192];
+foi=[7,58,63,68,93,94,96,97,98,99,101,102,103,104,105,106,107,108,109,110,112,113,114,115,116,117,118,119,120,121,122,123,124,125:132,144,151,152,153,154,155,156,157,158,164 165 172:175 185 186 190 191 192];
 foi=unique([foi foi_somDend]);
 [a, unqInd] = unique([Mouse(foi) NeuronInd(foi)] ,'row');
 
 %% Movie saving
 nTauSTA=[20 50];
 Referencefile=[];
-for i=unqInd(36)'
+for i=unqInd(30)'
 
     SameCellInd=find(Mouse==Mouse(foi(i)) & NeuronInd==NeuronInd(foi(i)));
     fprintf('Processing mouse #%2.0f, Neuron #%2.0f \n',Mouse(foi(i)),NeuronInd(foi(i)));
@@ -231,7 +231,7 @@ end
 
 %% Load STA movies and set the scaling factor
 nTauSTA=[20 50];
-for i=unqInd(36)'
+for i=unqInd(30)'
     SameCellInd=find(Mouse==Mouse(foi(i)) & NeuronInd==NeuronInd(foi(i)));
     fprintf('Processing mouse #%2.0f, Neuron #%2.0f \n',Mouse(foi(i)),NeuronInd(foi(i)));
     figure(i); clf;

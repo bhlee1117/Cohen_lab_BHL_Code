@@ -1,4 +1,5 @@
 function p_values = Boxplot_wPoints2(X, faceColor)
+% p_values = Boxplot_wPoints2(X, faceColor)
 % Boxplot_wPoints2 - Plots box plots with beeswarm or jittered points.
 % Supports both unpaired (cell array) and paired (numeric matrix) data.
 %

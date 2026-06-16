@@ -246,7 +246,8 @@ for i=unqInd(59)'
         linkaxes(ax2,'xy')
         n_take = input('#components to take: ', 's');
         n_take = str2num(n_take);
-        coeff=subMov*mean(eigTrace(:,n_take)*V(:,n_take)',2);
+        %        coeff=subMov*mean(eigTrace(:,n_take)*V(:,n_take)',2);
+        coeff = V(:, n_take) * D(n_take);
         ftprnt(pixelList,p)=coeff;
     end
     close(figure(4));
@@ -331,7 +332,7 @@ end
 %% Signal extraction from multiple movie files, in streaming mode
 bound = 6;
 %[97 98 99 102 104:111 123 124 144 145 151:158 164 165 172:175 185 186 190 191 192]
-for f=[192]
+for f=[145 150]
    
     time_segment=TimeSegFrame(f);
     load([fpath{f} '/OP_Result.mat'])
@@ -358,46 +359,46 @@ for f=[192]
     Result.mc=[];
     Result.tracesSplit=[];
 
-    [Result.ftprntSplit, mapping] = get_dividedROI(Result.ftprnt, 800);
+    %[Result.ftprntSplit, mapping] = get_dividedROI(Result.ftprnt, 800);
 
-    g=1; intDD=[]; pth=[]; pair=[];
-    figure(f); clf;
-    nROI=size(Result.ftprnt,3);
-    %nROI=size(Result.ftprntSplit,3);
-    if isfield(Result,'Structure')
-    SkelDend=Result.Structure>0.001;
-    else
-        if isfield(Result,'Mask')
-    SkelDend=Result.Mask>0;    
-        else
-    SkelDend = Skeletonize_dendrite(Result.ref_im,4,0.02,25);
-    SkelDend = SkelDend.* max(Result.ftprnt,[],3)>0;
-    Result.Mask= SkelDend;
-        end
-    end
-    [~, rmv]= get_ROI(SkelDend);
-    SkelDend(max(rmv,[],3)>0)=0;
-
-    for i=1:nROI
-        i
-        for k=i:nROI
-            %[intDD(i,k), pth(:,:,g)]=geodesic_distance(SkelDend,get_coord(Result.ftprntSplit(:,:,i)),get_coord(Result.ftprntSplit(:,:,k)));
-            [intDD(i,k), pth(:,:,g)]=geodesic_distance(SkelDend>0,get_coord(Result.ftprnt(:,:,i)),get_coord(Result.ftprnt(:,:,k)));
-            pth(:,:,g)=pth(:,:,g);
-            pair(g,:)=[i k];
-            %nexttile([1 1]);
-            %imshow2(im_merge(cat(3,Result.ref_im,pth),[1 1 1; 1 0 0]),[])
-            g=g+1;
-        end
-    end
-    for r=randi(nROI,1,6)
-nexttile([1 1])
-        imshow2(im_merge(cat(3,pth(:,:,r),mat2gray(Result.ref_im),mat2gray(SkelDend)),[1 0 0; 1 1 1; 0 0 1]),[]);
-        title(r);
-    end
-    intDD=max(cat(3,intDD,intDD'),[],3);
-    %Result.interDendDistSplit=intDD;
-    Result.interDendDist=intDD;
+%     g=1; intDD=[]; pth=[]; pair=[];
+%     figure(f); clf;
+%     nROI=size(Result.ftprnt,3);
+%     %nROI=size(Result.ftprntSplit,3);
+%     if isfield(Result,'Structure')
+%     SkelDend=Result.Structure>0.001;
+%     else
+%         if isfield(Result,'Mask')
+%     SkelDend=Result.Mask>0;    
+%         else
+%     SkelDend = Skeletonize_dendrite(Result.ref_im,4,0.02,25);
+%     SkelDend = SkelDend.* max(Result.ftprnt,[],3)>0;
+%     Result.Mask= SkelDend;
+%         end
+%     end
+%     [~, rmv]= get_ROI(SkelDend);
+%     SkelDend(max(rmv,[],3)>0)=0;
+% 
+%     for i=1:nROI
+%         i
+%         for k=i:nROI
+%             %[intDD(i,k), pth(:,:,g)]=geodesic_distance(SkelDend,get_coord(Result.ftprntSplit(:,:,i)),get_coord(Result.ftprntSplit(:,:,k)));
+%             [intDD(i,k), pth(:,:,g)]=geodesic_distance(SkelDend>0,get_coord(Result.ftprnt(:,:,i)),get_coord(Result.ftprnt(:,:,k)));
+%             pth(:,:,g)=pth(:,:,g);
+%             pair(g,:)=[i k];
+%             %nexttile([1 1]);
+%             %imshow2(im_merge(cat(3,Result.ref_im,pth),[1 1 1; 1 0 0]),[])
+%             g=g+1;
+%         end
+%     end
+%     for r=randi(nROI,1,6)
+% nexttile([1 1])
+%         imshow2(im_merge(cat(3,pth(:,:,r),mat2gray(Result.ref_im),mat2gray(SkelDend)),[1 0 0; 1 1 1; 0 0 1]),[]);
+%         title(r);
+%     end
+%     intDD=max(cat(3,intDD,intDD'),[],3);
+%     %Result.interDendDistSplit=intDD;
+%     Result.interDendDist=intDD;
 
     ref_im_vec=tovec(Result.ref_im(bound:end-bound,bound:end-bound));
 
@@ -431,6 +432,7 @@ nexttile([1 1])
         bv_trace=tovec(mov_mc)'*tovec(Result.bvMask);
         V_trace=tovec(mov_mc)'*tovec(Result.ftprnt);
         bv_trace=SeeResiduals(permute(bv_trace,[2 3 1]),V_trace);
+        bv_trace=SeeResiduals(bv_trace,[1:size(mov_mc,3)]);
         bv_trace=squeeze(bv_trace)';
 
         mov_mc2=mov_mc./reshape(bkg,1,1,[]);
@@ -449,19 +451,22 @@ nexttile([1 1])
         %Result.traces=[Result.traces, -(tovec(mov_res.*double(max(Result.bvMask,[],3)==0))'*tovec(Result.ftprntSplit))'];
         if isfield(Result,'bvMask')
             Result.traces_bvMask=[Result.traces_bvMask, -(tovec(mov_res)'*tovec(Result.ftprnt))'];
+            if isfield(Result,'ftprntSplit')
             Result.tracesSplit=[Result.tracesSplit, -(tovec(mov_res.*double(max(Result.bvMask,[],3)==0))'*tovec(Result.ftprntSplit))'];
+            end
         end
     end
 
+    Result.normTraces=Result.traces./get_threshold(Result.traces,1);
     %Result.ftprnt=Result.ftprntSplit;
     
-    figure(2*f); clf; tiledlayout(2,2)
-nexttile([1 1])
-show_footprnt_contour(Result.ftprntSplit,Result.ref_im)
-nexttile([1 1])
-show_footprnt_contour(Result.bvMask,Result.ref_im)
-nexttile([1 2])
-    plot(rescale2(Result.tracesSplit,2)'+[1:size(Result.tracesSplit,1)]);
+    figure(2*f); clf; tiledlayout(2,2);
+    nexttile([1 1])
+    show_footprnt_contour(Result.ftprnt,Result.ref_im)
+    nexttile([1 1])
+    show_footprnt_contour(Result.bvMask,Result.ref_im)
+    nexttile([1 2])
+    plot(rescale2(Result.normTraces,2)'+[1:size(Result.normTraces,1)]);
     drawnow;
     save([fpath{f} '/OP_Result.mat'],'Result','-v7.3')
     disp([num2str(f) ' th file is saved.'])
