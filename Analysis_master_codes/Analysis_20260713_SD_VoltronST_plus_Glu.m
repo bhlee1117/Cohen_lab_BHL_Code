@@ -100,7 +100,7 @@ staTau   = -20:20;    % frames averaged around each spike to form the footprint
 dilatePx = 5;       % px dilation of each ROI bounding its footprint
 [H,W]    = size(Result.ref_im);
 
-for f=[15:19]
+for f=[16]
 load(fullfile(fpath{f},'VoltResult.mat'));
 load(fullfile(fpath{f}, 'output_data.mat'));   % Device_Data
 
@@ -121,9 +121,13 @@ for j = 1:nSeg
 end
 
 % z-score (high-pass) and detect spikes per ROI
-tr_hi = rough_tr - movmedian(rough_tr, 50, 2);
+tr_hi = rough_tr - movmedian(rough_tr, 30, 2);
 tr_z  = tr_hi ./ get_threshold(tr_hi, 1);
-sp    = find_spike_bh(tr_z, 2, 1);                      % nROI x Ttotal binary
+sp=[];
+for n=1:size(tr_z,1)
+[spInd]=interactive_spike_finder(tr_z(n,:));
+sp(n,:)=ind2vec(size(tr_hi,2),spInd,1);
+end
 sp(:,round(end*0.8):end)=0;
 Result.spike_rough = sp;
 Result.rough_tr = rough_tr;
@@ -198,13 +202,12 @@ Result.traces           = T_all;
 figure(2*f); clf; tiledlayout(2,2);
 ax1 = nexttile([1 1]); show_footprnt_contour(Result.ftprnt, Result.ref_im); colormap(ax1,gray(256));
 nexttile([1 1]); imshow2(im_merge(Result.ftprnt, lines(size(Result.ftprnt,3)))*10, []);
-nexttile(3,[1 2]); plot(rescale2(Result.traces,2)' + (1:size(Result.traces,1)));
+nexttile(3,[1 2]); plot(rescale2(Result.traces(:,1:58000),2)' + (1:size(Result.traces,1)));
 sgtitle(fpath{f}, 'Interpreter','none'); drawnow;
 saveas(gcf, fullfile(fpath{f}, 'Volt_extraction_result.fig'));
 saveas(gcf, fullfile(fpath{f}, 'Volt_extraction_result.png'), 'png');
 save(fullfile(fpath{f}, 'Volt_Result.mat'), 'Result', '-v7.3');
 fprintf('Saved Volt_Result.mat to %s\n', fpath{f});
-
 end
 %% Section 2 : Glutamate extraction via extractGluSNFR3
 %  Interactive per file (PC-regression prompt + optional UIs inside extractGluSNFR3).
