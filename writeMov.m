@@ -19,6 +19,7 @@ end
 
 f=figure(1);
 set(f, 'Color', 'w');
+set(f,'theme','light')
 myVideo = VideoWriter([filename],"MPEG-4"); %open video file 
 %myVideo = VideoWriter([filename],"Uncompressed AVI");
 myVideo.FrameRate = videorate;  %can adjust this, 5 - 10 works well for me

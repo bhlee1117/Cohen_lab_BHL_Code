@@ -17,7 +17,7 @@ ROIcontour = bwboundaries(c_ftprnt(:,:,i));
 for j=1:length(ROIcontour)
 plot(ROIcontour{j}(:,2),ROIcontour{j}(:,1),'color',colr(i,:),'LineWidth',1.5)
 end
+end
 coord=get_coord(c_ftprnt);
 text(coord(:,1)',coord(:,2)',num2str([1:size(c_ftprnt,3)]'),'color','w','FontSize',13)
-
 end

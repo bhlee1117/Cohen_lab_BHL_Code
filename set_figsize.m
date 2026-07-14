@@ -14,7 +14,7 @@ function set_figsize(xx, yy, fig)
 if nargin < 3
     fig = gcf;
 end
-
+set(fig,'theme','light');
 % Convert mm to points (1 mm = 2.8346 points), used by MATLAB's PaperSize
 mm2pt = 2.8346;
 
@@ -38,7 +38,7 @@ set(fig, 'PaperPositionMode', 'manual');
 set(fig, 'Color', [1 1 1]);                          % white figure background
 set(gca, 'Color', [1 1 1]);                          % white axes background
 set(gca, 'XColor', [0 0 0], 'YColor', [0 0 0]);     % black axis lines & labels
-set(findall(fig, '-property', 'Color', 'Type', 'text'), 'Color', [0 0 0]);  % all text black
+%set(findall(fig, '-property', 'Color', 'Type', 'text'), 'Color', [0 0 0]);  % all text black
 set(gca, 'GridColor', [0.15 0.15 0.15]);             % dark grid lines
 set(fig, 'InvertHardcopy', 'off');  % prevent MATLAB from resetting bg on print
 copygraphics(gcf,'Resolution',300,'ContentType','image');

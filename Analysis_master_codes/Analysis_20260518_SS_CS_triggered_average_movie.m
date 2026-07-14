@@ -28,8 +28,8 @@ PlaceFieldList=cellfun(@(x) (str2num(num2str(x))),raw(:,21),'UniformOutput',fals
 PlaceFieldBin=cellfun(@(x) (str2num(num2str(x))),raw(:,22),'UniformOutput',false);
 set(0,'DefaultFigureWindowStyle','docked')
 %foi=[1 4 5 6 8 10 11 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27];
-foi=[1 4 5 6 8 10 11 15 16 17 18 19 20 21 22 23 24 25 26 27];
-%foi=26;
+%foi=[1 4 5 6 8 10 11 15 16 17 18 19 20 21 22 23 24 25 26 27];
+foi=20;
 
 %% Load parameter
 win_pre = 30; win_post = 20;
@@ -357,17 +357,17 @@ end
 
 %% Load STA movies and set the scaling factor
 nTauPeak=[50 150];
-for f=20
+for f=foi(4)
     load(fullfile(fpath{f},'STAinfo'))
     load(fullfile(fpath{f},"output_data.mat"))
     sz=double(Device_Data{1, 3}.ROI([2 4]));
 
     ftprint2cal=PCresult{f}.ftprnt;
     %ftprint2cal=ftprint2cal.*(max(PCresult{f}.bvMask,[],3)==0);
-    CS_list=find(PCresult{f}.SpikeClassMat(2,:));
-    SS_list=find(max(PCresult{f}.SpikeClassMat([1 2],:)));
+    CS_list=find((PCresult{f}.SpikeClassMat(2,:).*(PCresult{f}.Blue==0))>0);
+    SS_list=find(max(PCresult{f}.SpikeClassMat([1 2],:).*(PCresult{f}.Blue==0),[],1));
 
-    if length(CS_list)<30
+    if length(CS_list)<3000
         SPlist2AVE=[CS_list SS_list];
         t2integrate=[-3:5];
     else
@@ -422,11 +422,10 @@ for f=20
     normTrace2Ave(:, PCresult{f}.motionReject > 0) = NaN;
     [STAtrace]=get_STA(normTrace2Ave,SPlist2AVE,nTauPeak(1),nTauPeak(2));
     STAtrace=STAtrace-median(STAtrace(:,1:nTauPeak(1)/2),2);
-    ScaleFactor=sum(STAtrace(:,nTauPeak(1)+t2integrate),2)./dFFrobust';
-    %ScaleFactor=max(STAtrace(:,nTauPeak(1)+[-2:4]),[],2)./dFFrobustbAP';
+    %ScaleFactor=sum(STAtrace(:,nTauPeak(1)+t2integrate),2)./dFFrobust';
+    ScaleFactor=max(STAtrace(:,nTauPeak(1)+[-2:4]),[],2)./dFFrobustbAP';
     STAtrace_pcanorm=STAtrace./PCresult{f}.F0_PCA;
     STAtrace_norm=STAtrace./ScaleFactor;
-
 
     figure(223); clf;
     tiledlayout(2,2,'Padding','tight')
@@ -451,12 +450,46 @@ for f=20
     colormap(turbo(256));
     drawnow;
 
-    % clear RobustdFFfit
-    % RobustdFFfit.dFFresultsInteractive=dFFresults;
-    % RobustdFFfit.fit=dFFrobust;
-    % RobustdFFfit.R2=R2;
-    % RobustdFFfit.ScaleFactor=ScaleFactor;
-    % RobustdFFfit.dFFrobustbAP=dFFrobustbAP;
-    % save(fullfile(fpath{f},'RobustdFFfit'),'RobustdFFfit','-v7.3');
-    % disp('Saved RobustdFF fit')
+    clear RobustdFFfit
+    RobustdFFfit.dFFresultsInteractive=dFFresults;
+    RobustdFFfit.fit=dFFrobust;
+    RobustdFFfit.R2=R2;
+    RobustdFFfit.ScaleFactor=ScaleFactor;
+    RobustdFFfit.dFFrobustbAP=dFFrobustbAP;
+    save(fullfile(fpath{f},'RobustdFFfit'),'RobustdFFfit','-v7.3');
+    disp('Saved RobustdFF fit')
 end
+
+
+%%
+figure(6); clf;
+tiledlayout(2,2);
+F0image=PCresult{f}.ref_im;
+dFimage=max(-STAmovie(:,:,nTauPeak(1)+[-2:4]),[],3);
+[nY, nX] = size(F0image);
+for n=[1 23]
+[rows, cols] = find(PCresult{f}.ftprnt(:,:,n) > 0);
+pad = max(8, round(0.25 * max(range(rows), range(cols))));
+r1 = max(1, min(rows)-pad);  r2 = min(nY, max(rows)+pad);
+c1 = max(1, min(cols)-pad);  c2 = min(nX, max(cols)+pad);
+nexttile([1 1])
+imshow2(F0image(r1:r2, c1:c2),[]); colorbar;
+drawScaleBar(20/1.17,'horizontal','position',[(c2-c1-5) (r2-r1-5)],'color','w')
+nexttile([1 1])
+imshow2(dFimage(r1:r2, c1:c2),[]); colorbar;
+end
+set_fontsize(16);
+set_font('Arial'); set_figsize(200,150);
+%%
+figure(7);
+tiledlayout(2,1);
+for n=[1 23]
+    nexttile([1 1]);
+plot([-50:150],STAtrace(n,:),'k','linewidth',1.5)
+xlabel('Time (ms)');
+ylabel('∆F trace (A.U.)')
+box off;
+xlim([-40 80]);
+end
+set_fontsize(18);
+set_font('Arial'); set_figsize(150,180); 

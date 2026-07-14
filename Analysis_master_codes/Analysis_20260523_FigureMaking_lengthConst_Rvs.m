@@ -699,12 +699,13 @@ set_figsize(300,220);
 %% Length constant on different path (Figure S10)
 nTau=[-50:70];
 STADistmat=[];
-t2show=[-5:5:60];
+t2show=[10:10:30];
 cmap_t=hsv(length(t2show));
 dendbin=[0 15:50:450 500 600]-7.5;
 Lstaall=[];
 rmvROIs={[87 27 28 38 41],[72 13 14]};
 rmvROIs_stimInd=cellfun(@(x) x(:,1),rmvROIs);
+ifManualFit=1;
 
 for Mov2See=[1:length(LocalStimResult)]
     ftcoord=get_coord(LocalStimResult{Mov2See}.ftprnt);
@@ -724,6 +725,7 @@ for Mov2See=[1:length(LocalStimResult)]
         StimLoc_Somatodendritic=LocalStimResult{Mov2See}.dendaxis1d(si);
 
         for t=1:length(t2show)
+            fprintf('Current stim: %2.0f/%2.0f, time: %2.0f/%2.0f\n',Mov2See,length(LocalStimResult),t,length(t2show));
             STADistmat{Mov2See,t}=[];
             frame2avg=t2show(t)+[-5:5];
 
@@ -737,22 +739,33 @@ for Mov2See=[1:length(LocalStimResult)]
                     validInd(rmvROIs{find(ismember(rmvROIs_stimInd,Mov2See))}(2:end))=0;
                 end
                 StimAmp=STAtr_mean(dendaxisall==0);
-                if ~isnan(StimAmp)
-                    [fit_curves, cFitted, Rsta] = expfit_wBd(dendaxisall(validInd)', STAtr_mean(validInd),  [0:max(dendaxisall)], [StimAmp -100], [StimAmp*0.8 -350], [StimAmp*1.5 -10]);
+                if ifManualFit
+                    opt.b0=[100];
+                    Fit_result=interactive_expfit(dendaxisall(validInd)', STAtr_mean(validInd),opt);
+                    fit_curves=[Fit_result.xFit Fit_result.yFit];
+                    cFitted=Fit_result.p;
+                    Rsta=Fit_result.Rsq;
                 else
-                    [fit_curves, cFitted, Rsta] = expfit_wBd(dendaxisall(validInd)', STAtr_mean(validInd),  [0:max(dendaxisall)], [0.01 -100], [0 -350], [0.1 -10]);
+                    if ~isnan(StimAmp)
+                        [fit_curves, cFitted, Rsta] = expfit_wBd(dendaxisall(validInd)', STAtr_mean(validInd),  [0:max(dendaxisall)], [StimAmp -100], [StimAmp*0.8 -350], [StimAmp*1.5 -10]);
+                    else
+                        [fit_curves, cFitted, Rsta] = expfit_wBd(dendaxisall(validInd)', STAtr_mean(validInd),  [0:max(dendaxisall)], [0.01 -100], [0 -350], [0.1 -10]);
+                    end
                 end
 
                 pct = sum(STAtr_mean < STAtr_mean(si)) / numel(STAtr_mean);
-                Lstaall=[Lstaall; {Mov2See LocalStimResult{Mov2See}.fileInd -cFitted(2), pct, Rsta, ...
+                Lstaall=[Lstaall; {Mov2See LocalStimResult{Mov2See}.fileInd cFitted(2), pct, Rsta, ...
                     StimLabel, t2show(t), dendaxisall',STAtr_mean, fit_curves, StimLoc_Somatodendritic}]; %FileInd fitted_Length, percential, R2, distance, Stimulation Region
             end
         end
     end
 end
 Lstaall=array2table(Lstaall,'VariableNames',{'StimInd','fileInd','Fit_length','StimROI_percentile','Fit_R2','Stimulation_label','ReadBlueTime','dendaxis','VoltageSTA','VoltageFit','StimLocation1d'});
-
+% saveto='/Volumes/cohen_lab/Lab/Labmembers/Byung Hun Lee/Data/Statistics_Optopatch_Prism';
+% save([saveto '/LocalStimulationResult_20260620.mat'],'LocalStimResult','Lstaall','-v7.3');
 %% Plot Decay length
+saveto='/Volumes/cohen_lab/Lab/Labmembers/Byung Hun Lee/Data/Statistics_Optopatch_Prism';
+load([saveto '/LocalStimulationResult_20260620.mat']);
 tInd=cell2mat(Lstaall.ReadBlueTime)==25;
 path2show=find(cell2mat(Lstaall.StimROI_percentile)>0 & cell2mat(Lstaall.Fit_R2)>0 & tInd); % Percentile, R^2
 % figure(88); clf;
@@ -781,9 +794,11 @@ nexttile([1 1]);
 scatter(cell2mat(Lstaall.StimROI_percentile(path2show)),cell2mat(Lstaall.Fit_length(path2show)),20,vec2cmap(cell2mat(Lstaall.Fit_R2(path2show)),'turbo'),'filled')
 xlabel('Stimulation percentile'); ylabel('Decay length (µm)');
 %%
+dendbin=[0 15:50:450 500 600]-7.5;
+tInd=cell2mat(Lstaall.ReadBlueTime)>=10 & cell2mat(Lstaall.ReadBlueTime)<=30;
 path2show=find(cell2mat(Lstaall.StimROI_percentile)>0.9 & cell2mat(Lstaall.Fit_R2)>0.2 & tInd); % Percentile, R^2
 Stim2show=unique(cell2mat(Lstaall.StimInd(path2show)));
-Lsta2show=ismember(cell2mat(Lstaall.StimInd),Stim2show) & cell2mat(Lstaall.Fit_length)<250 & cell2mat(Lstaall.Fit_length)>20;
+Lsta2show=ismember(cell2mat(Lstaall.StimInd),Stim2show);
 fprintf('# of sample: %2.0f\n',length(Stim2show));
 
 figure(155); clf;
@@ -802,7 +817,7 @@ for i=1:length(Stim2show)
     nexttile([1 1]);
     imagesc(t2read,[1:size(KymoSta,1)],KymoSta);
     set_kymoYtick(dax{1});
-    title(sprintf('StimInd: %2.0f, Lc: %3.0f %3.0f %3.0f',Stim2show(i),Lc2print(1),Lc2print(2),Lc2print(3)));
+    %title(sprintf('StimInd: %2.0f, Lc: %3.0f %3.0f %3.0f',Stim2show(i),Lc2print(1),Lc2print(2),Lc2print(3)));
 end
 
 figure(156); clf;
@@ -843,21 +858,26 @@ ylabel('Distance from stimulation ROI (µm)')
 set(gca,'ydir','reverse'); colormap(turbo);
 
 d2show=[cell2mat(Lstaall.ReadBlueTime(Lsta2show)) cell2mat(Lstaall.Fit_length(Lsta2show))];
-LcData_binning=binning_data({d2show},[-7.5:5:60]);
+d2show(d2show(:,2)>250 | d2show(:,2)<30,2)=NaN;
+LcData_binning=binning_data({d2show},[5:10:35]);
 d2showCell=[];
 for m=1:length(LcData_binning.membership)
     d2showCell{m}=[d2show(LcData_binning.membership{m},2)];
 end
 ax3=nexttile([1 1]);
-showtInd=[4:8]; cmap_t=hsv(length(showtInd));
-p=Violin_wPoints(d2showCell(showtInd),cmap_t);
-line([1 5],[255 255],'LineWidth',2,'color','k');
-text([3],[265],'N.S.','HorizontalAlignment','center','FontSize',20);
+showtInd=[1:3]; cmap_t=nebula(length(showtInd));
+p=Boxplot_wPoints2(cell2mat(d2showCell(showtInd)),cmap_t);
+line([1 3],[255 255],'LineWidth',2,'color','k');
+text([2],[265],'N.S.','HorizontalAlignment','center','FontSize',20);
 set(gca,'xtick',[1:length(showtInd)],'XTickLabel',LcData_binning.centers(showtInd))
 ylabel('Decay length (µm)'); xlabel('Time after blue onset (ms)'); ylim([0 265]);
-set_font('Arial'); set_fontsize(22);
+set_font('Arial'); set_fontsize(22); box off;
 set_figsize(170,320)
-
+StimN=unique(cell2mat(Lstaall.StimInd(Lsta2show))); 
+MNlist=[Mouse(cell2mat(Lstaall.fileInd(Lsta2show))) NeuronInd(cell2mat(Lstaall.fileInd(Lsta2show)))];
+Mlist=unique(Mouse(cell2mat(Lstaall.fileInd(Lsta2show))));
+[UniqueMNlist]=unique(MNlist);
+fprintf('# of stimulation: %2.0f, # of Neuron: %2.0f, # of mouse: %2.0f \n',length(StimN),size(UniqueMNlist,1),size(Mlist,1));
 %%
 saveto='/Volumes/cohen_lab/Lab/Labmembers/Byung Hun Lee/Data/Statistics_Optopatch_Prism';
 save([saveto '/LocalStimulationResult_20260609.mat'],'LocalStimResult','Lstaall','-v7.3');

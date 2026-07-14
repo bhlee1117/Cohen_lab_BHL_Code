@@ -574,19 +574,19 @@ if opts.doPlot && newNsyn > 0
     fh = figure('Name','Event count map');
     imagesc(Smap_counts); axis image; axis off; colormap hot; colorbar;
     title('Event count map — kept synapses');
-    saveDiag(fh,opts,'event_count_map');
+    %saveDiag(fh,opts,'event_count_map');
 
     fh = figure('Name','Synapse footprints');
     tiledlayout(1,2,'TileSpacing','compact','Padding','compact');
     show_footprnt(S_glu, mean(mov2_sub,3));
     sgtitle('Synapse footprints (turbo) | overlay on mean movie');
-    saveDiag(fh,opts,'synapse_footprints');
+    %saveDiag(fh,opts,'synapse_footprints');
 
     fh = figure('Name','Footprints colored by event rate');
     tiledlayout(1,1);
     show_footprint_heatmap(S_glu, synEventRate);
     title('Footprints colored by event rate (ev/frame)');
-    saveDiag(fh,opts,'synapse_footprints_eventrate');
+    %saveDiag(fh,opts,'synapse_footprints_eventrate');
 
     cmap_rgb = hsv(newNsyn);
     RGB = zeros(H,W,3,'double');

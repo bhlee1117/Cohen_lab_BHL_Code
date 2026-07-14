@@ -85,6 +85,12 @@ if isPaired
 end
 
 % --- Statistical tests ---
+if isPaired
+    testName = 'paired t-test (ttest)';
+else
+    testName = 'Wilcoxon rank-sum (ranksum)';
+end
+fprintf('\n--- Statistical Tests: %s ---\n', testName);
 p_values = nan(numGroups);
 for i = 1:numGroups
     for j = i+1:numGroups
@@ -103,8 +109,10 @@ for i = 1:numGroups
         end
         p_values(i,j) = p;
         p_values(j,i) = p;
+        fprintf('  Group %d vs Group %d: p = %.4g\n', i, j, p);
     end
 end
+fprintf('-------------------------------\n');
 
 % --- Axis formatting ---
 set(gca, 'XTick', 1:numGroups, ...

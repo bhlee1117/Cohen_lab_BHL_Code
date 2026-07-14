@@ -285,15 +285,16 @@ SkelDend = DendriteMask_N1;
 
 %load SynDistance_sub
 load('/Volumes/BHL18TB_D2/20260203_SD_V2+iGluSNFR4/170544BHLm302_V_Glu_25X_3min_N2/DistanceMatrix_GluSignal_N1.mat')
-% SynDistance_sub=[];
-% for i=1:nSyn
-%     for j=i:nSyn
-%     [SynDistance_sub(i,j), p]=geodesic_distance(SkelDend,Glu_coord_sub(i,:),Glu_coord_sub(j,:));
-%     end
-%     if mod(i, 20) == 0
-%         fprintf('  Frame %d / %d  (%.1f%%)\n', i, nSyn, 100*i/nSyn);
-%     end
-% end
+SynDistance_sub=[];
+for i=1:nSyn
+    for j=i:nSyn
+    [SynDistance_sub(i,j), p]=geodesic_distance(SkelDend,Glu_coord_sub(i,:),Glu_coord_sub(j,:));
+    end
+    if mod(i, 20) == 0
+        fprintf('  Frame %d / %d  (%.1f%%)\n', i, nSyn, 100*i/nSyn);
+    end
+end
+load('/Volumes/BHL18TB_D2/20260203_SD_V2+iGluSNFR4/170544BHLm302_V_Glu_25X_3min_N2/DistanceMatrix_GluSignal_N1.mat')
 
 GluEvents_cluster= find_spatiotemporal_events(GluSpike_sub, SynDistance_sub, Glu_coord_sub,'MaxDist',10/pixelsize,'Tolerance',1);
 EventCentroid=vertcat(GluEvents_cluster.centroid);

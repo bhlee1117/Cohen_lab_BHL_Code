@@ -15,12 +15,17 @@ function p_values = get_pValue(data, isPaired, varargin)
 %   'Method'  : char/string, default 'auto'
 %   'TestFcn' : function handle (x,y)->p. Overrides Method if provided.
 
-p = inputParser;
-p.addParameter('Method','auto',@(s)ischar(s)||isstring(s));
-p.addParameter('TestFcn',[],@(f)isempty(f)||isa(f,'function_handle'));
-p.parse(varargin{:});
-method  = lower(string(p.Results.Method));
-testFcn = p.Results.TestFcn;
+% Allow method to be passed directly: get_pValue(data, isPaired, 'ttest')
+if numel(varargin) == 1 && (ischar(varargin{1}) || isstring(varargin{1}))
+    varargin = {'Method', varargin{1}};
+end
+
+ip = inputParser;
+ip.addParameter('Method','auto',@(s)ischar(s)||isstring(s));
+ip.addParameter('TestFcn',[],@(f)isempty(f)||isa(f,'function_handle'));
+ip.parse(varargin{:});
+method  = lower(string(ip.Results.Method));
+testFcn = ip.Results.TestFcn;
 
 if isPaired
     numGroups = size(data, 2);
@@ -29,6 +34,7 @@ else
 end
 
 p_values = nan(numGroups);
+printedHeader = false;
 
 for i = 1:numGroups
     for j = i+1:numGroups
@@ -44,13 +50,24 @@ for i = 1:numGroups
             y = data{j}; y = y(~isnan(y));
         end
 
+        % Skip comparisons where either group has no data (e.g. an empty bin);
+        % ranksum/ttest error on empty input. Report NaN for that pair.
+        if isempty(x) || isempty(y)
+            p_values(i,j) = NaN; p_values(j,i) = NaN;
+            continue
+        end
+
         % ----- run requested test -----
         if ~isempty(testFcn)
             pval = testFcn(x,y);
 
         else
             if method == "auto"
-                method = isPaired * "ttest" + ~isPaired * "ranksum"; % default behavior
+                if isPaired
+                    method = "ttest";
+                else
+                    method = "ranksum";
+                end
             end
 
             switch method
@@ -77,6 +94,19 @@ for i = 1:numGroups
 
         p_values(i,j) = pval;
         p_values(j,i) = pval;
+
+        % Print header once after method is resolved
+        if ~printedHeader
+            if ~isempty(testFcn)
+                testLabel = 'custom TestFcn';
+            else
+                testLabel = char(method);
+            end
+            fprintf('\n--- Statistical Tests: %s ---\n', testLabel);
+            printedHeader = true;
+        end
+        fprintf('  Group %d vs Group %d: p = %.4g\n', i, j, pval);
     end
 end
+fprintf('-------------------------------\n');
 end
