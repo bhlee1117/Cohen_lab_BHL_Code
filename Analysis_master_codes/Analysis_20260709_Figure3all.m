@@ -32,7 +32,7 @@ set(0,'DefaultFigureWindowStyle','docked')
 %foi=[1 4 5 6 8 10 11 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27];
 foi=[1 4 5 6 8 10 11 15 16 17 18 19 20 21 22 23 24 25 26 27];
 %foi=23;
-%% Load Result files
+%% Load Result files11
 % All voltage traces are normalized to dF/F with the robust dF/F fit scale
 % factor (dFFrobust.ScaleFactor), matching Analysis_20260522_Figure2all.m.
 % Everything downstream reads PCresult{f}, so a single normalization choice
@@ -254,7 +254,7 @@ for f = [foi]
     end
 
     if ~isempty(PlaceFieldList{f})
-        binTrack = ceil(PCresult{f}.VR(5,:) / (115 / 150));
+        binTrack = ceil(PCresult{f}.VR(5,:) / (115 / 150)); %bin # = 150, VR length = 115
         PFvec = zeros(1, nTime);
         for p = 1:length(PlaceFieldBin{f})/2
             if PlaceFieldBin{f}(2*p-1) > PlaceFieldBin{f}(2*p)
@@ -2012,6 +2012,421 @@ for f=foi
 end
 legend({'CS','SS','dSP','Peak','Trough','dSP','Peak','Trough'})
 
+%% dSpike-triggered average of other event types and behavioral state
+fprintf('Section: dSpike-triggered average (event types & state)\n');
+% Align to every dSpike (DendOnlySpFrame) and average the occurrence of other event
+% types (SS, BS, CS, dAP, apical peaks) and the behavioral-state occupancy
+% (running/resting, in/out place field) as a function of lag from the dSpike.
+% This shows directly whether a dSpike tends to precede/follow each spike type,
+% and in which state dSpikes occur.
+Twin=[300 300]; lags=-Twin(1):Twin(2);   % ms before/after (1 kHz -> 1 ms/frame)
+smthW=5;                                  % ms smoothing for display
+Pwin=50;                                 % ms window for before/after event probability
+evNames={'SS','BS','CS','dAP','Peak'};
+stateNames={'Running','Resting','In PF','Out PF'};
+sumEv  = zeros(numel(evNames),numel(lags));
+sumRun = zeros(2,numel(lags));  nDsp_all=0;   % running/resting (all neurons)
+sumPF  = zeros(2,numel(lags));  nDsp_PF =0;   % in/out place field (PF neurons only)
+% P(>=1 event of each type within Pwin ms) before / after each dSpike
+cntBefore=zeros(1,numel(evNames)); cntAfter=zeros(1,numel(evNames));
+colAfter  = Twin(1)+1 + (1:Pwin);      % lag columns  +1 .. +Pwin
+colBefore = Twin(1)+1 - (Pwin:-1:1);   % lag columns  -Pwin .. -1
+% shuffle null: circularly shift the dSpike times nShuffle times
+nShuffle=1000; rng(0);                  % rng seed for reproducible shuffles
+shufBefore=zeros(numel(evNames),nShuffle); shufAfter=zeros(numel(evNames),nShuffle);
+nNeuron_dSp=0;
+foi2analyze=foi;
+for i=1:length(foi2analyze)
+    f=foi2analyze(i);
+    nTime=size(PCresult{f}.NormalizedTrace_dirt,2);
+    somaAP=find(max(PCresult{f}.SpikeMat(PCresult{f}.BranchLabel==1,:),[],1)>0);
+    apicalROI=find(ismember(PCresult{f}.branch_dClass,[3 4 5]));
+
+    % event trains (1 x nTime binary)
+    evTrains=[ ind2vec(nTime,FiringRate{f}.SimpleSpikeFrame,1); ...             % SS
+               ind2vec(nTime,somaAP(PCresult{f}.BStrace(somaAP)>0),1); ...      % BS (somatic AP in burst)
+               ind2vec(nTime,FiringRate{f}.ComplexSpikeFrame,1); ...           % CS
+               ind2vec(nTime,FiringRate{f}.DendIntSpFrame,1); ...              % dAP
+               ind2vec(nTime,find(max(PCresult{f}.peakvec(apicalROI,:),[],1)>0),1) ]; % apical peaks
+
+    dsp=FiringRate{f}.DendOnlySpFrame(:)';
+    dsp=dsp(dsp>Twin(1) & dsp<=nTime-Twin(2));  % keep only windows fully in range
+    if isempty(dsp); continue; end
+    W=dsp'+lags;                                 % nDsp x nLag frame indices
+    for e=1:numel(evNames)
+        tr=evTrains(e,:);                        % row vector; single-subscript keeps size(W)
+        M=tr(W);                                 % nDsp x nLag
+        sumEv(e,:)=sumEv(e,:)+sum(M,1);
+        cntAfter(e) =cntAfter(e) +sum(any(M(:,colAfter )>0,2)); % dSpikes with event after
+        cntBefore(e)=cntBefore(e)+sum(any(M(:,colBefore)>0,2)); % dSpikes with event before
+    end
+
+    % --- circular-shift shuffle null for the before/after probability ---
+    baseBA = dsp' + [(-Pwin:-1) (1:Pwin)];        % nDsp x 2*Pwin window frame indices
+    for sh=1:nShuffle
+        s=randi(nTime);                            % random circular shift of dSpike times
+        idxS = mod(baseBA + s - 1, nTime) + 1;     % shifted window frames (wrap around ends)
+        for e=1:numel(evNames)
+            tr=evTrains(e,:);
+            Msh=tr(idxS);                          % nDsp x 2*Pwin
+            shufBefore(e,sh)=shufBefore(e,sh)+sum(any(Msh(:,1:Pwin)>0,2));
+            shufAfter(e,sh) =shufAfter(e,sh) +sum(any(Msh(:,Pwin+1:end)>0,2));
+        end
+    end
+
+    runV=PCresult{f}.runVec>0;
+    sumRun(1,:)=sumRun(1,:)+sum(runV(W),1);
+    sumRun(2,:)=sumRun(2,:)+sum(~runV(W),1);
+    nDsp_all=nDsp_all+length(dsp);
+    nNeuron_dSp=nNeuron_dSp+1;
+    if isfield(PCresult{f},'PFvec')
+        pfV=PCresult{f}.PFvec>0;
+        sumPF(1,:)=sumPF(1,:)+sum(pfV(W),1);
+        sumPF(2,:)=sumPF(2,:)+sum(~pfV(W),1);
+        nDsp_PF=nDsp_PF+length(dsp);
+    end
+end
+% event types -> instantaneous rate (Hz); states -> occupancy fraction
+evRate  = movmean(sumEv/nDsp_all*1000, smthW, 2);
+runFrac = movmean(sumRun/nDsp_all,      smthW, 2);
+pfFrac  = movmean(sumPF/nDsp_PF,        smthW, 2);
+% probability of each spike type within Pwin ms before / after a dSpike
+probBefore=cntBefore/nDsp_all; probAfter=cntAfter/nDsp_all;
+% shuffle null distributions (nEv x nShuffle) and one-sided p (obs >= chance)
+probShufBefore=shufBefore/nDsp_all; probShufAfter=shufAfter/nDsp_all;
+pBefore=mean(probShufBefore>=probBefore(:),2)'; pAfter=mean(probShufAfter>=probAfter(:),2)';
+fprintf('dSpike-triggered average: %d dSpikes from %d neurons (%d in PF neurons)\n',nDsp_all,nNeuron_dSp,nDsp_PF);
+fprintf('P(event within %d ms of dSpike), obs vs %d-shuffle null (mean), one-sided p:\n',Pwin,nShuffle);
+fprintf('   type   obs[before|after]   shuffle[before|after]   p[before|after]\n');
+for e=1:numel(evNames)
+    fprintf('   %-5s  %.3f | %.3f       %.3f | %.3f          %.3g | %.3g\n', evNames{e}, ...
+        probBefore(e),probAfter(e), mean(probShufBefore(e,:)),mean(probShufAfter(e,:)), pBefore(e),pAfter(e));
+end
+
+cmap_ev=[0 0 0; 0.2 0.5 1; 0.9 0.2 0.2; 1 0.6 0.1; 0.4 0.7 0.3];   % SS BS CS dAP Peak
+cmap_st=[0 0.6 0.2; 0.6 0.6 0.6; 1 0.4 0.1; 0.3 0.3 0.3];          % Run Rest inPF outPF
+figure(280); clf; tiledlayout(1,3,'Padding','compact','TileSpacing','compact');
+nexttile([1 1]);
+set(gca,'ColorOrder',cmap_ev,'NextPlot','replacechildren');
+plot(lags,evRate','LineWidth',1.5); hold all;
+xline(0,'k--'); xlabel('Time from dSpike (ms)'); ylabel('Event rate (Hz)'); box off;
+legend(evNames,'Location','northwest'); title('dSpike-triggered event rate'); axis tight;
+% probability of each spike type within Pwin ms, before vs after the dSpike
+nexttile([1 1]);
+b=bar([probBefore; probAfter]'*100); hold all;
+b(1).FaceColor=[0.55 0.55 0.55]; b(2).FaceColor=[0.85 0.33 0.10];
+% overlay shuffle null: mean marker + 95% CI whiskers on each bar
+mB=mean(probShufBefore,2)'*100; mA=mean(probShufAfter,2)'*100;
+loB=prctile(probShufBefore,2.5,2)'*100; hiB=prctile(probShufBefore,97.5,2)'*100;
+loA=prctile(probShufAfter, 2.5,2)'*100; hiA=prctile(probShufAfter, 97.5,2)'*100;
+errorbar(b(1).XEndPoints,mB,mB-loB,hiB-mB,'LineStyle','none','Color','k','Marker','_','CapSize',6,'LineWidth',1);
+eS=errorbar(b(2).XEndPoints,mA,mA-loA,hiA-mA,'LineStyle','none','Color','k','Marker','_','CapSize',6,'LineWidth',1);
+set(gca,'xtick',1:numel(evNames),'xticklabel',evNames);
+ylabel(sprintf('P(spike within %d ms) (%%)',Pwin)); box off;
+legend([b(1) b(2) eS],{'before','after','shuffle 95% CI'},'Location','northwest');
+title('Spike probability around dSpike');
+nexttile([1 1]);
+set(gca,'ColorOrder',cmap_st,'NextPlot','replacechildren');
+plot(lags,[runFrac; pfFrac]','LineWidth',1.5); hold all;
+xline(0,'k--'); xlabel('Time from dSpike (ms)'); ylabel('State occupancy (fraction)'); box off;
+legend(stateNames,'Location','best'); title('dSpike-triggered state occupancy'); axis tight;
+set_font('Arial'); set_fontsize(14);
+
+%% Somatic AUC histogram: dSpike vs simple spike (cf. AUC scatter above)
+fprintf('Section: Somatic AUC histogram (dSpike vs simple spike)\n');
+dclass2show=[3 4 5];
+AUCsoma_SS_all=[]; AUCsoma_dSp_all=[];
+nNeuron_SS=0; nNeuron_dSp=0;
+for f=foi
+    SSrows  = find(ismember(dSpikePropsMat{f}.Spike_frame,FiringRate{f}.SimpleSpikeFrame) & dSpikePropsMat{f}.Branch_Index==1 & dSpikePropsMat{f}.SpikeOrder==1);
+    dSprows = find(ismember(dSpikePropsMat{f}.Spike_frame,FiringRate{f}.DendOnlySpFrame) & ismember(dSpikePropsMat{f}.dClass,dclass2show));
+    AUCsoma_SS_all =[AUCsoma_SS_all;  dSpikePropsMat{f}.AUC_soma(SSrows)];
+    AUCsoma_dSp_all=[AUCsoma_dSp_all; dSpikePropsMat{f}.AUC_soma(dSprows)];
+    nNeuron_SS =nNeuron_SS +~isempty(SSrows);
+    nNeuron_dSp=nNeuron_dSp+~isempty(dSprows);
+end
+fprintf('AUC histogram: %d simple spikes (%d neurons), %d dSpikes (%d neurons), of %d neurons total\n', ...
+    sum(~isnan(AUCsoma_SS_all)),nNeuron_SS,sum(~isnan(AUCsoma_dSp_all)),nNeuron_dSp,numel(foi));
+
+fExample=18; % same example neuron as the AUC scatter above
+SSrows_e  = find(ismember(dSpikePropsMat{fExample}.Spike_frame,FiringRate{fExample}.SimpleSpikeFrame) & dSpikePropsMat{fExample}.Branch_Index==1 & dSpikePropsMat{fExample}.SpikeOrder==1);
+dSprows_e = find(ismember(dSpikePropsMat{fExample}.Spike_frame,FiringRate{fExample}.DendOnlySpFrame) & ismember(dSpikePropsMat{fExample}.dClass,dclass2show));
+AUCsoma_SS_e  = dSpikePropsMat{fExample}.AUC_soma(SSrows_e);
+AUCsoma_dSp_e = dSpikePropsMat{fExample}.AUC_soma(dSprows_e);
+
+cmap_hist=[0 0.45 0.74; 0.85 0.33 0.10]; % SS / dSpike
+figure(281); clf; tiledlayout(1,1,'Padding','compact','TileSpacing','compact');
+% pooled across neurons
+edges_p=linspace(prctile([AUCsoma_SS_all; AUCsoma_dSp_all]/13,1),prctile([AUCsoma_SS_all; AUCsoma_dSp_all]/13,99),40);
+histogram(AUCsoma_SS_all/13 ,edges_p,'Normalization','probability','FaceColor',cmap_hist(1,:),'EdgeColor','none'); hold all;
+histogram(AUCsoma_dSp_all/13,edges_p,'Normalization','probability','FaceColor',cmap_hist(2,:),'EdgeColor','none');
+xlabel('Mean somatic voltage (∆F/F)'); ylabel('Probability'); box off;
+p_auc=ranksum(AUCsoma_SS_all(~isnan(AUCsoma_SS_all)),AUCsoma_dSp_all(~isnan(AUCsoma_dSp_all)));
+legend({'Simple spike','dSpike'}); title(sprintf('All neurons (ranksum p = %.2e)',p_auc));
+set_font('Arial'); set_fontsize(14);
+set_figsize(150,100);
+
+%% Spike types in place field & during running vs resting
+fprintf('Section: spike types place field and locomotion state\n');
+% For each spike type (SS, BS, CS, dAP, dSpike) split by locomotion state (runVec)
+% and place field (PFvec):
+%   - occupancy-normalized RATE (Hz) in each condition
+%   - PROBABILITY that a spike of that type is detected in vs out of the place field
+%     ( P = fraction of that type's spikes falling in/out PF; the two sum to 1 ).
+% Neurons without a defined place field contribute NaN (skipped by the paired stats).
+% column layout: [type1_A .. typeN_A  type1_B .. typeN_B]  (A/B = the two states)
+spkNames={'SS','BS','CS','dAP','dSpike'};
+nSpk=numel(spkNames);
+runRate=NaN(length(foi),2*nSpk);   % A=running  B=resting            (Hz)
+PFRate =NaN(length(foi),2*nSpk);   % A=in PF    B=out of PF          (Hz)
+runProb=NaN(length(foi),2*nSpk);   % A=running  B=resting            (fraction of that type)
+PFprob =NaN(length(foi),2*nSpk);   % A=in PF    B=out of PF          (fraction of that type)
+occRun =NaN(length(foi),1);        % running occupancy fraction (chance level for P(run))
+occPF  =NaN(length(foi),1);        % PF occupancy fraction (chance level for P(in PF))
+for i=1:length(foi)
+    f=foi(i);
+    somaAP=find(max(PCresult{f}.SpikeMat(PCresult{f}.BranchLabel==1,:),[],1)>0);
+    frames={ FiringRate{f}.SimpleSpikeFrame(:)', ...                  % SS
+             somaAP(PCresult{f}.BStrace(somaAP)>0), ...               % BS (somatic AP in burst)
+             FiringRate{f}.ComplexSpikeFrame(:)', ...                 % CS
+             FiringRate{f}.DendIntSpFrame(:)', ...                    % dAP
+             FiringRate{f}.DendOnlySpFrame(:)' };                     % dSpike
+
+    runV=PCresult{f}.runVec>0;
+    Trun=sum(runV)/1000; Trest=sum(~runV)/1000;                       % seconds (1 kHz)
+    occRun(i)=Trun/(Trun+Trest);
+    for s=1:nSpk
+        fr=frames{s};
+        runRate(i,s)      = sum(runV(fr))/Trun;
+        runRate(i,s+nSpk) = sum(~runV(fr))/Trest;
+        nTot=numel(fr);
+        if nTot>0
+            runProb(i,s)      = sum(runV(fr))/nTot;   % P(run  | spike type)
+            runProb(i,s+nSpk) = sum(~runV(fr))/nTot;  % P(rest | spike type)
+        end
+    end
+
+    if isfield(PCresult{f},'PFvec')
+        pfV=PCresult{f}.PFvec>0;
+        Tpf=sum(pfV)/1000; Tout=sum(~pfV)/1000;
+        occPF(i)=Tpf/(Tpf+Tout);
+        for s=1:nSpk
+            fr=frames{s};
+            PFRate(i,s)      = sum(pfV(fr))/Tpf;
+            PFRate(i,s+nSpk) = sum(~pfV(fr))/Tout;
+            nTot=numel(fr);
+            if nTot>0
+                PFprob(i,s)      = sum(pfV(fr))/nTot;    % P(in PF  | spike type)
+                PFprob(i,s+nSpk) = sum(~pfV(fr))/nTot;   % P(out PF | spike type)
+            end
+        end
+    end
+end
+
+% Significance vs chance: per-neuron observed fraction vs per-neuron occupancy,
+% paired across neurons (Wilcoxon signed-rank). Stars are drawn only when p<0.05.
+p_run=nan(1,nSpk); p_pf=nan(1,nSpk);
+for s=1:nSpk
+    m=~isnan(runProb(:,s)) & ~isnan(occRun);
+    if sum(m)>=3; p_run(s)=signrank(runProb(m,s),occRun(m)); end
+    m=~isnan(PFprob(:,s)) & ~isnan(occPF);
+    if sum(m)>=3; p_pf(s)=signrank(PFprob(m,s),occPF(m)); end
+end
+
+% Figure 282: Rows 1-2 = occupancy-normalized firing rate (Hz); Row 3 = fraction of
+% each spike type by state (stacked to 1), dashed = chance = time-occupancy fraction,
+% stars = paired signed-rank of the observed fraction vs chance (only if p<0.05).
+figure(282); clf; tiledlayout(3,nSpk,'Padding','compact','TileSpacing','compact');
+
+% Row 1: firing rate (Hz), running vs resting  (paired t-test, labelled above)
+for s=1:nSpk
+    nexttile([1 1]);
+    p=Boxplot_wPoints2(runRate(:,[s s+nSpk]),[0 0.6 0.2; 0.6 0.6 0.6]); hold all;
+    set(gca,'xtick',[1 2],'xticklabel',{'Run','Rest'});
+    ylabel('Rate (Hz)'); title(spkNames{s}); box off;
+    yl=ylim; r=yl(2)-yl(1); yb=yl(2)+r*0.02;
+    plot([1 1 2 2],[yb yb+r*0.03 yb+r*0.03 yb],'k','LineWidth',1);
+    text(1.5,yb+r*0.06,sig_star(p(1,2)),'HorizontalAlignment','center','FontSize',12,'FontWeight','bold');
+    ylim([yl(1) yb+r*0.16]);
+end
+% Row 2: firing rate (Hz), in PF vs out PF  (paired t-test, labelled above)
+for s=1:nSpk
+    nexttile([1 1]);
+    p=Boxplot_wPoints2(PFRate(:,[s s+nSpk]),[1 0.4 0.1; 0.6 0.6 0.6]); hold all;
+    set(gca,'xtick',[1 2],'xticklabel',{'In PF','Out PF'});
+    ylabel('Rate (Hz)'); title(spkNames{s}); box off;
+    yl=ylim; r=yl(2)-yl(1); yb=yl(2)+r*0.02;
+    plot([1 1 2 2],[yb yb+r*0.03 yb+r*0.03 yb],'k','LineWidth',1);
+    text(1.5,yb+r*0.06,sig_star(p(1,2)),'HorizontalAlignment','center','FontSize',12,'FontWeight','bold');
+    ylim([yl(1) yb+r*0.16]);
+end
+
+% Row 3, left span: running vs resting fraction of each spike type
+nexttile([1 2]); hold all;
+mRun=[mean(runProb(:,1:nSpk),1,'omitnan')' mean(runProb(:,nSpk+1:end),1,'omitnan')']; % nSpk x [run rest]
+hb=bar(mRun,'stacked','FaceColor','flat');
+hb(1).CData=repmat([0 0.6 0.2],nSpk,1); hb(2).CData=repmat([0.75 0.75 0.75],nSpk,1);
+% SEM (across neurons) of the bottom fraction, drawn at the segment boundary
+semRun=std(runProb(:,1:nSpk),0,1,'omitnan')./sqrt(sum(~isnan(runProb(:,1:nSpk)),1));
+errorbar(1:nSpk,mRun(:,1)',semRun,'k','LineStyle','none','CapSize',6,'LineWidth',1);
+for s=1:nSpk; hc=plot([s-0.45 s+0.45],mean(occRun,'omitnan')*[1 1],'k--','LineWidth',1.2); end
+for s=1:nSpk; if p_run(s)<0.05; text(s,1.06,sig_star(p_run(s)),'HorizontalAlignment','center','FontSize',12,'FontWeight','bold'); end; end
+set(gca,'xtick',1:nSpk,'xticklabel',spkNames); ylim([0 1.18]); box off;
+ylabel('Fraction of spikes'); title('Running vs resting (fraction)');
+legend([hb(1) hb(2) hc],{'Running','Resting','chance'},'Location','eastoutside');
+
+% Row 3, right span: in vs out of place field fraction of each spike type
+nexttile([1 2]); hold all;
+mPF=[mean(PFprob(:,1:nSpk),1,'omitnan')' mean(PFprob(:,nSpk+1:end),1,'omitnan')'];   % nSpk x [inPF outPF]
+hb2=bar(mPF,'stacked','FaceColor','flat');
+hb2(1).CData=repmat([1 0.5 0.1],nSpk,1); hb2(2).CData=repmat([0.75 0.75 0.75],nSpk,1);
+% SEM (across neurons) of the bottom fraction, drawn at the segment boundary
+semPF=std(PFprob(:,1:nSpk),0,1,'omitnan')./sqrt(sum(~isnan(PFprob(:,1:nSpk)),1));
+errorbar(1:nSpk,mPF(:,1)',semPF,'k','LineStyle','none','CapSize',6,'LineWidth',1);
+for s=1:nSpk; hc2=plot([s-0.45 s+0.45],mean(occPF,'omitnan')*[1 1],'k--','LineWidth',1.2); end
+for s=1:nSpk; if p_pf(s)<0.05; text(s,1.06,sig_star(p_pf(s)),'HorizontalAlignment','center','FontSize',12,'FontWeight','bold'); end; end
+set(gca,'xtick',1:nSpk,'xticklabel',spkNames); ylim([0 1.18]); box off;
+ylabel('Fraction of spikes'); title('Place field in vs out (fraction)');
+legend([hb2(1) hb2(2) hc2],{'In PF','Out PF','chance'},'Location','eastoutside');
+
+sgtitle('Rows 1-2: firing rate (Hz).   Row 3: fraction of spikes (stacked to 1), dashed = chance, * = vs chance');
+set_font('Arial'); set_fontsize(11);
+
+%% dSpike across laps and track position (PlaceTrigger_average)
+fprintf('Section: dSpike laps x position map\n');
+% Bin each dSpike train by lap x track position with PlaceTrigger_average to see
+% where along the track (and in which laps) dSpikes occur.
+place_bin=150; vel_thresh=0.002; lap_dist=115;
+LapdSp=cell(1,max(foi)); LapdSpFR=cell(1,max(foi)); LapdSpN=cell(1,max(foi));
+
+figure(283); clf; tiledlayout('flow','Padding','compact','TileSpacing','compact');
+for f=foi
+    nTime=size(PCresult{f}.NormalizedTrace_dirt,2);
+    dSpikeTrain=ind2vec(nTime,FiringRate{f}.DendOnlySpFrame,1);
+    [LapdSpFR{f}, LapdSp{f}, LapdSpN{f}]=PlaceTrigger_average(dSpikeTrain,place_bin,PCresult{f}.VR,vel_thresh,lap_dist);
+    nexttile; hold all;
+    nLaps=size(LapdSp{f},1);
+    imagesc([1:place_bin]/place_bin*lap_dist,[1:nLaps],LapdSp{f});
+    colormap(turbo); caxis([0 1]);
+    xlabel('Track position (cm)'); ylabel('Lap'); title(sprintf('Neuron %d',f)); axis tight;
+    % shade place field as a rectangle: [start lap, end lap] x [start position, end position]
+    if ~isempty(PlaceFieldBin{f})
+        for p=1:length(PlaceFieldBin{f})/2
+            pb=PlaceFieldBin{f}(2*(p-1)+[1 2]);            % [start end] position bin
+            pl=PlaceFieldList{f}(2*(p-1)+[1 2]);           % [start end] lap
+            pl=[max(pl(1),1) min(pl(2),nLaps)];            % clamp laps to the map
+            if pb(1)<=pb(2), xseg={[pb(1) pb(2)]};
+            else,            xseg={[pb(1) place_bin],[1 pb(2)]}; % field wraps past teleport
+            end
+            for xs=1:numel(xseg)
+                xc=[xseg{xs}(1) xseg{xs}(2) xseg{xs}(2) xseg{xs}(1)]/place_bin*lap_dist;
+                yc=[pl(1) pl(1) pl(2) pl(2)];
+                patch(xc,yc,[1 1 1],'FaceAlpha',0.18,'EdgeColor','w','LineWidth',1.2);
+            end
+        end
+    end
+end
+sgtitle('dSpike count per lap \times position');
+set_font('Arial'); set_fontsize(11);
+
+% Example neuron: lap x position map + position tuning (rate averaged over laps)
+fExample=18;
+figure(284); clf; tiledlayout(2,1,'Padding','compact','TileSpacing','compact');
+posAxis=[1:place_bin]/place_bin*lap_dist;
+nexttile([1 1]);
+imagesc(posAxis,[1:size(LapdSp{fExample},1)],LapdSp{fExample}); colormap(turbo); caxis([0 1]);
+ylabel('Lap'); title(sprintf('Neuron %d  dSpike (count)',fExample)); axis tight;
+if ~isempty(PlaceFieldBin{fExample})
+    for p=1:length(PlaceFieldBin{fExample})/2
+        xl=sort(PlaceFieldBin{fExample}(2*(p-1)+[1 2]))/place_bin*lap_dist;
+        xline(xl(1),'w-','LineWidth',1.5); xline(xl(2),'w-','LineWidth',1.5);
+    end
+end
+nexttile([1 1]);
+plot(posAxis,mean(LapdSpFR{fExample},1,'omitnan')*1000,'k','LineWidth',1.5);
+xlabel('Track position (cm)'); ylabel('dSpike rate (Hz)'); box off; axis tight;
+set_font('Arial'); set_fontsize(13);
+
+%% Is the dSpike position-tuned? (spatial tuning + shuffle test)
+fprintf('Section: dSpike position tuning\n');
+% Occupancy-normalized spatial tuning curve of dSpikes (Hz per track-position bin),
+% and a Skaggs spatial-information significance test against a circular-shift null:
+% shift the dSpike train by a random offset (1000x), recompute the tuning + info,
+% and compare the observed info to the null. p = (1+#{null>=obs})/(nShuffle+1).
+nShuffle_pt=1000; rng(1);
+smooth_bin=5;                           % circular moving-mean window (bins) for tuning curves
+dSpikeTuning=NaN(max(foi),place_bin);   % Hz per position bin, per neuron (smoothed)
+SI_obs=NaN(1,max(foi)); SI_p=NaN(1,max(foi));
+for f=foi
+    nTime=size(PCresult{f}.NormalizedTrace_dirt,2);
+    VR=PCresult{f}.VR;
+    not_running = VR(end,:) < vel_thresh;
+    bin_dist=ceil(VR(5,:)/(lap_dist/place_bin)); bin_dist=min(max(bin_dist,1),place_bin);
+    dTrain=ind2vec(nTime,FiringRate{f}.DendOnlySpFrame,1);
+    occSum=sum(LapdSpN{f},1,'omitnan'); occSum(occSum==0)=NaN;   % valid running frames per bin
+    spk=dTrain; spk(not_running)=0;                              % running-only dSpikes
+    cntObs=accumarray(bin_dist(spk>0)',1,[place_bin 1])';
+    dSpikeTuning(f,:)=ringmovMean(cntObs./occSum*1000,smooth_bin);   % Hz, circularly smoothed
+    SI_obs(f)=skaggs_info(dSpikeTuning(f,:),occSum);
+    SI_sh=zeros(1,nShuffle_pt);
+    for sh=1:nShuffle_pt
+        shifted=circshift(dTrain,randi(nTime)); shifted(not_running)=0;
+        c=accumarray(bin_dist(shifted>0)',1,[place_bin 1])';
+        SI_sh(sh)=skaggs_info(ringmovMean(c./occSum*1000,smooth_bin),occSum); % same smoothing as obs
+    end
+    SI_p(f)=(1+sum(SI_sh>=SI_obs(f)))/(nShuffle_pt+1);
+end
+sigMask=SI_p(foi)<0.05;
+fprintf('Position-tuned dSpike neurons: %d/%d (Skaggs info, shuffle p<0.05)\n',sum(sigMask),numel(foi));
+
+% normalized tuning curves across neurons, sorted by peak position
+Tn=dSpikeTuning(foi,:); Tn=Tn./max(Tn,[],2,'omitnan');     % peak-normalized per neuron
+[~,pk]=max(Tn,[],2,'omitnan'); [~,ord]=sort(pk);
+figure(285); clf; tiledlayout(1,3,'Padding','compact','TileSpacing','compact');
+nexttile([1 1]);
+imagesc(posAxis,1:numel(foi),Tn(ord,:),[0 1]); colormap(turbo);
+xlabel('Track position (cm)'); ylabel('Neuron (sorted by peak)');
+title('Normalized dSpike tuning'); cb=colorbar; cb.Label.String='Norm. rate';
+% mark significant neurons on the y-axis
+hold all; sig_ord=find(sigMask(ord));
+plot(zeros(numel(sig_ord),1)+posAxis(1),sig_ord,'w*','MarkerSize',6);
+
+% example neuron tuning with shuffle 95% band
+nexttile([1 1]); hold all;
+f=fExample; nTime=size(PCresult{f}.NormalizedTrace_dirt,2);
+VR=PCresult{f}.VR; not_running=VR(end,:)<vel_thresh;
+bin_dist=ceil(VR(5,:)/(lap_dist/place_bin)); bin_dist=min(max(bin_dist,1),place_bin);
+dTrain=ind2vec(nTime,FiringRate{f}.DendOnlySpFrame,1);
+occSum=sum(LapdSpN{f},1,'omitnan'); occSum(occSum==0)=NaN;
+shufT=zeros(nShuffle_pt,place_bin);
+for sh=1:nShuffle_pt
+    shifted=circshift(dTrain,randi(nTime)); shifted(not_running)=0;
+    shufT(sh,:)=ringmovMean(accumarray(bin_dist(shifted>0)',1,[place_bin 1])'./occSum*1000,smooth_bin);
+end
+band=prctile(shufT,[2.5 97.5],1);
+fill([posAxis fliplr(posAxis)],[band(1,:) fliplr(band(2,:))],[0.8 0.8 0.8],'EdgeColor','none','FaceAlpha',0.6);
+plot(posAxis,dSpikeTuning(f,:),'k','LineWidth',1.5);
+if ~isempty(PlaceFieldBin{f})
+    for p=1:length(PlaceFieldBin{f})/2
+        xl=sort(PlaceFieldBin{f}(2*(p-1)+[1 2]))/place_bin*lap_dist;
+        xline(xl(1),'r--'); xline(xl(2),'r--');
+    end
+end
+xlabel('Track position (cm)'); ylabel('dSpike rate (Hz)'); box off; axis tight;
+title(sprintf('Neuron %d (p=%.3f)',fExample,SI_p(fExample)));
+legend({'shuffle 95%','observed'},'Location','best');
+
+% observed spatial info; significant (p<0.05) neurons marked with a star above the bar
+nexttile([1 1]); hold all;
+bar(1:numel(foi),SI_obs(foi),'FaceColor',[0.6 0.6 0.6]);
+sigIdx=find(sigMask);
+text(sigIdx,SI_obs(foi(sigMask)),repmat('*',numel(sigIdx),1),...
+    'HorizontalAlignment','center','VerticalAlignment','bottom','FontSize',14,'FontWeight','bold');
+set(gca,'xtick',1:numel(foi),'xticklabel',foi); xtickangle(90);
+xlabel('Neuron'); ylabel('Spatial info (bits/spike)'); box off;
+title(sprintf('%d/%d position-tuned (p<0.05)',sum(sigMask),numel(foi)));
+set_font('Arial'); set_fontsize(12);
+
 %% bAP amplitude in place fields
 fprintf('Section: bAP amplitude in place fields\n');
 nTau_short=[1 3];
@@ -2389,6 +2804,18 @@ end
 function s = sig_star(p)
 % Significance string: '*' <0.05, '**' <0.01, '***' <0.001, else 'n.s.'
 if p < 0.001, s = '***'; elseif p < 0.01, s = '**'; elseif p < 0.05, s = '*'; else, s = 'n.s.'; end
+end
+
+function SI = skaggs_info(rate, occ)
+% Skaggs spatial information (bits/spike). rate: 1xB firing rate (Hz) per bin,
+% occ: 1xB dwell time (frames) per bin. Non-finite bins are treated as empty.
+occ(~isfinite(occ))=0; rate(~isfinite(rate))=0;
+if sum(occ)<=0, SI=0; return; end
+p    = occ/sum(occ);            % occupancy probability per bin
+rbar = sum(p.*rate);           % occupancy-weighted mean rate
+if rbar<=0, SI=0; return; end
+idx  = rate>0 & occ>0;
+SI   = sum(p(idx).*(rate(idx)/rbar).*log2(rate(idx)/rbar));
 end
 
 function [SpikeTable, EventTable, NeuronTable] = build_spike_event_tables(PCresult, bAPPropsMat, EventPropsMat, foi)

@@ -65,7 +65,7 @@ end
 
 %% Extract voltage signal
 bound = 6;
-for f=[439:447]
+for f=[441]
     fprintf('Processing %2.0f ...',f);
     Result=[];
     load(fullfile(fpath{f},"output_data.mat"))
@@ -124,10 +124,10 @@ for f=[439:447]
         opts=[];
         opts.zSeedMin=3.8;
         opts.r_max = 8.4;
-        opts.doPlot = false;
-        opts.uiSeedThresh  = false;
-        opts.uiClusterSize = false;
-        opts.uiSynFilter   = false;
+        opts.doPlot = true;
+        opts.uiSeedThresh  = true;
+        opts.uiClusterSize = true;
+        opts.uiSynFilter   = true;
         opts.synFilter = struct( ...
             'ampRange',   [-inf inf],  ...
             'countRange', [3  inf],  ...

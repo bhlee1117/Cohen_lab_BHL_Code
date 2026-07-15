@@ -1258,37 +1258,40 @@ end
 % Show TX ratio, spike order
 TXratio_sporder=[]; g2=1;
 for stimregion2show=[1 3];
-    for sporder=1:13
+    for sporder=1:20
         g=1;
         [unqLab, refind]=unique([LabelMat.SessionID LabelMat.StimRegion],'row');
         for n=refind(unqLab(:,2)==stimregion2show,1)' %soma targeted
             sessioninterested=unique(LabelMat.SessionID(n));
             stimregioninterested=unique(LabelMat.StimRegion(n));
             ind2norm=find(LabelMat.SessionID==sessioninterested & LabelMat.StimRegion==stimregioninterested);
-            show_ind=find(LabelMat.StimOrder~=6 & LabelMat.StimRegion==stimregioninterested & abs(LabelMat.TransmissionRatio)<maxTXratio & LabelMat.SpikeOrder==sporder & LabelMat.SessionID==sessioninterested); %Pulse & Soma
+            show_ind=find(LabelMat.StimOrder~=6 & LabelMat.StimRegion==stimregioninterested & abs(LabelMat.TransmissionRatio_norm)<maxTXratio & LabelMat.SpikeOrder==sporder & LabelMat.SessionID==sessioninterested); %Pulse & Soma
             % TXratio_sporder(sporder,g,1)=mean(LabelMat.TransmissionRatio(show_ind)./median(LabelMat.TransmissionRatio(ind2norm),'omitnan'),'omitnan');
             % TXratio_sporder(sporder,g,2)=std(LabelMat.TransmissionRatio(show_ind)./median(LabelMat.TransmissionRatio(ind2norm),'omitnan'),'omitnan');
-            TXratio_sporder(sporder,g,1)=mean(LabelMat.TransmissionRatio(show_ind),'omitnan');
-            TXratio_sporder(sporder,g,2)=std(LabelMat.TransmissionRatio(show_ind),'omitnan');
+            TXratio_sporder(sporder,g,1)=mean(LabelMat.TransmissionRatio_norm(show_ind),'omitnan');
+            TXratio_sporder(sporder,g,2)=std(LabelMat.TransmissionRatio_norm(show_ind),'omitnan');
             g=g+1;
         end
     end
     g2=g2+1;
 end
-figure(24); clf; cmap_order=gray(10); show_sporder=[1:7];
+figure(24); clf; cmap_order=gray(20); show_sporder=[1:10];
 nexttile([1 1]);
 TXratio_sporder(TXratio_sporder>5 | TXratio_sporder<0)=NaN;
 TXratio_sporder_mean=mean(TXratio_sporder(show_sporder,:,1)',1,'omitnan');
 TXratio_sporder_sem=std(TXratio_sporder(show_sporder,:,1)',0,1,'omitnan')./sqrt(sum(~isnan(TXratio_sporder(show_sporder,:,1)),2)');
-%plot([1:4],TXratio_sporder(show_sporder,:,1)','color',[0.7 0.7 0.7]); hold all;
-%errorbar([1:4],TXratio_sporder_mean,TXratio_sporder_sem,'r');
-Violin_wPoints(TXratio_sporder(show_sporder,:,1)',cmap_order(show_sporder,:));
+%plot(show_sporder,TXratio_sporder(show_sporder,:,1)','color',[0.7 0.7 0.7]); hold all;
+errorbar_shade(show_sporder,TXratio_sporder_mean,TXratio_sporder_sem,[1 0 0]);
+%Violin_wPoints(TXratio_sporder(show_sporder,:,1)',cmap_order(show_sporder,:));
 p_values = get_pValue(TXratio_sporder(show_sporder,:,1)', 1);
-drawPValueLines(p_values,0.1);
-xlim([show_sporder(1)-0.5 show_sporder(end)+0.5]); ylim([0 6]);
-set(gca,'xtick',[1:5],'XTickLabel',counting_string(1:5))
-ylabel('TX ratio');  xlabel('Evoked spike order');
-
+p_values_show=p_values;
+p_values_show(setdiff([1:size(p_values,1)],[3 4]),:)=1;
+p_values_show=min(cat(3,p_values_show,p_values_show'),[],3);
+drawPValueLines(p_values_show,0,'StepHeight',0.03,'TextYOffset',0.02);
+xlim([show_sporder(1)-0.5 show_sporder(end)+0.5]); ylim([0.85 1.55]);
+set(gca,'xtick',show_sporder,'XTickLabel',counting_string(show_sporder))
+ylabel(sprintf('Normalized\n transmission ratio'));  xlabel('Evoked spike order');
+box off; set_font('Arial'); set_fontsize(16); set_figsize(120,120);
 %% Show bAP apical AUC over time (figure 5)
 timebin=[0 30 35 85 110 200:100:500];
 Rheobin=[1 1.3 1.6 2 3 4 5];
@@ -1364,7 +1367,7 @@ ylabel('Normalized bAP apical AUC');  xlabel('Evoked spike order');
 
 %% Representative Pulse stim (Figure 5a)
 % show example bAP amplitude/AUC image
-ShowSession=[106 1]; ExampleRep=1;
+ShowSession=[105 1]; ExampleRep=1;
 ExampleSession=ShowSession(1,1); wvf=ShowSession(1,2);
 ExampleNeuron=unique(LabelMat.NeuronID(find(LabelMat.SessionID==ExampleSession & LabelMat.StimRegion==wvf)));
 [nROI nTime]=size(OpResult{1,1,ExampleNeuron}.normTraces);
@@ -1372,88 +1375,133 @@ ExampleNeuron=unique(LabelMat.NeuronID(find(LabelMat.SessionID==ExampleSession &
 ROIvec=OpResult{1,1,ExampleNeuron}.maintrunkROI;
 ftprint2show=OpResult{1,1,ExampleNeuron}.ftprnt(:,:,ROIvec); ftprintall=OpResult{1,1,ExampleNeuron}.ftprnt;
 nROI=size(OpResult{1,1,ExampleNeuron}.ftprnt,3); ftprint2show_trace=get_coord(ftprint2show);
-somROI=1; dendROI=[9]; caxshow=[-0.02 0.15];
+somROI=1; dendROI=[7 8]; caxshow=[-0.02 0.17];
 SWCpoints=OpResult{1,1,ExampleNeuron}.SWC; SWCpoints(1,3)=70; cmap_ExTr=gen_colormap(Plasma,10);
-
-figure(25); clf;
-nexttile([1 1])
-boundary_s=bwboundaries(max(ftprint2show(:,:,somROI),[],3)); boundary_ap=bwboundaries(max(ftprint2show(:,:,dendROI),[],3));
-boundary_blue=bwboundaries(OpResult{1,1,ExampleNeuron}.BlueDMDimg);
-showScaleScatter([1:nROI], SWCpoints, ftprintall,repmat([0 0 0],256,1)); hold all
-plot(boundary_s{1}(:,1),boundary_s{1}(:,2),'color',cmap_ExTr(1,:),'linewidth',2);
-plot(boundary_ap{1}(:,1),boundary_ap{1}(:,2),'color',cmap_ExTr(end,:),'linewidth',2);
-plot(boundary_blue{1}(:,1),boundary_blue{1}(:,2),'color',[0 0.5 1],'linewidth',2);
-plot(ftprint2show_trace(:,2),ftprint2show_trace(:,1),'r','linewidth',2);
-drawScaleBar(100/OpResult{1,1,ExampleNeuron}.pixelsize,'vertical')
-view([210 90])
+time2show=[2980:3550];
+% 
+% figure(25); clf;
+% nexttile([1 1])
+% boundary_s=bwboundaries(max(ftprint2show(:,:,somROI),[],3)); boundary_ap=bwboundaries(max(ftprint2show(:,:,dendROI),[],3));
+% boundary_blue=bwboundaries(OpResult{1,1,ExampleNeuron}.BlueDMDimg);
+% showScaleScatter([1:nROI], SWCpoints, ftprintall,repmat([0 0 0],256,1)); hold all
+% plot(boundary_s{1}(:,1),boundary_s{1}(:,2),'color',cmap_ExTr(1,:),'linewidth',2);
+% plot(boundary_ap{1}(:,1),boundary_ap{1}(:,2),'color',cmap_ExTr(end,:),'linewidth',2);
+% plot(boundary_blue{1}(:,1),boundary_blue{1}(:,2),'color',[0 0.5 1],'linewidth',2);
+% plot(ftprint2show_trace(:,2),ftprint2show_trace(:,1),'r','linewidth',2);
+% drawScaleBar(100/OpResult{1,1,ExampleNeuron}.pixelsize,'vertical')
+% view([210 90])
 
 nROI=size(OpResult{1,1,ExampleNeuron}.normTraces,1);
 ftprint=OpResult{1,1,ExampleNeuron}.ftprnt(:,:,OpResult{1,1,ExampleNeuron}.dist_order)>0;
 dax=OpResult{1,1,ExampleNeuron}.dendaxis;
 
 normTr=OpResult{wvf,1,ExampleNeuron}.normTraces./OpResult{wvf,1,ExampleNeuron}.ScaleFactor;
-normTr=normTr(ROIvec,:);
-%normTr=pcafilterTrace(normTr,[1:16 20:25]);
-sublarge=get_subthreshold(normTr,OpResult{wvf,ExampleRep,ExampleNeuron}.Blue>0,300,1000);
-Tr2show=[mean(normTr(somROI,:),1); mean(normTr(dendROI,:),1)];
-normTr_interp=interp1(dax(ROIvec),normTr,linspace(dax(ROIvec(1)),dax(ROIvec(end)),10));
+normTr_res=normTr(ROIvec,time2show);
+normTr_res=pcafilterTrace(normTr_res,setdiff([1:9],[3]));
+normTr_res=normTr_res-median(normTr_res(:,1:35),2);
+Tr2show=[mean(normTr_res(somROI,:),1); mean(normTr_res(dendROI,:),1)];
+normTr_interp=interp1(dax(ROIvec),normTr_res,linspace(dax(ROIvec(1)),dax(ROIvec(end)),16));
 dax2show=linspace(dax(ROIvec(1)),dax(ROIvec(end)),10);
 
-kymosSub2show=get_subthreshold(normTr,OpResult{wvf,ExampleRep,ExampleNeuron}.spike(1,:),7,19);
+figure(27); clf; tiledlayout(7,1,'TileSpacing','tight'); % show example bAP amplitude/AUC image
+ax1=nexttile([3 1]);
+normTr_interp=normTr_interp-median(normTr_interp(:,1:35),2);
+t_ax=[1:size(normTr_interp,2)]*0.001;
+imagesc(t_ax, dax2show, normTr_interp,caxshow); colormap(ax1,'turbo'); cb=colorbar; cb.Label.String = '∆F/F';
+set(gca,'xtick',[]); ylabel('Distance (µm)');
 
-figure(27); clf; tiledlayout(5,1); % show example bAP amplitude/AUC image
-ax1=nexttile([2 1]);
-time2show=[2980:3550];
-kymos2show=normTr_interp(:,time2show);
-kymos2show=kymos2show-median(kymos2show(:,1:35),2);
-t_ax=[1:size(kymos2show,2)]-20;
-imagesc(t_ax, [1:size(kymos2show,1)], kymos2show,caxshow); colormap(ax1,'turbo'); cb=colorbar; cb.Label.String = 'Z score';
-set_kymoYtick(dax2show)
-
-ax2=nexttile([3 1]);
-l=plot(t_ax,Tr2show([1 2],time2show)','linewidth',1.5);
+ax2=nexttile([4 1]);
+l=plot(t_ax,Tr2show([1 2],:)','linewidth',1.5);
 arrayfun(@(l,c) set(l,'Color',c{:}),l,num2cell(cmap_ExTr([1 10],:),2));
 ylabel('∆F/F'); xlabel('Time (ms)');
-legend({'Soma','Apical dendrite'}); axis tight off;
-linkaxes([ax1 ax2],'x'); box off; ylim(caxshow);
-
-ss=1; t_start=[3000 3290]; t_showlength=90;
+axis tight off;
+ylim([-0.05 0.2]);
+drawScaleBar(0.1, 'horizontal','color','k','position',[0.570 -0.02]);
+drawScaleBar(0.1, 'vertical','color','k','position',[0.570 0.08]);
+linkaxes([ax1 ax2],'x'); box off;
+set_font('Arial'); set_fontsize(16);
+set_figsize(200,100);
+%%
+ss=1; t_start=[3000 3290]-time2show(1)+1; t_showlength=90;
 t_ax=[1:t_showlength+1];
 figure(30); clf;
-tiledlayout(5,length(t_start),'padding','compact')
+tiledlayout(5,length(t_start),'padding','compact','TileSpacing','tight'); ax2=[];
 for t=1:length(t_start)
     ax1=nexttile(t,[2 1]);
     kymos2show=normTr_interp(:,t_start(t):t_start(t)+t_showlength);
     %kymos2show=pcafilterTrace(kymos2show,[1:5]);
     %kymos2show=kymos2show(ShowROI,:);
-    imagesc(t_ax, [1:size(kymos2show,1)], kymos2show,caxshow); colormap(ax1,'turbo'); cb=colorbar; cb.Label.String = 'Z score';
+    imagesc(t_ax, dax2show, kymos2show,caxshow); colormap(ax1,'turbo');
     Trcat=Tr2show(:,t_start(t):t_start(t)+t_showlength);
-    set_kymoYtick(dax2show)
-    ax2=nexttile(t+length(t_start)*2,[3 1]);
-    l=plot(t_ax,Trcat([1 2],:)','linewidth',1.5);
+    set(gca,'xtick',[]);
+if t==1
+    ylabel('Distance (µm)');
+else
+    set(gca,'ytick',[]);
+    cb=colorbar; cb.Label.String = '∆F/F';
+end
+    ax2=[ax2 nexttile(t+length(t_start)*2,[3 1])];
+    l=plot(t_ax,Trcat([1 2],:)','linewidth',2);
     arrayfun(@(l,c) set(l,'Color',c{:}),l,num2cell(cmap_ExTr([1 10],:),2));
-    ylabel('\DeltaF/F'); xlabel('Time (ms)');
+    ylabel('∆F/F'); xlabel('Time (ms)');
     axis tight off;
-    ylim(caxshow);
+    ylim([-0.05 0.2]);
 end
 
+drawScaleBar(10, 'horizontal','color','k','position',[93 0]);
+drawScaleBar(0.1, 'vertical','color','k','position',[93 0]);
+
+set_font('Arial'); set_fontsize(16.5);
+set_figsize(330,120);
+
+%% Pad the spike-group AUC maps into ONE axis with an x-offset (instead of
+% separate figures 32-34). Precompute each SWC point's ROI membership once
+% (mirrors showScaleScatter), then scatter a shifted copy per spike group.
+
+
 Splist=find(LabelMat.SessionID==ExampleSession & LabelMat.StimRegion==1 & LabelMat.NeuronID==ExampleNeuron);
-showSP={[1],[2 3 4],[13 14 15]}; excludeROI=[15 35]; cax_AUC=[0.02 0.4];
+showSP={[1],[2 3 4],[13 14 15]}; excludeROI=[15 35]; cax_AUC=[0.02 0.4]/6;
 AUC2show=cell2mat(cellfun(@(x) x(:,2),AUCbAPall(Splist),'UniformOutput',false));
 ftprintall2show=ftprintall;
 ftprintall2show(:,:,excludeROI)=[];
 AUC2show=AUC2show;%./AUC2show(1,:);
 AUC2show(excludeROI,:)=[];
 %tiledlayout(1,9,'Padding','tight'); 
-Fcat=[];
-for s=1:length(showSP)    
-    figure(31+s); clf;
-    %nexttile([1 1])
-    showvec=mean(AUC2show(:,showSP{s}),2,'omitnan');
-    showScaleScatter(showvec, SWCpoints, ftprintall2show,'turbo',cax_AUC);
-    axis tight;
-    view([210 90])
+
+sz32=[size(ftprintall2show,1) size(ftprintall2show,2)];
+swc32=SWCpoints; if size(swc32,2)<4, swc32(:,4)=1; end; swc32(swc32(:,4)==0,4)=1;
+ptX32=swc32(:,2); ptY32=swc32(:,1); ptSz32=swc32(:,4); ptROI32=zeros(size(swc32,1),1);
+ptSz32(1)=40; ptSz32=ptSz32+4;
+valid32=ptY32>0.5 & ptY32<sz32(2)-0.5 & ptX32>0.5 & ptX32<sz32(1)-0.5;
+lin32=nan(size(swc32,1),1); lin32(valid32)=sub2ind(sz32, round(ptX32(valid32)), round(ptY32(valid32)));
+for r=1:size(ftprintall2show,3)
+    m=ftprintall2show(:,:,r)>0; hit=false(size(swc32,1),1); hit(valid32)=m(lin32(valid32)); ptROI32(hit)=r;
 end
+% Rotate the SWC display coordinates in-plane (membership is unchanged -- it is
+% computed on the original coords above). Tune rotAngle32 to orient the neuron.
+rotAngle32=-20;   % degrees
+ct32=mean([ptX32 ptY32],1);
+Rm32=[cosd(rotAngle32) -sind(rotAngle32); sind(rotAngle32) cosd(rotAngle32)];
+XYr32=(Rm32*([ptX32 ptY32]-ct32)')' + ct32;
+ptXr32=XYr32(:,1); ptYr32=XYr32(:,2);
+xStep32=1.02*(max(ptXr32)-min(ptXr32));   % spacing between spike groups (rotated frame)
+
+figure(32); clf; hold on;
+for s=1:length(showSP)
+    showvec=mean(AUC2show(:,showSP{s}),2,'omitnan')/6;
+    cols=vec2cmap(showvec,'turbo',cax_AUC); xoff=(s-1)*xStep32;
+    g0=ptROI32==0;
+    scatter(ptXr32(g0)-xoff, ptYr32(g0), ptSz32(g0), [0.5 0.5 0.5], 'filled');
+    for r=1:max(ptROI32)
+        sel=ptROI32==r;
+        if any(sel), scatter(ptXr32(sel)-xoff, ptYr32(sel), ptSz32(sel), cols(r,:), 'filled'); end
+    end
+end
+colormap(turbo); caxis(cax_AUC); axis equal tight off;
+set(gca,'ydir','reverse','xdir','reverse');
+cb=colorbar; cb.Label.String='mean ∆F/F';
+set_font('Arial'); set_fontsize(16);
+set_figsize(150,90);
 % 
 % figure(32); clf;
 % set(gcf,'Color','w')
