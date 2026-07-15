@@ -1,14 +1,48 @@
-%% Load file path
+%% Section 0 : Setup
 clear
 clc;
-[~, ~, raw] = xlsread(['/Volumes/cohen_lab/Lab/Labmembers/Byung Hun Lee/Data/Prism_V2+Glu_Data_Arrangement.xlsx'], 'Sheet1', 'C5:AA31');
-load('/Volumes/BHL18TB_D2/20260203_SD_V2+iGluSNFR4/25X_transformationMatrix.mat');
-fpath=raw(:,1)';
-V2moviemaxTime=15000;
-GlumoviemaxTime=5000;
-Endframe=cell2mat(raw(:,5));
-foi=[3 5 6 8 9 10 11 12 13];
-StructureData=raw(:,6);
+
+addpath('D:\Labmember\Data\ByungHun\VU_analysiscode');
+addpath(genpath('C:\Users\Lab Member\Documents\GitHub\Cohen_lab_BHL_Code'));
+
+% Remove any shadow of the built-in 'graph' (old cvx/sdpt3 defines graph.m,
+% which breaks the centroid clustering in extractVoltronST / extractGluSNFR3).
+gshadow = which('graph','-all');
+for gi = 1:numel(gshadow)
+    if ~contains(gshadow{gi}, fullfile('toolbox','matlab'))   % keep MATLAB's built-in
+        rmpath(fileparts(gshadow{gi}));
+        fprintf('Removed shadowing graph.m folder from path: %s\n', fileparts(gshadow{gi}));
+    end
+end
+iswindow=0;
+try
+    [~, ~, raw] = xlsread('/Volumes/cohen_lab/Lab/Labmembers/Byung Hun Lee/Data/Prism_V2+Glu_Data_Arrangement.xlsx', 'Sheet1', 'C5:AA31');
+catch
+    raw = readcell(macToWindowsPath('/Volumes/cohen_lab/Lab/Labmembers/Byung Hun Lee/Data/Prism_V2+Glu_Data_Arrangement.xlsx'),...
+        'Sheet', 'Sheet1', 'Range', 'C5:AA31');
+    iswindow=1;
+end
+
+fpath           = raw(:,1)';
+fpath_valid=cell2mat(cellfun(@(x) any(~ismissing(x)),fpath,'UniformOutput',false));
+if iswindow
+    for f=find(fpath_valid>0)
+        fpath{f}=macToWindowsPath(fpath{f});
+    end
+end
+V2moviemaxTime  = 15000;   % voltage movie chunk length (frames)
+GlumoviemaxTime = 3500;    % glutamate movie chunk length (frames)
+o_laser         = 200001;  % 607/488 modulation onset (DAQ sample index, ~2 s after acq start)
+mod488          = 200001;
+foi             = [14:19];   % files of interest
+set(0,'DefaultFigureWindowStyle','docked')
+
+% --- extra columns + transform used by the f=3/f=5 sections below (cross-platform) ---
+Endframe      = cell2mat(raw(:,5));
+StructureData = raw(:,6);            % NB: paths in here also need macToWindowsPath on Windows
+tformFile = '/Volumes/BHL18TB_D2/20260203_SD_V2+iGluSNFR4/25X_transformationMatrix.mat';
+if iswindow, tformFile = macToWindowsPath(tformFile); end
+load(tformFile);                     % tformReg
 %% Map Glu Footprint onto morphology
 % Voltage image >> Structure image >> Glu
 
@@ -311,11 +345,11 @@ nCol2 = double(Device_Data{4}.ROI([2]));  % ROI on the camera
 nRow2 = double(Device_Data{4}.ROI([4]));  % ROI on the camera
 nTime = size(GluResult.t_ax,2);
 try
-mov2_mc=double(readBinMov_times([fpath{f} '/mc2' num2str(1,'%02d') '.bin'], nRow2, nCol2,[1:nTime]));
+mov2_mc=double(readBinMov_times(fullfile(fpath{f}, ['mc2' num2str(1,'%02d') '.bin']), nRow2, nCol2,[1:nTime]));
 catch
-mov2_mc=double(readBinMov([fpath{f} '/mc2' num2str(1,'%02d') '.bin'], nRow2, nCol2));
+mov2_mc=double(readBinMov(fullfile(fpath{f}, ['mc2' num2str(1,'%02d') '.bin']), nRow2, nCol2));
 end
-load([fpath{f} '/mc2Trace' num2str(1,'%02d') '.mat'])
+load(fullfile(fpath{f}, ['mc2Trace' num2str(1,'%02d') '.mat']))
 meanF=squeeze(mean(mov2_mc,[1 2]));
 y_fit=expfitDM_2([1:size(mov2_mc,3)]',meanF,[1:size(mov2_mc,3)]',[10000 100]);
 mov2_mc_filt=mov2_mc./reshape(y_fit,1,1,[]);
@@ -444,12 +478,12 @@ t_cal = (cam2_trig-1)*exposuretime2;
 %
 %  Results are collected in STA_Result and saved as STA_Glu_Volt_Result.mat per file.
 % =====================================================================
-foi_STA = [14:19];
+foi_STA = foi;   % from Section 0 (14:19)
 
 % -- shared parameters --------------------------------------------------
-o_laser  = 200001;   mod488 = 200001;   % 607/488 modulation onset (DAQ sample index)
-GlumoviemaxTime = 5000;                  % glutamate movie chunk length (frames)
-
+% NB: o_laser, mod488 and GlumoviemaxTime are defined in Section 0 (cross-platform
+%     setup) and are used as-is here — do NOT redefine them, or the glutamate tile
+%     boundaries reconstructed in S4/S5 will not match how the movies were chunked.
 staTauV   = [100 100];   % STA voltage window  [pre post] in voltage frames (~ms)
 staTauG   = [15 15];     % STA glutamate window [pre post] in glutamate frames
 matchTol  = 1;           % max |dt| (glu frames) allowed when mapping a V-spike to a glu frame
@@ -664,8 +698,8 @@ for f = foi_STA
         inCS = gluIdx_CS(gluIdx_CS>=off+1 & gluIdx_CS<=off+tileLen(k)) - off;
         if isempty(inSS) && isempty(inCS), off = off+tileLen(k); continue; end
 
-        mov2 = double(readBinMov_times([fpath{f} '/mc2' num2str(k,'%02d') '.bin'], nRow2, nCol2, 1:tileLen(k)));
-        load([fpath{f} '/mc2Trace' num2str(k,'%02d') '.mat']);   % mcTrace2
+        mov2 = double(readBinMov_times(fullfile(fpath{f}, ['mc2' num2str(k,'%02d') '.bin']), nRow2, nCol2, 1:tileLen(k)));
+        load(fullfile(fpath{f}, ['mc2Trace' num2str(k,'%02d') '.mat']));   % mcTrace2
         meanF = squeeze(mean(mov2,[1 2]));
         y_fit = expfitDM_2((1:size(mov2,3))', meanF, (1:size(mov2,3))', [10000 100]);
         mov_f = mov2 ./ reshape(y_fit,1,1,[]);

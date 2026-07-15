@@ -5,15 +5,15 @@ function [movR, mov_mc, mtr, nT] = loadVoltChunk(fpath_f, j, sz, readFrame)
 %   mov_mc : raw motion-corrected movie,               H x W x nT
 %   mtr    : motion trace (nT x k), smoothed
 %   nT     : number of frames
-S = load([fpath_f '/mcTrace' num2str(j,'%02d') '.mat'], 'mcTrace');
+S = load(fullfile(fpath_f, ['mcTrace' num2str(j,'%02d') '.mat']), 'mcTrace');
 mcTrace = S.mcTrace;
 if isstruct(mcTrace), mcTrace = mcTrace.xymean; end
 mtr = movmean(mcTrace, 3, 1);
 
 try
-    mov_mc = double(readBinMov_times([fpath_f '/mc' num2str(j,'%02d') '.bin'], sz(2), sz(1), 1:readFrame));
+    mov_mc = double(readBinMov_times(fullfile(fpath_f, ['mc' num2str(j,'%02d') '.bin']), sz(2), sz(1), 1:readFrame));
 catch
-    mov_mc = double(readBinMov([fpath_f '/mc' num2str(j,'%02d') '.bin'], sz(2), sz(1)));
+    mov_mc = double(readBinMov(fullfile(fpath_f, ['mc' num2str(j,'%02d') '.bin']), sz(2), sz(1)));
 end
 nT  = size(mov_mc,3);
 mtr = mtr(1:nT, :);
