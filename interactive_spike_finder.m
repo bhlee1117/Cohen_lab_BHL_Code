@@ -18,7 +18,7 @@ function [spikeIdx, threshold1, threshold2] = interactive_spike_finder(trace)
 
     % Axes
     ax = axes('Parent',f,'Position',[0.1 0.3 0.85 0.65]);
-    plotTrace = plot(ax, trace, 'w'); hold on;  grid on;
+    plotTrace = plot(ax, trace, 'k'); hold on;  grid on;
     plotSpikes = plot(ax, nan, nan, 'ro', 'MarkerSize', 6, 'DisplayName','Spikes');
     ylabel(ax,'Amplitude'); xlabel(ax,'Time');
     legend(ax, 'Trace', 'Spikes');

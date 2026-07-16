@@ -555,12 +555,13 @@ for f = foi_STA
     sgtitle(sprintf('File %d STA glutamate movie (peak)',f)); drawnow;
 end
 
-%% S4b : Voltage-spike-triggered glutamate STA (-100..100 ms) + pre-spike tuning significance
-%  Per good neuron, for SS and CS: STA of every synapse's dF/F around the soma spikes, plus a
-%  1000x circular-shuffle test of the -50..0 ms PRE-spike glutamate (staGlu_prewin). Results are
-%  saved as VtrigGlu in STA_Glu_Volt_Result.mat and reused by S7 (S7 does NOT recompute).
-VtrigWin_ms   = [100 100];   % STA window [pre post] ms
-VtrigScore_ms = [-50 0];     % pre-spike scoring window (ms)
+%% S4b : Voltage-spike-triggered glutamate STA trace (-100..100 ms) + peri-spike tuning significance
+%  For each good neuron: STA of every synapse's dF/F around that neuron's voltage spikes
+%  (window -100..100 ms, as in S2), binned into 10-ms bins relative to the spike. A 1000x
+%  circular-shuffle null (roll the glutamate trace, spikes fixed) tests whether the peri-spike
+%  modulation (max-min across bins) is significant per synapse. Tuning map drawn on the cell image.
+VtrigWin_ms = [100 100];   % [pre post] ms
+VtrigBin_ms = 10;          % bin width (ms)
 for f = foi_STA
     fprintf('=== S4b V-spike-triggered glu tuning, file #%d ===\n', f);
     VoltResult = importdata(fullfile(fpath{f},'Volt_Result.mat'));
@@ -568,36 +569,76 @@ for f = foi_STA
     nTg  = size(GluResult.dFF_glu,2);
     dtG  = median(diff(GluResult.t_ax(1:nTg)));
     gtax = GluResult.t_ax(1:nTg);
-    GluCoord = getGluCoord(GluResult);  AvgImg = GluResult.AvgGluImg;  Nsyn = size(GluResult.dFF_glu,1);
-    goodROI = find(VoltResult.GoodNeuron(:))';
-    classes = {'SS',1; 'CS',2};
+    dFF  = GluResult.dFF_glu;  Nsyn = size(dFF,1);
+    GluCoord = getGluCoord(GluResult);  AvgImg = GluResult.AvgGluImg;
 
+    % window (glu frames) + 10-ms time bins relative to spike
+    pre  = round(VtrigWin_ms(1)/1000/dtG);  post = round(VtrigWin_ms(2)/1000/dtG);
+    woff = -pre:post;  winLen = numel(woff);
+    tMs  = woff*dtG*1000;
+    edges = -VtrigWin_ms(1):VtrigBin_ms:VtrigWin_ms(2);  nBin = numel(edges)-1;
+    tcent = edges(1:end-1)+VtrigBin_ms/2;
+    bidx  = discretize(tMs, edges);  vin = ~isnan(bidx);
+    OH    = sparse(find(vin), bidx(vin), 1, winLen, nBin);
+    cnt   = full(sum(OH,1)); cnt(cnt==0) = NaN;
+
+    goodROI = find(VoltResult.GoodNeuron(:))';
     clear VtrigGlu
     for gi = 1:numel(goodROI)
-        n = goodROI(gi); VtrigGlu(gi).roi = n;
-        for ci = 1:2
-            vfr  = find(VoltResult.SpClass(classes{ci,2},:,n) > 0);           % SS or CS-onset frames
-            trig = mapV2Glu(VoltResult.t_ax(vfr), gtax, matchTol*dtG);        % -> glu frames
-            [STA, tMs, score, pval] = staGlu_prewin(GluResult.dFF_glu, trig, dtG, VtrigWin_ms, VtrigScore_ms, SI_nShuffle);
-            VtrigGlu(gi).(classes{ci,1}) = struct('ntrig',numel(trig),'STA',STA,'tMs',tMs,'score',score,'pval',pval);
-            fprintf('  ROI %d %s: %d triggers, %d/%d synapses pre-spike tuned (p<0.05)\n', ...
-                n, classes{ci,1}, numel(trig), sum(pval<0.05), Nsyn);
+        n = goodROI(gi);
+        vspk   = find(VoltResult.spike(n,:) > 0);
+        gluIdx = mapV2Glu(VoltResult.t_ax(vspk), gtax, matchTol*dtG);      % V-spike -> glu frame
+        gluIdx = gluIdx(gluIdx+woff(1)>=1 & gluIdx+woff(end)<=nTg);        % keep windows in range
+        if isempty(gluIdx), warning('ROI %d: no in-range triggers.',n); continue; end
+
+        [binnedSTA, STA] = sta_binmean(dFF, gluIdx, woff, OH, cnt, 0);     % observed
+        tuning = max(binnedSTA,[],2) - min(binnedSTA,[],2);               % peri-spike modulation depth
+
+        % circular-shuffle null (roll the glu trace; triggers fixed)
+        minShift = max(1, round(1/dtG)); minShift = min(minShift, max(1,floor(nTg/2)));
+        hiShift  = max(minShift+1, nTg-minShift);
+        rng(0);
+        shifts = randi([minShift, hiShift], 1, SI_nShuffle);
+        Tnull  = zeros(Nsyn, SI_nShuffle);
+        for i = 1:SI_nShuffle
+            bs = sta_binmean(dFF, gluIdx, woff, OH, cnt, shifts(i));
+            Tnull(:,i) = max(bs,[],2) - min(bs,[],2);
         end
+        tuning_p = (1 + sum(Tnull >= tuning, 2)) ./ (SI_nShuffle + 1);
+
+        VtrigGlu(gi).roi = n;  VtrigGlu(gi).nTrig = numel(gluIdx);
+        VtrigGlu(gi).tMs = tMs;  VtrigGlu(gi).STA = STA;                  % Nsyn x winLen (dF/F)
+        VtrigGlu(gi).binCenters = tcent;  VtrigGlu(gi).binnedSTA = binnedSTA;
+        VtrigGlu(gi).tuning = tuning;  VtrigGlu(gi).tuning_p = tuning_p;
+        fprintf('  ROI %d: %d triggers, %d/%d synapses tuned (p<0.05)\n', n, numel(gluIdx), sum(tuning_p<0.05), Nsyn);
     end
 
     STA_Result = importdata(fullfile(fpath{f},'STA_Glu_Volt_Result.mat'));
     STA_Result.VtrigGlu          = VtrigGlu;
     STA_Result.VtrigGlu_win_ms   = VtrigWin_ms;
-    STA_Result.VtrigGlu_score_ms = VtrigScore_ms;
+    STA_Result.VtrigGlu_bin_ms   = VtrigBin_ms;
     STA_Result.VtrigGlu_nShuffle = SI_nShuffle;
     save(fullfile(fpath{f},'STA_Glu_Volt_Result.mat'),'-struct','STA_Result','-v7.3');
 
-    plot_VtrigGlu(VtrigGlu, GluCoord, AvgImg, VtrigScore_ms, 400+f);   % SS/CS heatmap + pre-spike map
+    % ---- visualize: tuning map on the cell image + binned-STA heatmap (per good neuron) ----
+    figure(400+f); clf; tiledlayout(numel(goodROI),2,'TileSpacing','compact','Padding','compact');
+    for gi = 1:numel(goodROI)
+        V = VtrigGlu(gi); cval = -log10(V.tuning_p); cval(isnan(cval)) = 0;
+        nexttile; image(repmat(mat2gray(double(AvgImg)),1,1,3)); hold on; axis image off;
+        scatter(GluCoord(:,1),GluCoord(:,2),34,cval,'filled');
+        colormap(gca,'turbo'); caxis([0 max(prctile(cval,99.5),eps)]); colorbar;
+        title(sprintf('ROI %d  -log_{10}p  (n=%d spk)',V.roi,V.nTrig));
+        nexttile; [~,pk]=max(V.binnedSTA,[],2); [~,ord]=sort(pk);
+        imagesc(V.binCenters, 1:Nsyn, V.binnedSTA(ord,:)); axis tight;
+        xlabel('Time from spike (ms)'); ylabel('synapse (sorted)'); colorbar;
+        title('binned STA glu (dF/F)');
+    end
+    drawnow;
 end
 
 %% S5 : Glutamate place tuning vs treadmill position  (VR_Result-based, f = 14:19)
 for f = foi_STA(3)
-    fprintf('=== S5 glutamate place tuning, file #%d ===\n', f); tS5 = tic;
+    fprintf('=== S5 glutamate place tuning, file #%d ===\n', f);
     GluResult  = loadGlu(fullfile(fpath{f},'Glu_Result.mat'));   % skips F0_glu/T_glu (unused, ~3.7 GB)
     VoltResult = importdata(fullfile(fpath{f},'Volt_Result.mat'));   % only for the voltage time axis
     VR_Result  = importdata(fullfile(fpath{f},'VR_Result.mat'));     % Virmen matrix on the VOLTAGE timebase
@@ -622,7 +663,7 @@ for f = foi_STA(3)
     binTr = ceil(Virmen(5,:)/(VRtrackLength/place_bin));
     binTr(Virmen(end,:) < vel_thresh) = NaN;                       % drop non-running (velocity = last row)
     Nsyn  = size(GluResult.dFF_glu,1);
-    [SI, SI_p] = si_pvalue(GluSpike, binTr, GluResult.t_ax, SI_nShuffle, 0, sprintf('f%d glu (%d syn)',f,Nsyn));
+    [SI, SI_p] = si_pvalue(GluSpike, binTr, GluResult.t_ax, SI_nShuffle);
     fprintf('  glutamate: %d/%d synapses spatially tuned (p<0.05)\n', sum(SI_p<0.05), Nsyn);
 
     % ---- VOLTAGE spatial information + p-value (good neurons; VR is already on the volt timebase) ----
@@ -633,7 +674,7 @@ for f = foi_STA(3)
     binTrV = ceil(VRv(5,:)/(VRtrackLength/place_bin));
     binTrV(VRv(end,:) < vel_thresh) = NaN;
     [Lap_FR_V, Lap_SpkN_V, Lap_Nvalid_V] = PlaceTrigger_average(spikeV, place_bin, VRv, vel_thresh, VRtrackLength);
-    [SI_V, SI_p_V] = si_pvalue(spikeV, binTrV, VoltResult.t_ax, SI_nShuffle, 0, sprintf('f%d volt (%d roi)',f,numel(goodROI)));
+    [SI_V, SI_p_V] = si_pvalue(spikeV, binTrV, VoltResult.t_ax, SI_nShuffle);
     fprintf('  voltage:   %d/%d good neurons spatially tuned (p<0.05)\n', sum(SI_p_V<0.05), numel(goodROI));
 
     STA_Result = importdata(fullfile(fpath{f},'STA_Glu_Volt_Result.mat'));
@@ -680,149 +721,26 @@ for f = foi_STA(3)
     nexttile;
     imshow2(GluResult.AvgGluImg,[100 500]); hold all;
     scatter(GluCoord(:,1),GluCoord(:,2),10,vec2cmap(-log10(SI_p),'turbo'),'filled')
-    fprintf('=== S5 file #%d done in %.1f s ===\n', f, toc(tS5));
 end
 
-%% S6b : Interactive VOLTAGE + GLUTAMATE ROI browser (single file: set f)
-%  Top: glu image + glu synapses (dots, -log10 SI_p) + voltage footprint CONTOURS (-log10 V_SI_p).
-%  Click a synapse -> glu row (trace, dF/F map, GluSpike map); click a footprint -> voltage row
-%  (trace, place map, mean tuning). Needs S5 outputs and tformReg (from Section 0).
-f = foi_STA(2);            % <-- pick the file to browse
-GluResult  = loadGlu(fullfile(fpath{f},'Glu_Result.mat'));
-VoltResult = importdata(fullfile(fpath{f},'Volt_Result.mat'));
+%% S6 : Interactive glutamate ROI browser (single file: set f)
+%  Left  : AvgGluImg + synapses colored by -log10(SI_p) (click to select a synapse).
+%  Top-R : selected synapse raw dF/F trace with its glutamate events overlaid.
+%  Bot-R : place-triggered-average dF/F (left y) and event rate (right y).
+f = foi_STA(1);            % <-- pick the file to browse
+GluResult  = loadGlu(fullfile(fpath{f},'Glu_Result.mat'));   % skips F0_glu/T_glu (unused, ~3.7 GB)
 STA_Result = importdata(fullfile(fpath{f},'STA_Glu_Volt_Result.mat'));   % needs S5 outputs
-load(fullfile(fpath{f},'output_data.mat'));                              % Device_Data
-nTg = size(GluResult.dFF_glu,2);
-
-% voltage footprints aligned into the glutamate image space (contours)
-alignedVoltftprnt = [];
-for ft = 1:size(VoltResult.ftprnt,3)
-    alignedVoltftprnt(:,:,ft) = transformCamera_O2B(Device_Data, tformReg, VoltResult.ftprnt(:,:,ft), GluResult.AvgGluImg);
-end
-goodROI = STA_Result.V_goodROI;                 % voltage neurons with place maps (S5 order)
-
-% voltage-trace place map (mean V per lap x position) for the middle voltage panel
-VR_Result = importdata(fullfile(fpath{f},'VR_Result.mat'));
-Tvr = min(size(VR_Result,2), size(VoltResult.traces,2));
-V_Lap_trace = PlaceTrigger_average(VoltResult.traces(goodROI,1:Tvr), place_bin, VR_Result(:,1:Tvr), vel_thresh, VRtrackLength);
-
-G = struct('coord',getGluCoord(GluResult), 'cvec',-log10(STA_Result.SpatialInfo_p), ...
-           'dFF',GluResult.dFF_glu, 'spike',find_spike_bh(zscore(GluResult.dFF_glu,0,2),3,1), ...
-           't',GluResult.t_ax(1:nTg), 'Lap_dFF',STA_Result.Lap_dFF, 'Lap_FR',STA_Result.Lap_FR);
-V = struct('ftprnt',alignedVoltftprnt(:,:,goodROI), 'cvec',-log10(STA_Result.V_SpatialInfo_p), ...
-           'trace',VoltResult.traces(goodROI,:), 'spike',VoltResult.spike(goodROI,:), ...
-           't',VoltResult.t_ax(1:size(VoltResult.traces,2)), ...
-           'Lap_FR',STA_Result.V_Lap_FR, 'Lap_trace',V_Lap_trace);
-interactive_voltglu_ROI(GluResult.AvgGluImg, G, V, {'Position (cm)', VRtrackLength});
-
-%% S6c : Tuning-curve correlation browser (significant synapses only; set f)
-%  Top    : significant synapses (SI_p<0.05) colored by PEAK position as an angle (circular, hsv).
-%  Bottom : click a synapse -> synapses recolored by tuning-curve correlation to it (caxis [-1 1]).
-f = foi_STA(2);            % <-- pick the file to browse
-GluResult  = loadGlu(fullfile(fpath{f},'Glu_Result.mat'));
-STA_Result = importdata(fullfile(fpath{f},'STA_Glu_Volt_Result.mat'));   % needs S5 outputs
-coord   = getGluCoord(GluResult);
-popMap  = squeeze(mean(STA_Result.Lap_FR,1,'omitnan'))';    % Nsyn x place_bin (mean place firing rate)
-sig     = STA_Result.SpatialInfo_p < 0.05;                  % significant synapses (NaN -> excluded)
-fprintf('S6c: %d/%d synapses significant (p<0.05)\n', sum(sig), numel(sig));
-interactive_glu_tuningcorr(GluResult.AvgGluImg, coord(sig,:), popMap(sig,:));
-
-%% S6d : Max-lag dF/F trace-correlation browser (significant synapses only; set f)
-%  Top    : significant synapses colored by PEAK position (angle, hsv).
-%  Bottom : click a synapse -> synapses recolored by MAX cross-correlation of their raw dF/F
-%           trace with the clicked one over lags +/- 5 frames.
-f = foi_STA(3);            % <-- pick the file to browse
-GluResult  = loadGlu(fullfile(fpath{f},'Glu_Result.mat'));
-STA_Result = importdata(fullfile(fpath{f},'STA_Glu_Volt_Result.mat'));
-coord   = getGluCoord(GluResult);
-popMap  = squeeze(mean(STA_Result.Lap_FR,1,'omitnan'))';    % Nsyn x place_bin (peak-position color)
-sig     = STA_Result.SpatialInfo_p < 0.05;
-fprintf('S6d: %d/%d synapses significant (p<0.05)\n', sum(sig), numel(sig));
-interactive_glu_tracecorr(GluResult.AvgGluImg, coord(sig,:), popMap(sig,:), GluResult.dFF_glu(sig,:), 5);
-
-%% S7 : Voltage + glutamate example (nominate file) : spike-event table
-%  (A) Table of voltage spike EVENTS (SS singles + CS bursts) per good neuron:
-%      ROI, Type, nSpike, voltage frame, glutamate frame, times, V->G gap, CS burst duration.
-%  Then: S7b = peri-spike traces for a nominated event; S7c = SS/CS pre-spike glu tuning maps
-%  (S7c REUSES VtrigGlu computed in S4b -> no recomputation here).
-f = foi_STA(3);            % <-- nominate the file to view
-fprintf('=== S7 volt+glu example, file #%d ===\n', f);
-VoltResult = importdata(fullfile(fpath{f},'Volt_Result.mat'));
-GluResult  = loadGlu(fullfile(fpath{f},'Glu_Result.mat'));
-nTg  = size(GluResult.dFF_glu,2);
-dtG  = median(diff(GluResult.t_ax(1:nTg)));
-dtV  = median(diff(VoltResult.t_ax));
-gtax = GluResult.t_ax(1:nTg);
-nTv  = size(VoltResult.traces,2);
-coord   = getGluCoord(GluResult);
-AvgImg  = GluResult.AvgGluImg;
-goodROI = find(VoltResult.GoodNeuron(:))';
-
-% ---------- (A) spike-event table ----------
-rows = {};
-for n = goodROI
-    ssV  = find(VoltResult.SpClass(1,:,n) > 0);              % simple spikes
-    csV  = find(VoltResult.SpClass(2,:,n) > 0);              % complex-spike onsets
-    bwCS = bwlabel(VoltResult.CStrace(n,:));
-    for k = 1:numel(ssV)
-        fv = ssV(k); gi = match_nearest(VoltResult.t_ax(fv), gtax);
-        rows(end+1,:) = {n,"SS",1,fv,VoltResult.t_ax(fv),gi,gtax(gi),(VoltResult.t_ax(fv)-gtax(gi))*1000,0}; %#ok<SAGROW>
-    end
-    for k = 1:numel(csV)
-        fo = csV(k); w = max(1,fo-2):min(nTv,fo+2); lbl = max(bwCS(w));
-        if lbl>0, reg = find(bwCS==lbl); nspk = sum(VoltResult.spike(n,reg)); dur = (reg(end)-reg(1))*dtV*1000;
-        else,     nspk = NaN;            dur = NaN; end
-        gi = match_nearest(VoltResult.t_ax(fo), gtax);
-        rows(end+1,:) = {n,"CS",nspk,fo,VoltResult.t_ax(fo),gi,gtax(gi),(VoltResult.t_ax(fo)-gtax(gi))*1000,dur}; %#ok<SAGROW>
-    end
-end
-SpikeTable = cell2table(rows,'VariableNames', ...
-    {'ROI','Type','nSpike','Vframe','Vtime_s','Gframe','Gtime_s','V_G_gap_ms','CSdur_ms'});
-SpikeTable = sortrows(SpikeTable,{'ROI','Vframe'});
-fprintf('  %d spike events (%d SS, %d CS) across %d good neurons\n', ...
-    height(SpikeTable), sum(SpikeTable.Type=="SS"), sum(SpikeTable.Type=="CS"), numel(goodROI));
-disp(SpikeTable(1:min(25,height(SpikeTable)),:));   % full table is in the SpikeTable variable
-
-%% S7b : Peri-spike glutamate + voltage traces for a NOMINATED event (run S7 first; set evIdx)
-%  Pick a row of SpikeTable; show the voltage trace + the glutamate synapse traces around it.
-evIdx = 1;                                   % <-- nominate an event = row index of SpikeTable
-ev = SpikeTable(evIdx,:);
-n  = ev.ROI;  vf = ev.Vframe;  gf = ev.Gframe;
-winMs = 200;                                 % +/- window to display (ms)
-vw = round(winMs/1000/dtV);  vI = max(1,vf-vw):min(nTv,vf+vw);  tVms = (vI-vf)*dtV*1000;
-gw = round(winMs/1000/dtG);  gI = max(1,gf-gw):min(nTg,gf+gw);  tGms = (gI-gf)*dtG*1000;
-
-figure(680); clf; tiledlayout(4,1,'TileSpacing','compact','Padding','compact');
-nexttile;                                    % (1) voltage trace + spikes in window
-plot(tVms, VoltResult.traces(n,vI),'k'); hold on;
-sp = vI(VoltResult.spike(n,vI)>0); plot((sp-vf)*dtV*1000, VoltResult.traces(n,sp),'r.','MarkerSize',10);
-xline(0,'r'); axis tight; box off; ylabel('V');
-title(sprintf('Event %d: ROI %d %s (nSpike=%d)   Vframe %d / Gframe %d', ...
-    evIdx, n, string(ev.Type), ev.nSpike, vf, gf));
-nexttile;                                    % (2) mean glutamate dF/F across synapses
-plot(tGms, mean(GluResult.dFF_glu(:,gI),1,'omitnan'),'b'); hold on;
-xline(0,'r'); axis tight; box off; ylabel('mean dF/F');
-preM = mean(GluResult.dFF_glu(:, gI(tGms>=-50 & tGms<0)),2,'omitnan');   % (3-4) per-synapse heatmap
-if all(isnan(preM)), ord = 1:numel(preM); else, [~,ord] = sort(preM,'descend','MissingPlacement','last'); end
-nexttile([2 1]); imagesc(tGms, 1:size(GluResult.dFF_glu,1), GluResult.dFF_glu(ord,gI)); hold on;
-xline(0,'r'); xlabel('Time from event (ms)'); ylabel('synapse (sorted by -50..0 dF/F)');
-colorbar; title('peri-spike glutamate dF/F'); drawnow;
-
-%% S7c : SS/CS pre-spike glutamate tuning maps (REUSE S4b results; run S4b first; set f)
-%  Loads VtrigGlu from STA_Glu_Volt_Result.mat (computed in S4b) and plots per neuron:
-%  SS/CS STA-glutamate heatmaps + maps of synapses tuned in the -50..0 ms pre-spike window.
-f = foi_STA(3);            % <-- file to view
-GluResult  = loadGlu(fullfile(fpath{f},'Glu_Result.mat'));
-STA_Result = importdata(fullfile(fpath{f},'STA_Glu_Volt_Result.mat'));   % contains VtrigGlu (from S4b)
-if ~isfield(STA_Result,'VtrigGlu'), error('VtrigGlu not found - run S4b for file %d first.', f); end
-plot_VtrigGlu(STA_Result.VtrigGlu, getGluCoord(GluResult), GluResult.AvgGluImg, ...
-              STA_Result.VtrigGlu_score_ms, 700);
+nTg      = size(GluResult.dFF_glu,2);
+GluCoord = getGluCoord(GluResult);
+GluSpike = find_spike_bh(zscore(GluResult.dFF_glu,0,2), 3, 1);
+cvec     = -log10(STA_Result.SpatialInfo_p);                 % color = -log10(spatial-info p)
+interactive_glu_ROI(GluResult.AvgGluImg, GluCoord, cvec, ...
+    GluResult.dFF_glu, GluSpike, GluResult.t_ax(1:nTg), ...
+    STA_Result.Lap_dFF, STA_Result.Lap_FR, {'Position (cm)', VRtrackLength});
 
 %% ===================== Helpers (STA pipeline) =====================
 % The S3/S4 helpers are now STANDALONE files (so they work when you Run Section):
 %   ms2frames.m  clsName.m  newStacker.m  accumStack.m  flushStacker.m
 %   stackInfo.m  loadSTAevent.m  mapV2Glu.m  (V-spike -> glu frame via match_nearest)
-%   spatialInfo_mat.m  si_pvalue.m  interactive_glu_ROI.m  interactive_voltglu_ROI.m
-%   interactive_glu_tuningcorr.m (S6c peak-angle + tuning-corr)  interactive_glu_tracecorr.m (S6d max-lag dFF corr)
-%   sta_binmean.m  staGlu_prewin.m (S4b pre-spike glu tuning)  plot_VtrigGlu.m (S4b/S7c plots)
-%   getS_glu.m  getGluCoord.m (compact S_glu accessors)  loadGlu.m
+%   spatialInfo_mat.m  si_pvalue.m  interactive_glu_ROI.m
+%   sta_binmean.m (S4b binned STA)  getS_glu.m  getGluCoord.m (compact S_glu accessors)

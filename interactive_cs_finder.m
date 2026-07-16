@@ -1,7 +1,11 @@
-function [CS_trace, CS_thres] = interactive_cs_finder(sp_soma, tr_hi)
+function [CS_trace, CS_thres, CS_params] = interactive_cs_finder(sp_soma, tr_hi)
 % INTERACTIVE_CS_FINDER  Visual interface to tune CS detection thresholds
 % and spike parameters.
-%   [CS_trace, CS_thres] = interactive_cs_finder(sp_soma, tr_hi)
+%   [CS_trace, CS_thres, CS_params] = interactive_cs_finder(sp_soma, tr_hi)
+%
+%   CS_params (optional 3rd output) returns the extra GUI settings as a
+%   struct: .N_Spike, .Max_AUC, .N_Spike2ISI  (existing 2-output callers
+%   are unaffected).
 
 % Default parameters
 CS_thres = [4 1];
@@ -12,13 +16,13 @@ Max_AUC = 150;
 % Process subthreshold trace
 %tr_sub= get_subthreshold(tr_hi,sp_soma,7,17);
 tr_sub = movmean(tr_hi, 20, 2);
-tr_sub = tr_sub - movmedian(tr_sub, 300, 2);
+tr_sub = tr_sub - movmedian(tr_sub, 500, 2);
 nTime = length(tr_sub);
 
 % Create figure and main plot
 f = figure('Name','Interactive CS Finder','NumberTitle','off','Position',[200 200 900 500]);
 ax = axes('Parent', f, 'Position', [0.1 0.35 0.85 0.6]);
-plot(ax, tr_hi, 'w'); hold on; grid on;
+plot(ax, tr_hi, 'k'); hold on; grid on;
 plot(ax, tr_sub,'color',[1 0.8 0]);
 plot(ax, find(sp_soma>0), tr_hi(find(sp_soma>0)),'go')
 plotCS = plot(ax, nan, nan, 'r', 'LineWidth', 1.5, 'DisplayName','CS Trace');
@@ -63,7 +67,10 @@ updateThresholds();
 uiwait(f);
 
 % Final thresholds after closing
-CS_thres = [str2double(th1Edit.String), str2double(th2Edit.String)];
+CS_thres  = [str2double(th1Edit.String), str2double(th2Edit.String)];
+CS_params = struct('N_Spike',     str2double(nSpikeEdit.String), ...
+                   'Max_AUC',     str2double(maxAmpEdit.String), ...
+                   'N_Spike2ISI', str2double(nSpike2ISIEdit.String));
 
 if isvalid(f)
     close(f);
