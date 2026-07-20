@@ -26,7 +26,7 @@ function interactive_voltglu_ROI(AvgImg, G, V, posUnit, dotSize)
 
     [H,W] = size(AvgImg);
     if nargin<4, posUnit = []; end
-    if nargin<5 || isempty(dotSize), dotSize = 8; end
+    if nargin<5 || isempty(dotSize), dotSize = 4; end
     pb = size(G.Lap_dFF,2); nLapG = size(G.Lap_dFF,1); nLapV = size(V.Lap_FR,1);
     if isempty(posUnit), xpos = 1:pb; xlab = 'Position bin';
     else, xpos = ((1:pb)-0.5)/pb*posUnit{2}; xlab = posUnit{1}; end

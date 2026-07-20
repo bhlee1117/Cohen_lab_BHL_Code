@@ -2760,7 +2760,1189 @@ for oi=1:size(OrthAxis2,1)
     end
 end
 
+%% CS vs SS
+figure(300); clf;
+stype_str={'SS','CS','BS'};
+OrthAxis=[1 0 0 0 0; 0 0 1 0 1; 0 0 0 0 1; 0 1 0 0 0]; %rows: basal, apical(trunk+distal), distal, soma
+cmaps=gen_colormap(Plasma,size(OrthAxis,1));
+ax1=[]; Prespike_t=5; nTau2show=[150 50];
+foi2show=[18 23 25 26];
+cax=[-0.02 0.1]; cax_scatter=[-0.3 0.5]; presubtime2ave=[10 3];
+branch_str={'Basal','Apical','Distal','Soma'};   % rows of OrthAxis
+branchPlotOrder=[1 4 2 3];                        % trace display order: Basal, Soma, Apical, Distal
+cmap_SSCS=[1 0 1; 0 0.7 0.7];                     % SS (magenta), CS (teal)
+for f=foi2show
+    % --- source everything from robust-dF/F PCresult{f} (adapter for legacy names) ---
+    Sub_f         = PCresult{f}.Subthreshold;          % robust dF/F subthreshold
+    NT_dirt       = PCresult{f}.NormalizedTrace_dirt;  % robust dF/F, distance-sorted
+    SpikeMat_f    = PCresult{f}.SpikeMat;              % row 1 = somatic spike train
+    SpikeClass_f  = PCresult{f}.SpikeClassVecMat;      % 4 x nTime (1 SS, 2 CS, 3 BS, 4 dSP)
+    CS_f          = PCresult{f}.CStrace;
+    blue_f        = PCresult{f}.Blue;
+    roisD_order_f = PCresult{f}.roisD_order;
+    dax_f         = PCresult{f}.dendaxis;
+
+    [nROI nTime]=size(Sub_f); perispike_time=[-2:20];
+    [SubV SubD subTrace]=get_eigvector(Sub_f(:,sum(isnan(Sub_f),1)==0),nROI);
+    subTrace_onFrame=NaN(nROI,nTime);
+    subTrace_onFrame(:,sum(isnan(Sub_f),1)==0)=subTrace';
+
+    perispike_frame=ind2vec(nTime,unique([tovec(find(double(SpikeMat_f(1,:)==1))'+perispike_time); find(CS_f)']),1);
+    Blue_on_frame=imdilate(blue_f>0, [ones(1, 1), 1, ones(1, 200)])>0;
+    Blue_off_frame=imdilate(blue_f==0, [1, ones(1, 50)])>0;
+
+    roisD_order_ind=cellfun(@find,roisD_order_f,'UniformOutput',false);
+    OrthAxis_vec=zeros(size(OrthAxis,1),nROI);
+    for d=1:5 %dClass
+        dclassinds=cell2mat(roisD_order_ind(d,:)');
+        for v=1:size(OrthAxis,1)
+            if abs(OrthAxis(v,d))>0 & isempty(dclassinds)
+                OrthAxis_vec(v,:)=NaN;
+            else
+                suborthvec=ind2vec(nROI,dclassinds,OrthAxis(v,d)/length(dclassinds));
+                OrthAxis_vec(v,abs(suborthvec)>0)=suborthvec(abs(suborthvec)>0);
+            end
+        end
+    end
+    %OrthAxis_vec=OrthAxis_vec(:,cell2mat(roisD_order_ind(:)));
+
+    SubBasalApical=(Sub_f'*OrthAxis_vec')';
+    %NormTr_filtered=pcafilterTrace(NT_dirt,[1:5]);
+    NormBasalApical=(NT_dirt'*OrthAxis_vec')';
+    % ---- STA kymographs, branch traces, and isolated pre-spike scatter (SS, CS) ----
+    kymoStore=cell(1,2); kymoVecStore=cell(1,2); nSPstore=zeros(1,2); scatterStore=cell(1,2);
+    preCols=nTau2show(1)+1+[-presubtime2ave(1):-presubtime2ave(2)];   % -10..-3 ms pre-spike window
+    for stype=1:2
+        [~, STAmat, spframes]=get_STA(NT_dirt,max(SpikeClass_f(stype,:),[],1).*Blue_off_frame,nTau2show(1),nTau2show(2));
+        [~, SpClassMat]=get_STA(SpikeClass_f+repmat(CS_f,4,1),spframes,nTau2show(1),nTau2show(2));
+        SPisolated=sum(double(SpClassMat(:,:,1:nTau2show(1))),[1 3])==0; % no other event in the 150 ms pre-window
+        nSPstore(stype)=sum(SPisolated);
+        kymo2show=permute(mean(STAmat(:,SPisolated,:),2,'omitnan'),[1 3 2]);
+        kymo2show=kymo2show-median(kymo2show(:,[1:nTau2show(1)]),2,'omitnan');
+        kymoStore{stype}=kymo2show;
+        kymoVecStore{stype}=(kymo2show'*OrthAxis_vec')';
+        % pre-spike subthreshold of the SAME isolated events (for the figure-300 scatter)
+        [~, subBAwin]=get_STA(SubBasalApical,spframes,nTau2show(1),nTau2show(2));
+        subPre=mean(subBAwin(:,:,preCols),3,'omitnan');
+        scatterStore{stype}=subPre(:,SPisolated);
+    end
+
+    % ---- figure 300: basal-vs-apical density with the isolated SS / CS points ----
+    figure(300);
+    nexttile([1 1])
+    try
+        [hist_subV_A_B]=scatter_heatmap(SubBasalApical(1,Blue_off_frame),SubBasalApical(2,Blue_off_frame),50,50);
+        hold all
+        hSS=scatter(scatterStore{1}(1,:),scatterStore{1}(2,:),10,cmap_SSCS(1,:),'filled');
+        hCS=scatter(scatterStore{2}(1,:),scatterStore{2}(2,:),10,cmap_SSCS(2,:),'filled');
+        xlabel('Basal'); ylabel('Apical');
+        colormap('bone'); title(['ID# ' num2str(f) '  (SS ' num2str(nSPstore(1)) ', CS ' num2str(nSPstore(2)) ')']);
+        %xlim(cax_scatter); ylim(cax_scatter);
+        axis tight;
+        if f==foi2show(1), legend([hSS hCS],{'SS','CS'},'Box','on'); end
+    end
+
+    % ---- one figure per neuron: kymographs (top) + branch traces (bottom, incl. soma) ----
+    figure(3030+f); clf; tiledlayout(2,4,'TileSpacing','compact','Padding','compact');
+    sgtitle(['Neuron ID# ' num2str(f)]);
+    t_axis=[-nTau2show(1):nTau2show(2)];
+    for stype=1:2
+        nexttile([1 2]);
+        imagesc(kymoStore{stype},cax)
+        title([stype_str{stype} ', N=' num2str(nSPstore(stype))])
+        if stype==1, set_kymoYtick(dax_f); else, set(gca,'ytick',[]); end
+        set(gca,'XTick',[1 nTau2show(1)+1 sum(nTau2show)+1],'XTickLabel',num2str([-nTau2show(1) 0 nTau2show(end)]',3))
+    end
+    for v=branchPlotOrder
+        nexttile([1 1]); hold on; box off;
+        plot(t_axis,kymoVecStore{1}(v,:),'color',cmap_SSCS(1,:),'linewidth',1.5);
+        plot(t_axis,kymoVecStore{2}(v,:),'color',cmap_SSCS(2,:),'linewidth',1.5);
+        ylim([-0.2 1.5]*PCresult{f}.SpikeHeight); xlim([-150 50]);
+        title(branch_str{v}); xlabel('Time (ms)');
+        if v==branchPlotOrder(1), ylabel('\DeltaF/F'); legend({'SS','CS'},'Box','off','location','northwest'); end
+    end
+    set_fontsize(12); colormap(turbo(256));
+end
+figure(300); set_fontsize(12);
+
+MeanPrespikeSubthreshold=[];
+nIsolatedSp=zeros(max(foi),3);   % # isolated spikes averaged per neuron per class (1 SS, 2 CS, 3 BS)
+for f=foi
+    % --- source everything from robust-dF/F PCresult{f} (adapter for legacy names) ---
+    Sub_f         = PCresult{f}.Subthreshold;          % robust dF/F subthreshold
+    NT_dirt       = PCresult{f}.NormalizedTrace_dirt;  % robust dF/F, distance-sorted
+    SpikeMat_f    = PCresult{f}.SpikeMat;              % row 1 = somatic spike train
+    SpikeClass_f  = PCresult{f}.SpikeClassVecMat;      % 4 x nTime (1 SS, 2 CS, 3 BS, 4 dSP)
+    CS_f          = PCresult{f}.CStrace;
+    blue_f        = PCresult{f}.BlueStim;
+    roisD_order_f = PCresult{f}.roisD_order;
+
+    [nROI nTime]=size(Sub_f); perispike_time=[-2:20];
+    [SubV SubD subTrace]=get_eigvector(Sub_f(:,sum(isnan(Sub_f),1)==0),nROI);
+    subTrace_onFrame=NaN(nROI,nTime);
+    subTrace_onFrame(:,sum(isnan(Sub_f),1)==0)=subTrace';
+
+    perispike_frame=ind2vec(nTime,unique([tovec(find(double(SpikeMat_f(1,:)==1))'+perispike_time); find(CS_f)']),1);
+    Blue_on_frame=imdilate(blue_f>0, [ones(1, 1), 1, ones(1, 200)])>0;
+    Blue_off_frame=imdilate(blue_f==0, [1, ones(1, 50)])>0;
+
+    roisD_order_ind=cellfun(@find,roisD_order_f,'UniformOutput',false);
+    OrthAxis_vec=zeros(size(OrthAxis,1),nROI);
+    for d=1:5 %dClass
+        dclassinds=cell2mat(roisD_order_ind(d,:)');
+        for v=1:size(OrthAxis,1)
+            if abs(OrthAxis(v,d))>0 & isempty(dclassinds)
+                OrthAxis_vec(v,:)=NaN;
+            else
+                suborthvec=ind2vec(nROI,dclassinds,OrthAxis(v,d)/length(dclassinds));
+                OrthAxis_vec(v,abs(suborthvec)>0)=suborthvec(abs(suborthvec)>0);
+            end
+        end
+    end
+
+    SubBasalApical=(Sub_f'*OrthAxis_vec')';
+    NormBasalApical=(NT_dirt'*OrthAxis_vec')';
+    for stype=1:3
+        [~, STAmat, spframes]=get_STA(NT_dirt,max(SpikeClass_f(stype,:),[],1).*Blue_off_frame,nTau2show(1),nTau2show(2));
+        [~, SpClassMat]=get_STA(SpikeClass_f+repmat(CS_f,4,1),spframes,nTau2show(1),nTau2show(2));
+        if length(spframes)>3
+        SPisolated=sum(double(SpClassMat(:,:,1:nTau2show(1))),[1 3])==0; % no SS/CS/BS/dSP in the pre-spike window
+        nIsolatedSp(f,stype)=sum(SPisolated);
+        kymo2show=permute(mean(STAmat(:,SPisolated,:),2,'omitnan'),[1 3 2]);
+        kymo2show_std=permute(std(STAmat(:,SPisolated,:),0,2,'omitnan')./sqrt(sum(SPisolated)),[1 3 2]);
+
+        kymo2show=kymo2show-median(kymo2show(:,[1:nTau2show(1)]),2,'omitnan');        
+        kymo2show_vec=(kymo2show'*OrthAxis_vec')'; kymo2show_std_vec=(kymo2show_std'*OrthAxis_vec')';
+
+        MeanPrespikeSubthreshold(f,:,stype)=mean(kymo2show_vec(:,nTau2show(1)+[-presubtime2ave(1):-presubtime2ave(2)]),2,'omitnan');
+        else
+        MeanPrespikeSubthreshold(f,:,stype)=NaN(size(OrthAxis_vec,1),1);
+        end
+    end
+end
+
+figure(302); clf; cmap_stype=[1 0 1; 0 0.7 0.7];
+title_str={'Basal','Apical','Distal'}; g=1;
+ylim_302={[-0.03 0.05],[-0.03 0.05],[-0.01 0.1]};   % per-panel y-limits (Basal, Apical, Distal)
+SpikeHeight_foi=arrayfun(@(ff) PCresult{ff}.SpikeHeight, foi)'; % robust dF/F spike height per neuron
+for dclass=[1 3 2]
+    nexttile([1 1]);
+    MeanPrespikeSubthreshold_Sp=permute(MeanPrespikeSubthreshold(foi,dclass,[1 2]),[1 3 2]);
+    MeanPrespikeSubthreshold_Sp(nIsolatedSp(foi,2)<10,:)=NaN;   % drop neurons with <10 isolated CS
+    p=Boxplot_wPoints2(MeanPrespikeSubthreshold_Sp,cmap_stype);
+    drawPValueLines(p,0);
+    box off;
+    % # neurons (finite points) and # isolated spikes averaged per group
+    validSS=isfinite(MeanPrespikeSubthreshold_Sp(:,1)); validCS=isfinite(MeanPrespikeSubthreshold_Sp(:,2));
+    nSpSS=sum(nIsolatedSp(foi(validSS),1)); nSpCS=sum(nIsolatedSp(foi(validCS),2));
+    set(gca,'xtick',[1 2],'xticklabel',{sprintf('SS'), ...
+                                        sprintf('CS')});
+    ylabel('Pre-spike subthreshold (∆F/F)');
+    ylim(ylim_302{g});
+    title(title_str{g}); g=g+1;
+end
+set_figsize(200,90)
+
+%% [3-setup] Compute pre-spike theta phase / amplitude / dV/dt / PLV / STA / ETA  (feeds 3a-3e)
+% Multi-compartment (basal / apical / distal / soma) PRE-spike theta phase at the
+% onset of each event, estimated from pre-onset dynamics ONLY (get_prespike_phase),
+% plus the causal distal-basal theta phase-locking (coherence) in the pre-onset
+% window (get_prespike_coherence). We compare where SS, CS and (silent-period)
+% dSpikes sit on each compartment's theta, and whether SS/CS occur when distal
+% and basal theta are PHASE-MATCHED (signed index <cos(dphi)>: +1 in-phase, -1
+% anti-phase). Run this cell once; then run any of [3a]-[3e].
+%
+% Isolation (req 2): an SS/CS onset is kept only if NO CS falls in its pre-window
+% (a preceding SS is allowed). dSpikes are taken from SILENT periods (no SS/CS/BS
+% in the pre-window). "Silent" = random frames whose 600 ms pre-window has no
+% somatic event, used as the coherence baseline.
+%
+% NOTE: pre-spike V / dV/dt are a straight-line fit over preWin on the RAW traces
+% (not the subthreshold) -- raw is not smoothed, so it has no post-spike leakage and
+% the window can run right up to -2 ms. The spike upstroke is later than -2 ms.
+if isempty(which('circ_rtest'))     % make CircStat2012a available if it isn't
+    addpath(genpath(fullfile(fileparts(mfilename('fullpath')),'..','CircStat2012a')));
+end
+rng(0);
+OrthAxis=[1 0 0 0 0; 0 0 1 0 1; 0 0 0 0 1; 0 1 0 0 0]; % rows: basal, apical, distal, soma
+compName={'Basal','Apical','Distal','Soma'}; basalAx=1; apicalAx=2; distalAx=3; somaAx=4;
+thetaBand=[5 12]; phaseW_ms=600; phaseGuard_ms=40;     % Hz; causal pre-window / edge guard (ms)
+etypeName={'SS','CS','BS','dSpike','Silent'};              % real spike types 1-4, silent baseline = 5
+cmap_et=[1 0 1; 0 0.7 0.7; 0.5 0.2 0.75; 0.9 0.6 0; 0.6 0.6 0.6];
+nET=numel(etypeName); nRealET=4; nComp=numel(compName);   % nRealET = SS,CS,BS,dSpike
+preWin=-20:-2;                                      % pre-spike dV/dt / V window (ms), fit on RAW traces
+
+staTau=[50 20];                                     % STA window (ms pre, ms post) for fig 308
+csAmpWin=0:80; ssAUCwin=0:50;                       % soma post-onset windows for fig-309 colors
+Phase_all  = repmat({nan(0,nComp)},max(foi),nET);   % {f,et}: onsets x compartment phase (rad)
+Mag_all    = repmat({nan(0,nComp)},max(foi),nET);   % {f,et}: onsets x compartment theta amplitude
+dVdtPre_all= repmat({nan(0,nComp)},max(foi),nET);   % {f,et}: onsets x compartment pre-spike dV/dt
+Vpre_all   = repmat({nan(0,nComp)},max(foi),nET);   % {f,et}: onsets x compartment pre-spike V (mean of preWin)
+PeakSlow_all=repmat({nan(0,nComp)},max(foi),nET);   % {f,et}: onsets x compartment PEAK slow component (fig 310)
+peakSlowWin=0:150;                                  % post-onset window (ms) for the peak slow component
+ColorVal_all=repmat({nan(0,1)},   max(foi),nET);    % {f,et}: onsets x soma color value (fig 309)
+AUCpost_all =repmat({nan(0,1)},   max(foi),nET);    % {f,et}: onsets x soma post-spike AUC (fig 309 phase-diff)
+Coh_all    = repmat({nan(0,1)},   max(foi),nET);    % {f,et}: onsets x distal-basal PLV
+Dphi_all   = repmat({nan(0,1)},   max(foi),nET);    % {f,et}: onsets x distal-basal phase offset
+STA_comp   = repmat({nan(nComp,sum(staTau)+1)},max(foi),2);  % {f,stype}: subthreshold compartment STA (SS,CS)
+STA_comp_raw=repmat({nan(nComp,sum(staTau)+1)},max(foi),2);  % {f,stype}: RAW compartment STA (fig 307 dV/dt)
+phaseEdges=-pi:pi/5:pi; nPB=numel(phaseEdges)-1;             % 10 phase bins for the binned STA (fig 309)
+phaseCtr=(phaseEdges(1:end-1)+phaseEdges(2:end))/2;
+staTau9=[150 150]; nT9=sum(staTau9)+1;                        % fig-309 STA window (-150..50 ms, >=1 theta cycle)
+verifTau=[150 50]; nVT=sum(verifTau)+1;                      % window for the phase-detection check (fig 303)
+PV_sum=zeros(nComp,nPB,nVT); PV_cnt=zeros(nComp,nPB);        % filtered trace binned by estimated phase
+STAbin_sum=zeros(nComp,nPB,nT9,2); STAbin_cnt=zeros(nComp,nPB,2);   % phase-binned STA (comp x bin x t x SS/CS)
+STAdiff_sum=zeros(nPB,nT9,2); STAdiff_cnt=zeros(nPB,2);             % distal-basal-phase-diff-binned soma STA
+% fig-311 (SS) / fig-312 (CS): dendritic STA kymograph, binned into a 2x2 grid of
+% (basal-phase sign) x (distal-phase sign) -- the four quadrants of the fig-306 basal-vs-distal
+% phase scatter. Pooled across neurons by dendritic distance (RAW trace, baseline-subtr, /spike ht).
+kymoTau=[100 250]; nKT=sum(kymoTau)+1; kymoT=-kymoTau(1):kymoTau(2);      % kymograph window (ms)
+kymoEdges=-300:40:460; kymoCtr=(kymoEdges(1:end-1)+kymoEdges(2:end))/2; nKB=numel(kymoCtr);
+KymoSum=zeros(nKB,nKT,4,2); KymoN=zeros(nKB,nKT,4,2); nEvQuad=zeros(4,2); % 4 quadrants x (SS,CS)
+for f=foi
+    Sub_f        = PCresult{f}.Subthreshold;
+    SpikeClass_f = PCresult{f}.SpikeClassVecMat;
+    CS_f         = PCresult{f}.CStrace;
+    blue_f       = PCresult{f}.BlueStim;
+    [nROI, nTime]= size(Sub_f);
+    W = round(phaseW_ms);
+
+    OrthAxis_vec = build_orthaxis_vec(OrthAxis, PCresult{f}.roisD_order, nROI);
+    SubBA = OrthAxis_vec * Sub_f;                 % 4 x nTime: basal, apical, distal, soma (subthreshold)
+    rawComp = OrthAxis_vec * PCresult{f}.NormalizedTrace_dirt;  % 4 x nTime RAW voltage (fig 309 STA)
+                                                  % (missing compartments -> NaN row -> dropped later)
+    rawFull = PCresult{f}.NormalizedTrace_dirt;   % nROI x nTime RAW voltage (fig 311 kymograph)
+    dax_f   = PCresult{f}.dendaxis(:)';           % dendritic distance per ROI (sorted order)
+    kbin    = discretize(dax_f, kymoEdges);       % distance-bin index per ROI (NaN outside range)
+    Mbin    = zeros(nKB, nROI);                   % distance-bin membership (bins x ROI), fig 311
+    for r=1:nROI, if ~isnan(kbin(r)), Mbin(kbin(r),r)=1; end, end
+    shF     = PCresult{f}.SpikeHeight;
+    % req 4: if this neuron has no basal ROI, use soma as the basal proxy for the
+    % distal-basal phase relationships (coherence / phase match / phase difference).
+    basalTr = SubBA(basalAx,:); basalProxy = all(isnan(basalTr));
+    if basalProxy, basalTr = SubBA(somaAx,:); end
+    % event traces
+    CS_any  = (SpikeClass_f(2,:)>0) | (CS_f>0);
+    Somatic = (max(SpikeClass_f(1:3,:),[],1)>0) | (CS_f>0);   % SS | CS | BS
+    dSP     = SpikeClass_f(4,:)>0;
+
+    % mask peri-event & blue so transients don't leak into the theta band
+    exclMask = imdilate(max(SpikeClass_f,[],1)>0 | CS_f>0, ones(1,11))>0 | blue_f>0;
+
+    % causal isolation tests (strictly BEFORE the onset, within the pre-window)
+    hasCSpre  = @(t) any(CS_any(max(1,t-W):t-1));
+    hasSomPre = @(t) any(Somatic(max(1,t-W):t-1));
+
+    % ---- onsets per event type ----
+    Et  = EventTable(EventTable.Neuron==f,:);
+    frSS = Et.Frame(Et.EventClass=="SS" & Et.IsValid)';
+    frCS = Et.Frame(Et.EventClass=="CS" & Et.IsValid)';
+    frBS = Et.Frame(Et.EventClass=="BS" & Et.IsValid)';
+    frDS = find(diff([0 dSP])==1);                  % dSpike onsets (rising edges)
+    frDS = frDS(~(blue_f(min(max(frDS,1),nTime))>0));
+    silent = ~imdilate(Somatic, ones(1,201)) & ~(blue_f>0);   % >=100 ms from any somatic event
+    silCand = find(silent); silCand = silCand(silCand>W);
+    frRND = silCand(randperm(numel(silCand), min(200,numel(silCand))));
+
+    frSS = frSS(arrayfun(@(t) t>W && ~hasCSpre(t),  frSS));    % req 2: reject if preceding CS
+    frCS = frCS(arrayfun(@(t) t>W && ~hasCSpre(t),  frCS));
+    frBS = frBS(arrayfun(@(t) t>W && ~hasCSpre(t),  frBS));
+    frDS = frDS(arrayfun(@(t) t>W && ~hasSomPre(t), frDS));    % silent-period dSpikes
+    frRND= frRND(arrayfun(@(t) t>W && ~hasSomPre(t), frRND));  % silent baseline
+    onsetSet = {frSS, frCS, frBS, frDS, frRND};               % 1 SS, 2 CS, 3 BS, 4 dSpike, 5 Silent
+
+    for et=1:nET
+        ons = onsetSet{et}; if isempty(ons), continue; end
+        % per-compartment pre-spike theta phase + amplitude + pre-spike dV/dt (-20..0 ms)
+        ph  = nan(numel(ons),nComp); mg = nan(numel(ons),nComp); dvd = nan(numel(ons),nComp);
+        for c=1:nComp
+            [phc,mgc,~,okc] = get_prespike_phase(SubBA(c,:),1000,thetaBand,ons,exclMask,phaseW_ms,phaseGuard_ms);
+            phc(~okc)=NaN; ph(:,c)=phc(:);
+            mgc(~okc)=NaN; mg(:,c)=mgc(:);
+        end
+        vpre = nan(numel(ons),nComp);
+        for k=1:numel(ons)
+            t0=ons(k); if t0+preWin(1)<1 || t0+preWin(end)>nTime, continue; end
+            seg=rawComp(:,t0+preWin);                 % RAW traces (linear fit over preWin)
+            for c=1:nComp
+                v=seg(c,:); gd=isfinite(v);
+                if nnz(gd)>=5, pp=polyfit(preWin(gd),v(gd),1); dvd(k,c)=pp(1); vpre(k,c)=mean(v(gd)); end
+            end
+        end
+        Phase_all{f,et}=ph; Mag_all{f,et}=mg; dVdtPre_all{f,et}=dvd; Vpre_all{f,et}=vpre;
+        % per-onset PEAK slow component per compartment (fig 310): max of the smoothed
+        % subthreshold (slow) trace over peakSlowWin (0..150 ms), minus the pre-onset baseline.
+        pk=nan(numel(ons),nComp); SubBAsm=movmean(SubBA,5,2,'omitnan');
+        for k=1:numel(ons)
+            t0=ons(k); w=t0+peakSlowWin; w=w(w>=1 & w<=nTime); b0=max(1,t0-20):t0-1;
+            if isempty(w) || isempty(b0), continue; end
+            base=mean(SubBAsm(:,b0),2,'omitnan');
+            pk(k,:)=max(SubBAsm(:,w),[],2,'omitnan')' - base';
+        end
+        PeakSlow_all{f,et}=pk./shF;                  % /spike ht so neurons pool
+        % ---- fig 311 (SS) / fig 312 (CS): bin the basal-vs-distal phase scatter into a 2x2
+        % grid and accumulate the dendritic STA kymograph of each quadrant (pooled by distance) ----
+        if et<=2
+            Pb=ph(:,basalAx); if all(isnan(Pb)), Pb=ph(:,somaAx); end   % scatter x (soma proxy)
+            Pd=ph(:,distalAx);                                          % scatter y
+            for k=1:numel(ons)
+                t0=ons(k);
+                if t0-kymoTau(1)<1 || t0+kymoTau(2)>nTime, continue; end
+                if ~isfinite(Pb(k)) || ~isfinite(Pd(k)), continue; end
+                q = 1 + (Pb(k)>0) + 2*(Pd(k)<=0);   % 1 TL,2 TR,3 BL,4 BR (top row = distal>0)
+                W = rawFull(:, t0+kymoT);                            % nROI x nKT raw window
+                W = (W - mean(W(:,1:10),2,'omitnan'))./shF;          % baseline-subtract, /spike ht
+                fin=isfinite(W); Wz=W; Wz(~fin)=0;
+                meanB=(Mbin*Wz)./(Mbin*fin);                         % nKB x nKT distance-binned (NaN where empty)
+                good=isfinite(meanB); meanB(~good)=0;
+                KymoSum(:,:,q,et)=KymoSum(:,:,q,et)+meanB; KymoN(:,:,q,et)=KymoN(:,:,q,et)+good;
+                nEvQuad(q,et)=nEvQuad(q,et)+1;
+            end
+        end
+        % per-event soma color value for fig 309:
+        %   CS -> peak somatic slow-depol amplitude; SS -> somatic post-spike AUC (0..50 ms)
+        if et<=2
+            cv=nan(numel(ons),1); aucp=nan(numel(ons),1); somaTr=SubBA(somaAx,:);
+            for k=1:numel(ons)
+                t0=ons(k);
+                base=mean(somaTr(max(1,t0-20):t0-1),'omitnan');
+                wA=t0+ssAUCwin; wA=wA(wA<=nTime); aucp(k)=sum(somaTr(wA)-base,'omitnan');   % post-spike soma AUC
+                if et==2
+                    w=t0+csAmpWin; w=w(w<=nTime); cv(k)=max(somaTr(w),[],'omitnan')-base;    % CS soma amplitude
+                else
+                    cv(k)=aucp(k);                                                            % SS post-spike AUC
+                end
+            end
+            ColorVal_all{f,et}=cv; AUCpost_all{f,et}=aucp;
+        end
+        % compartment STA aligned to onset (SS / CS), baseline-subtracted, /SpikeHeight
+        if et<=2 && ~isempty(ons)
+            sta = get_STA(SubBA, ons, staTau(1), staTau(2));      % nComp x nT (subthreshold)
+            if ~isempty(sta)
+                sta = sta - mean(sta(:,1:10),2,'omitnan');        % baseline = first 10 ms of window
+                STA_comp{f,et} = sta ./ PCresult{f}.SpikeHeight;  % normalize across neurons
+            end
+            staR = get_STA(rawComp, ons, staTau(1), staTau(2));   % nComp x nT (RAW, for fig-307 dV/dt)
+            if ~isempty(staR)
+                staR = staR - mean(staR(:,1:10),2,'omitnan');
+                STA_comp_raw{f,et} = staR ./ PCresult{f}.SpikeHeight;
+            end
+            % phase-binned STA accumulation (fig 309 STA columns): per-event windows of the
+            % SOMA raw trace, grouped by EACH compartment's pre-spike theta phase (row c),
+            % and by the distal-basal phase difference (bottom row). /SpikeHeight so neurons pool.
+            okWin = ons+(-staTau9(1))>=1 & ons+staTau9(2)<=nTime;   % fig-309 STA window (-150..50)
+            onsK=ons(okWin); phK=ph(okWin,:);
+            if ~isempty(onsK)
+                [~, staMat] = get_STA(rawComp, onsK, staTau9(1), staTau9(2)); % nComp x nK x nT (RAW voltage)
+                staMat = staMat ./ PCresult{f}.SpikeHeight;
+                for c=1:nComp
+                    bidx=discretize(phK(:,c),phaseEdges);               % bins from compartment c's phase
+                    for bb=1:nPB
+                        sel=bidx==bb; if ~any(sel), continue; end
+                        wseg=reshape(staMat(somaAx,sel,:),sum(sel),[]);  % SOMA trace (nSel x nT)
+                        wseg=wseg-mean(wseg(:,1:10),2,'omitnan');
+                        STAbin_sum(c,bb,:,et)=STAbin_sum(c,bb,:,et)+reshape(sum(wseg,1,'omitnan'),1,1,[]);
+                        STAbin_cnt(c,bb,et)=STAbin_cnt(c,bb,et)+sum(sel);
+                    end
+                end
+                Pb=phK(:,basalAx); if all(isnan(Pb)), Pb=phK(:,somaAx); end   % req 4 proxy
+                dpd=mod(phK(:,distalAx)-Pb+pi,2*pi)-pi;
+                bidxD=discretize(dpd,phaseEdges);
+                for bb=1:nPB
+                    sel=bidxD==bb; if ~any(sel), continue; end
+                    wseg=reshape(staMat(somaAx,sel,:),sum(sel),[]);
+                    wseg=wseg-mean(wseg(:,1:10),2,'omitnan');
+                    STAdiff_sum(bb,:,et)=STAdiff_sum(bb,:,et)+sum(wseg,1,'omitnan');
+                    STAdiff_cnt(bb,et)=STAdiff_cnt(bb,et)+sum(sel);
+                end
+            end
+        end
+        % causal distal-basal theta phase match over the pre-window (soma proxies basal if absent)
+        [plv,dph,okco]=get_prespike_coherence(SubBA(distalAx,:),basalTr,1000,thetaBand,ons,exclMask,phaseW_ms,phaseGuard_ms);
+        plv(~okco)=NaN; dph(~okco)=NaN;
+        Coh_all{f,et}=plv(:); Dphi_all{f,et}=dph(:);
+    end
+
+    % ---- phase-detection check: theta-FILTERED trace binned by the estimated phase (fig 303) ----
+    % Pool all onset types; within each phase bin the filtered trace should stay a clean
+    % oscillation (peaks shift diagonally with bin) and be at cos(phi) at t=0 if the phase
+    % estimate is correct. Normalized to unit theta amplitude so neurons pool.
+    for c=1:nComp
+        [~, filtC] = get_phase(SubBA(c,:), 1000, thetaBand, exclMask);   % continuous band-passed
+        sfc=std(filtC,0,'omitnan'); if ~(sfc>0), continue; end
+        filtC=filtC/sfc;
+        for et=1:nET
+            ons=onsetSet{et}; if isempty(ons), continue; end
+            phc=Phase_all{f,et}(:,c);
+            okW = ons+(-verifTau(1))>=1 & ons+verifTau(2)<=nTime;
+            ons2=ons(okW); phc2=phc(okW);
+            if isempty(ons2), continue; end
+            bidx=discretize(phc2,phaseEdges);
+            for bb=1:nPB
+                sel=bidx==bb; if ~any(sel), continue; end
+                frB=ons2(sel); frB=frB(:);
+                seg=filtC(frB+(-verifTau(1):verifTau(2)));      % nSel x nVT
+                PV_sum(c,bb,:)=PV_sum(c,bb,:)+reshape(sum(seg,1,'omitnan'),1,1,[]);
+                PV_cnt(c,bb)=PV_cnt(c,bb)+sum(sel);
+            end
+        end
+    end
+end
+
+%% [3-verify] Theta phase-detection check: filtered traces binned by the estimated phase
+% If the causal phase estimate is correct, then binning events by their estimated
+% pre-spike phase and averaging the theta-FILTERED trace should give clean oscillations
+% whose peak shifts diagonally across bins, and whose value at t=0 tracks cos(phi).
+figure(303); clf; tiledlayout(2,nComp,'TileSpacing','compact','Padding','compact');
+tV=-verifTau(1):verifTau(2); cmapPhase=hsv(nPB);
+for c=1:nComp                                        % row 1: binned averaged filtered traces
+    nexttile; hold on; box off;
+    for bb=1:nPB
+        if PV_cnt(c,bb)<5, continue; end
+        plot(tV, squeeze(PV_sum(c,bb,:))/PV_cnt(c,bb), 'color',cmapPhase(bb,:),'LineWidth',1);
+    end
+    xline(0,'k:'); title(compName{c}); xlabel('Time from onset (ms)'); xlim([-150 50]);
+    colormap(gca,hsv(nPB)); clim([-pi pi]);
+    if c==1, ylabel('theta-filtered (norm.)'); end
+    if c==nComp, cb=colorbar; cb.Label.String='estimated phase @ onset'; cb.Ticks=[-pi 0 pi]; cb.TickLabels={'-\pi','0','\pi'}; end
+end
+for c=1:nComp                                        % row 2: value at t=0 vs bin (should track cos)
+    nexttile; hold on; box off;
+    val0=nan(1,nPB);
+    for bb=1:nPB
+        if PV_cnt(c,bb)>=5, val0(bb)=PV_sum(c,bb,verifTau(1)+1)/PV_cnt(c,bb); end
+    end
+    hd=plot(phaseCtr, val0, 'ko-','MarkerFaceColor','k');
+    A=max(abs(val0)); if ~(A>0), A=1; end
+    hc=plot(phaseCtr, A*cos(phaseCtr), 'r--','LineWidth',1);
+    xline(0,'k:'); yline(0,'k:'); xlim([-pi pi]);
+    set(gca,'xtick',[-pi 0 pi],'xticklabel',{'-\pi','0','\pi'}); xlabel('estimated phase bin');
+    if c==1, ylabel('filtered value @ t=0'); legend([hd hc],{'data','cos(\phi)'},'Box','off','FontSize',7); end
+end
+set_fontsize(9);
+sgtitle('[3-verify] Phase-detection check: filtered trace binned by causal phase estimate (value@0 should track cos \phi)');
+
+%% [3a] Figure 304 - pre-spike theta phase, compartment (rows) x event (cols)
+figure(304); clf; tiledlayout(nComp,nRealET,'TileSpacing','compact','Padding','compact');
+phEdges=linspace(-pi,pi,19);
+for c=1:nComp
+    for et=1:nRealET
+        allPhi = cell2mat(cellfun(@(M) M(:,c), Phase_all(foi,et),'UniformOutput',false));
+        allPhi = allPhi(~isnan(allPhi));
+        nexttile;
+        polarhistogram(allPhi, phEdges,'Normalization','probability','FaceColor',cmap_et(et,:),'EdgeColor','none'); hold on;
+        if numel(allPhi)>=3
+            R=circ_r(allPhi); mu=circ_mean(allPhi); p=circ_rtest(allPhi);
+            polarplot([mu mu],[0 max(0.001,R)],'k','LineWidth',1.5);
+            title(sprintf('%s / %s  R=%.2f p=%.1g', compName{c}, etypeName{et}, R, p),'FontSize',8);
+        else
+            title(sprintf('%s / %s  (n<3)', compName{c}, etypeName{et}),'FontSize',8);
+        end
+    end
+end
+set_fontsize(9);
+sgtitle('[3a] Pre-spike theta phase: compartment (rows) x event (cols)');
+
+%% [3b] Figure 306 - distal-basal theta phase match & basal-vs-distal phase per spike type
+figure(306); clf; tiledlayout(3,2,'TileSpacing','compact','Padding','compact');
+nexttile; hold on; box off;                    % (a) phase-match per spike type -- SAME data as panel (c)
+% cos(phi_distal - phi_basal) from the causal per-onset phase estimates (Phase_all), on the
+% isolated subset, so this histogram is the 1-D marginal of the panel-(c) scatter.
+pmEdges=linspace(-1,1,21); pmCtr=(pmEdges(1:end-1)+pmEdges(2:end))/2;
+for et=1:nRealET
+    pm=[];
+    for f=foi
+        P=Phase_all{f,et}; if isempty(P), continue; end
+        Pb=P(:,basalAx); if all(isnan(Pb)), Pb=P(:,somaAx); end   % req 4: soma proxy
+        pm=[pm; cos(P(:,distalAx)-Pb)];   %#ok<AGROW>
+    end
+    pm=pm(isfinite(pm));
+    if isempty(pm), continue; end
+    hc=histcounts(pm,pmEdges,'Normalization','probability');
+    plot(pmCtr, hc, '-', 'color',cmap_et(et,:), 'LineWidth',1.5);
+end
+xlabel('Distal-basal phase match cos(\Delta\phi) at onset'); ylabel('P(event)');
+xlim([-1 1]); legend(etypeName(1:nRealET),'Box','off','Location','best'); title('Phase-match at onset per spike type (isolated)');
+nexttile; hold on; box off;                    % (b) pre-onset phase match per type vs silent
+PLVneuron=nan(max(foi),nET);
+for f=foi
+    for et=1:nET
+        if ~isempty(Coh_all{f,et}), PLVneuron(f,et)=mean(Coh_all{f,et},'omitnan'); end
+    end
+end
+p=Boxplot_wPoints2(PLVneuron(foi,:), cmap_et); drawPValueLines(p,0); box off;
+set(gca,'xtick',1:nET,'xticklabel',etypeName); ylabel('Pre-onset phase match'); title('Phase match at onset');
+% (c) basal (or soma proxy) phase vs distal phase -- ONE PANEL PER SPIKE TYPE (SS,CS,BS,dSpike)
+for et=1:nRealET
+    nexttile; hold on; box off;
+    bx=[]; dy=[];
+    for f=foi
+        P=Phase_all{f,et}; if isempty(P), continue; end
+        Pb=P(:,basalAx); if all(isnan(Pb)), Pb=P(:,somaAx); end   % req 4: soma proxy
+        bx=[bx; Pb]; dy=[dy; P(:,distalAx)];   %#ok<AGROW>
+    end
+    v=isfinite(bx)&isfinite(dy);
+    if nnz(v)>=10
+        scatter_density(bx(v), dy(v), 10); colorbar(gca,'off');   % color = local point density
+    elseif any(v)
+        scatter(bx(v), dy(v), 8, cmap_et(et,:),'filled','MarkerFaceAlpha',0.5);
+    end
+    plot([-pi pi],[-pi pi],'k:');               % diagonal = in-phase (matched)
+    axis square; xlim([-pi pi]); ylim([-pi pi]);
+    set(gca,'xtick',[-pi 0 pi],'xticklabel',{'-\pi','0','\pi'},'ytick',[-pi 0 pi],'yticklabel',{'-\pi','0','\pi'});
+    xlabel('basal phase'); ylabel('distal phase');
+    title(sprintf('%s: basal vs distal phase (n=%d, color=density)', etypeName{et}, sum(v)));
+end
+set_fontsize(9);
+sgtitle('[3b] Distal-basal phase match (<cos \Delta\phi>) & joint basal-distal phase per spike type');
+
+%% [3c] Figure 307 - pre-spike dV/dt by compartment (slope of the RAW STA), SS vs CS
+figure(307); clf; tiledlayout(1,nComp,'TileSpacing','compact','Padding','compact');
+preLbl=sprintf('%d..%d ms', preWin(1), preWin(end));
+staCols=preWin+staTau(1)+1;                          % STA columns spanning preWin (tSTA(col)=time)
+for c=1:nComp
+    M=nan(max(foi),2);
+    for f=foi
+        for et=1:2                                   % dV/dt = slope of the raw STA over preWin
+            S=STA_comp_raw{f,et};
+            if isempty(S), continue; end
+            seg=S(c,staCols); gd=isfinite(seg);
+            if nnz(gd)>=3, pp=polyfit(preWin(gd),seg(gd),1); M(f,et)=pp(1); end
+        end
+    end
+    nexttile;
+    p=Boxplot_wPoints2(M(foi,:), cmap_et(1:2,:)); drawPValueLines(p,0); box off;
+    set(gca,'xtick',[1 2],'xticklabel',{'SS','CS'}); title(compName{c});
+    if c==1, ylabel(sprintf('STA dV/dt, %s (\\DeltaF/F/spike ht per ms)',preLbl)); end
+end
+set_fontsize(11);
+sgtitle(sprintf('[3c] Pre-spike (%s) dV/dt from the RAW STA, by compartment: SS vs CS', preLbl));
+
+%% [3d] Figure 308 - compartment STA + pre-spike V-vs-dV/dt phase plane
+% Top STA panels are the SUBTHRESHOLD compartment STA. The bottom phase plane uses the
+% RAW traces (per event): dV/dt is the linear-fit slope over preWin, V is the mean raw
+% over the same window; both are divided by each neuron's spike height so events pool.
+figure(308); clf; tiledlayout(2,4,'TileSpacing','compact','Padding','compact');
+tSTA=-staTau(1):staTau(2); pw0=preWin(1); pw1=preWin(end);
+dispOrd=[1 4 2 3];                                  % display order: Basal, Soma, Apical, Distal
+cmap_comp=[0.2 0.4 1; 0 0 0; 0.2 0.7 0.2; 0.85 0.3 0.1];
+compLbl=compName(dispOrd);
+stypeOrder=[2 1];                                   % top panels: CS then SS
+% --- top row: compartment STA per event (each spans 2 tiles) ---
+for pp=1:2
+    stype=stypeOrder(pp);
+    nexttile([1 2]); hold on; box off;
+    h=gobjects(1,numel(dispOrd));
+    for j=1:numel(dispOrd)
+        c=dispOrd(j);
+        M = cell2mat(cellfun(@(S) S(c,:), STA_comp(foi,stype),'UniformOutput',false));  % neurons x nT
+        M = M(all(isfinite(M),2),:);
+        if isempty(M), continue; end
+        h(j)=errorbar_shade(tSTA, mean(M,1,'omitnan'), std(M,0,1,'omitnan')./sqrt(size(M,1)), cmap_comp(j,:));
+    end
+    yl=ylim; hp=patch([pw0 pw1 pw1 pw0],[yl(1) yl(1) yl(2) yl(2)],[0.9 0.9 0.6], ...
+        'FaceAlpha',0.25,'EdgeColor','none','HandleVisibility','off');   % pre-spike dV/dt window
+    uistack(hp,'bottom'); xline(0,'k:'); title([etypeName{stype} ' STA']); xlabel('Time from onset (ms)');
+    if pp==1
+        ylabel('Subthreshold (\DeltaF/F / spike ht)');
+        valid=isgraphics(h); legend(h(valid), compLbl(valid),'Box','off','Location','northwest');
+    end
+end
+% --- bottom row: phase plane V vs dV/dt (one point per event), SS & CS, per compartment ---
+for j=1:numel(dispOrd)
+    c=dispOrd(j);
+    nexttile; hold on; box off;
+    hS=gobjects(1,2);
+    for stype=1:2
+        Vv=[]; dV=[];
+        for f=foi
+            if isempty(Vpre_all{f,stype}), continue; end
+            sh=PCresult{f}.SpikeHeight;
+            Vv=[Vv; Vpre_all{f,stype}(:,c)./sh]; dV=[dV; dVdtPre_all{f,stype}(:,c)./sh];   %#ok<AGROW>
+        end
+        v=isfinite(Vv)&isfinite(dV); Vv=Vv(v); dV=dV(v);
+        if ~isempty(Vv)
+            hS(stype)=scatter(Vv, dV, 8, cmap_et(stype,:),'filled','MarkerFaceAlpha',0.25);
+            % 2D mean +- std errorbar (both axes linear)
+            errorbar(mean(Vv), mean(dV), std(dV), std(dV), std(Vv), std(Vv), 'o', ...
+                'Color','k','MarkerFaceColor',cmap_et(stype,:),'MarkerSize',7,'LineWidth',1.5,'CapSize',6);
+        end
+    end
+    yline(0,'k:'); xline(0,'k:'); title(compLbl{j});
+    if j==1
+        xlabel('V (\DeltaF/F / spike ht)'); ylabel('dV/dt (per ms)');
+        lbl={'SS','CS'}; valid=isgraphics(hS); legend(hS(valid),lbl(valid),'Box','off','Location','best');
+    end
+end
+set_fontsize(10);
+sgtitle(sprintf('[3d] Top: subthreshold STA (CS, SS).  Bottom: pre-spike (%d..%d ms) V vs dV/dt (RAW)', pw0, pw1));
+
+%% [3e] Figure 309 - phase x amplitude scatter (cols 1-2) + SOMA STA binned by phase (cols 3-4)
+% Columns: 1=SS scatter, 2=CS scatter, 3=SS soma STA, 4=CS soma STA.
+% Rows 1-4 = compartments. Scatter: phase x, theta amplitude y, color=post-spike soma AUC.
+% STA columns: the SOMA raw-voltage STA, grouped by bins of THAT ROW's compartment phase
+% (so you see how the somatic waveform depends on each compartment's theta phase). Row 5 =
+% distal-basal phase DIFFERENCE (scatter: x=phase diff, y=joint distal*basal amplitude;
+% STA: soma STA grouped by the phase difference). Soma proxies basal where absent (req 4).
+figure(309); clf; tiledlayout(nComp+1,4,'TileSpacing','compact','Padding','compact');
+ampScale=nan(max(foi),1);                            % per-neuron amp scale (shared SS & CS)
+for f=foi, ampScale(f)=median([Mag_all{f,1}(:); Mag_all{f,2}(:)],'omitnan'); end
+phaseOffsets=[-2*pi 0 2*pi];                         % tile phase so -3pi/2..3pi/2 is continuous
+wrappi=@(x) mod(x+pi,2*pi)-pi;
+tSTA=-staTau9(1):staTau9(2); cmapPhase=hsv(nPB);     % fig-309 STA time axis (-150..50 ms)
+for c=1:nComp
+    % --- cols 1-2: SS / CS scatter, phase(x, 3 cycles) x amplitude(y), color=post AUC ---
+    for stype=1:2
+        ph=[]; am=[]; cv=[];
+        for f=foi
+            P=Phase_all{f,stype}; A=Mag_all{f,stype}; C=AUCpost_all{f,stype};
+            if isempty(P) || ~isfinite(ampScale(f)) || ampScale(f)<=0, continue; end
+            ph=[ph; P(:,c)]; am=[am; A(:,c)./ampScale(f)]; cv=[cv; C(:)];   %#ok<AGROW>
+        end
+        v=isfinite(ph)&isfinite(am)&isfinite(cv); ph=ph(v); am=am(v); cv=cv(v);
+        nexttile; hold on; box off;
+        yyaxis left;                                       % left axis: phase x amplitude scatter
+        for oo=phaseOffsets, scatter(ph+oo, am, 8, cv, 'filled','MarkerFaceAlpha',0.5); end
+        colormap(gca, parula(256));
+        if ~isempty(cv), cr=prctile(cv,[5 95]); if diff(cr)>0, clim(cr); end, end
+        if stype==1, ylabel(sprintf('%s\ntheta amp', compName{c})); end
+        set(gca,'YColor','k');
+        yyaxis right;                                      % right axis: # events vs phase (marginal)
+        if ~isempty(ph)
+            phEdgesM=linspace(-pi,pi,19); phCtrM=(phEdgesM(1:end-1)+phEdgesM(2:end))/2;
+            cntM=histcounts(ph, phEdgesM);
+            for oo=phaseOffsets, plot(phCtrM+oo, cntM, '-','color',[0 0 0],'LineWidth',1.3); end
+            ylim([0 max(cntM)*3.2]);                        % keep the count line in the lower third
+        end
+        set(gca,'YColor',[0.3 0.3 0.3]); if stype==2, ylabel('# events'); end
+        yyaxis left;
+        cb=colorbar; cb.Label.String='post AUC';
+        xlim([-1.5*pi 1.5*pi]);
+        set(gca,'xtick',(-1:1)*pi,'xticklabel',{'-\pi','0','\pi'});
+        if c==nComp, xlabel('theta phase'); end
+        title(sprintf('%s  n=%d (all neurons)', etypeName{stype}, numel(ph)), 'FontSize',7);
+    end
+    % --- cols 3-4: SS / CS SOMA raw-voltage STA, binned by THIS ROW's compartment phase ---
+    for stype=1:2
+        nexttile; hold on; box off;
+        for bb=1:nPB
+            if STAbin_cnt(c,bb,stype)<3, continue; end
+            m=squeeze(STAbin_sum(c,bb,:,stype))/STAbin_cnt(c,bb,stype);
+            plot(tSTA, m, 'color',cmapPhase(bb,:),'LineWidth',1);
+        end
+        xline(0,'k:'); xlim([tSTA(1) tSTA(end)]); colormap(gca,hsv(nPB)); clim([-pi pi]);
+        if c==1, cb=colorbar; cb.Label.String='pre-spike phase'; cb.Ticks=[-pi 0 pi]; cb.TickLabels={'-\pi','0','\pi'}; end
+        if c==nComp, xlabel('Time from onset (ms)'); end
+        ylabel('soma raw V (norm.)');
+        title(sprintf('%s soma STA / %s phase', etypeName{stype}, compName{c}));
+    end
+end
+% --- row 5: distal-basal phase DIFFERENCE (x) x offset-strength (y); soma STA by phase diff ---
+for stype=1:2
+    dpb=[]; amO=[]; cv=[];
+    for f=foi
+        P=Phase_all{f,stype}; A=Mag_all{f,stype}; C=AUCpost_all{f,stype};
+        if isempty(P) || ~isfinite(ampScale(f)) || ampScale(f)<=0, continue; end
+        Pb=P(:,basalAx); Ab=A(:,basalAx);
+        if all(isnan(Pb)), Pb=P(:,somaAx); Ab=A(:,somaAx); end     % req 4 proxy
+        dpb=[dpb; wrappi(P(:,distalAx)-Pb)]; amO=[amO; sqrt(A(:,distalAx).*Ab)./ampScale(f)]; cv=[cv; C(:)];   %#ok<AGROW>
+    end
+    v=isfinite(dpb)&isfinite(amO)&isfinite(cv); dpb=dpb(v); amO=amO(v); cv=cv(v);
+    nexttile; hold on; box off;
+    yyaxis left;                                       % left axis: phase-diff x offset-strength scatter
+    if ~isempty(cv)
+        scatter(dpb, amO, 8, cv, 'filled','MarkerFaceAlpha',0.5); colormap(gca,parula(256));
+        cr=prctile(cv,[5 95]); if diff(cr)>0, clim(cr); end
+    end
+    ylabel('offset strength (rel. amp)'); set(gca,'YColor','k');
+    yyaxis right;                                      % right axis: # events vs phase difference
+    if ~isempty(dpb)
+        phEdgesD=linspace(-pi,pi,19); phCtrD=(phEdgesD(1:end-1)+phEdgesD(2:end))/2;
+        cntD=histcounts(dpb, phEdgesD);
+        plot(phCtrD, cntD, '-','color',[0 0 0],'LineWidth',1.3);
+        ylim([0 max(cntD)*3.2]);                        % keep the count line in the lower third
+    end
+    set(gca,'YColor',[0.3 0.3 0.3]); if stype==2, ylabel('# events'); end
+    yyaxis left;
+    cb=colorbar; cb.Label.String='post AUC'; xline(0,'k:'); xlim([-pi pi]);
+    set(gca,'xtick',[-pi 0 pi],'xticklabel',{'-\pi','0','\pi'});
+    xlabel('\phi_{distal}-\phi_{basal}');
+    title(sprintf('%s offset  n=%d', etypeName{stype}, numel(dpb)));
+end
+for stype=1:2                                         % soma STA binned by distal-basal phase diff
+    nexttile; hold on; box off;
+    for bb=1:nPB
+        if STAdiff_cnt(bb,stype)<3, continue; end
+        m=squeeze(STAdiff_sum(bb,:,stype))/STAdiff_cnt(bb,stype);
+        plot(tSTA, m, 'color',cmapPhase(bb,:),'LineWidth',1);
+    end
+    xline(0,'k:'); xlim([tSTA(1) tSTA(end)]); colormap(gca,hsv(nPB)); clim([-pi pi]);
+    cb=colorbar; cb.Label.String='\phi_{distal}-\phi_{basal}'; cb.Ticks=[-pi 0 pi]; cb.TickLabels={'-\pi','0','\pi'};
+    xlabel('Time from onset (ms)'); title([etypeName{stype} ' soma raw STA / \Delta\phi']);
+end
+set_fontsize(8);
+sgtitle('[3e] Cols 1-2: phase x amplitude scatter (n=all-neuron events; color=post AUC).  Cols 3-4: RAW-voltage STA binned by phase / phase diff');
+
+%% [3e+] Figures 311 (SS) & 312 (CS) - dendritic STA kymograph, binned 2x2 by (basal phase) x (distal phase)
+% Companion to fig 309/306: the isolated basal-vs-distal phase scatter is split at phase 0 into
+% four quadrants; within each quadrant the dendritic STA (RAW, baseline-subtracted per event,
+% /spike ht) is pooled across neurons by dendritic distance and shown as a kymograph.
+% Tiles match the scatter layout: columns = basal phase (<0 | >0), rows = distal phase (>0 | <0).
+qTitle={'basal<0, distal>0','basal>0, distal>0','basal<0, distal<0','basal>0, distal<0'};
+kymoFig=[311 312]; kymoName={'SS','CS'};             % last dim of KymoSum: 1=SS, 2=CS
+for et=1:2
+    figure(kymoFig(et)); clf; tiledlayout(2,2,'TileSpacing','compact','Padding','compact');
+    Kymo=KymoSum(:,:,:,et)./KymoN(:,:,:,et); Kymo(KymoN(:,:,:,et)==0)=NaN;   % mean kymograph per quadrant
+    finK=Kymo(isfinite(Kymo));
+    if isempty(finK), cax=[-1 1]; else, cax=[-1 1]*max(prctile(abs(finK),99), eps); end   % symmetric color scale
+    for q=1:4
+        nexttile;
+        imagesc(kymoT, kymoCtr, Kymo(:,:,q), cax); axis xy; hold on;
+        xline(0,'k:'); yline(0,'k:');                % t=0 (onset) & soma (distance 0)
+        title(sprintf('%s (n=%d)', qTitle{q}, nEvQuad(q,et)));
+        if q>=3, xlabel(sprintf('Time from %s onset (ms)', kymoName{et})); end
+        if mod(q,2)==1, ylabel('dendritic distance (\mum)'); end
+    end
+    colormap(turbo); cb=colorbar; cb.Label.String='\DeltaF/F / spike ht'; cb.Layout.Tile='east';
+    set_fontsize(10);
+    sgtitle(sprintf('[3e+] %s dendritic STA kymograph, binned 2x2 by (basal \\phi) x (distal \\phi) at onset', kymoName{et}));
+end
+
+%% [3g] Figure 310 - CS peak slow component as a function of theta phase
+% CS events only. For each CS, take the PEAK of the slow (subthreshold) depolarization in the
+% 0..150 ms window after the first spike (PeakSlow_all, /spike ht) and relate it to the pre-spike
+% theta phase. y = peak slow component of the DISTAL dendrite and the SOMA; x = theta phase,
+% shown against five phase references (basal / apical / soma / distal, and the distal-basal
+% phase difference). Peak and phase are matched per event (same onsets => same rows).
+figure(310); clf; tiledlayout(1,5,'TileSpacing','compact','Padding','compact');
+wrappi=@(x) mod(x+pi,2*pi)-pi; etCS=2;         % CS only
+PH=[]; PK=[];
+for f=foi
+    P=Phase_all{f,etCS}; K=PeakSlow_all{f,etCS};
+    if isempty(P) || isempty(K), continue; end
+    Pb=P(:,basalAx); if all(isnan(Pb)), Pb=P(:,somaAx); end          % soma proxy for the diff
+    PH=[PH; P(:,basalAx) P(:,apicalAx) P(:,somaAx) P(:,distalAx) wrappi(P(:,distalAx)-Pb)]; %#ok<AGROW>
+    PK=[PK; K(:,distalAx) K(:,somaAx)];        %#ok<AGROW>  distal, soma peak slow component
+end
+refName={'basal \phi','apical \phi','soma \phi','distal \phi','\phi_{distal}-\phi_{basal}'};
+phB=linspace(-pi,pi,11); phC=(phB(1:end-1)+phB(2:end))/2;      % 10 phase bins
+cmapDS=[0.85 0.3 0.1; 0 0 0];                                  % distal (red), soma (black)
+for r=1:5
+    nexttile; hold on; box off; hl=gobjects(1,2);
+    for j=1:2
+        [mu,se]=phase_tuning(PH(:,r), PK(:,j), phB);
+        hl(j)=errorbar_shade(phC, mu, se, cmapDS(j,:));
+    end
+    xline(0,'k:'); xlim([-pi pi]); set(gca,'xtick',[-pi 0 pi],'xticklabel',{'-\pi','0','\pi'});
+    xlabel(refName{r}); title(refName{r});
+    if r==1
+        ylabel('CS peak slow component (/spike ht, 0..150 ms)');
+        vv=isgraphics(hl); legend(hl(vv),{'distal','soma'},'Box','off','Location','best');
+    end
+end
+set_fontsize(9);
+sgtitle(sprintf('[3g] CS peak slow component (distal & soma, %d..%d ms) vs pre-spike theta phase', peakSlowWin(1), peakSlowWin(end)));
+
+%% [3f] Figure 305 - CS slow depolarization: soma-vs-dendrite timing & dV/dt vs bAP order  [Task 2]
+% (1) Cross-correlate the soma and distal SLOW (spike-removed, subthreshold)
+%     depolarization of each CS to measure their timing difference (lag of the
+%     xcorr peak). Positive lag => distal LAGS soma (i.e. soma leads distal).
+% (2) Relate the dendritic slow-depolarization rate (dV/dt of apical / distal)
+%     to the order of the fast somatic bAP within the CS burst.
+if ~exist('nTau_EV','var'), nTau_EV=[-200 500]; end
+OrthAxis=[1 0 0 0 0; 0 0 1 0 1; 0 0 0 0 1; 0 1 0 0 0]; % rows: basal, apical, distal, soma
+apicalAxis=2; distalAxis=3; somaAxis=4;
+tWin_ms=[-50 300]; maxLagCS=60;      % xcorr analysis window & half-window (ms)
+lagStepFine=0.05;                    % sub-ms lag resolution via spline interp (req 5)
+onsetCol=-nTau_EV(1)+1;              % column of the event onset in AlignedEvntall
+winCols=onsetCol+[tWin_ms(1):tWin_ms(2)];
+baseCols=1:20;                       % baseline = first 20 ms of the analysis window
+maxOrder=8; smoothMs=5; dVdtWin=2;   % soma-spike order cap; dV/dt smoothing & +-window (ms)
+maxSearch=0:200;                     % post-onset window (ms) to locate the peak distal dV/dt & V
+spkPre=1; spkPost=3; slowSm=5;       % distal SLOW build: blank spike frames [-spkPre..+spkPost], interp, movmean(slowSm)
+
+CSlag=nan(max(foi),1); CSlag_perEv=cell(max(foi),1);
+dVdt_distal=nan(max(foi),maxOrder);     dVdt_apical=nan(max(foi),maxOrder);       % at spike
+CSsomaGrand=[]; CSdistGrand=[];      % pooled (peak-normalized) mean CS waveforms for display
+% per-CS-event distal-dendrite peak timing (relative to first spike / CS onset)
+CSt_maxdVdt=[]; CSt_maxV=[]; CSt_rise=[]; CSdVdt_val=[]; CSV_val=[]; CSorder_at=[];
+% per-event feature records for the interactive browser (fig 3052)
+exWin=-50:250;                       % kymograph display window (ms rel. first spike)
+CSmeta=struct('f',{},'ev',{},'feat',{},'scalar',{},'dist',{},'somaSlow',{},'spk',{},'label',{});
+for f=foi
+    [nROI, nTime]=size(PCresult{f}.Subthreshold);
+    OrthAxis_vec=build_orthaxis_vec(OrthAxis, PCresult{f}.roisD_order, nROI);
+    if any(isnan(OrthAxis_vec([somaAxis distalAxis apicalAxis],1))), continue; end
+
+    % ---- (1) per-CS soma vs distal slow-component cross-correlation ----
+    A3 = AlignedEvntall{f,3};        % ROI x time x event, subthreshold (fast spikes removed)
+    A1 = AlignedEvntall{f,1};        % ROI x time x event, RAW (for the spike-excised slow build)
+    Et = EventTable(EventTable.Neuron==f,:);
+    csIdx = Et.LocalIdx(Et.EventClass=="CS" & Et.IsValid);
+    somaEv=[]; distEv=[]; lags_ev=[];
+    for ii=1:numel(csIdx)
+        slow = OrthAxis_vec * A3(:,:,csIdx(ii));      % 4 x time
+        s  = slow(somaAxis, winCols);  dd = slow(distalAxis, winCols);
+        s  = s  - mean(s(baseCols),'omitnan');
+        dd = dd - mean(dd(baseCols),'omitnan');
+        if all(isnan(s)) || all(isnan(dd)), continue; end
+        [cc,lg]=nanXCorr(s, dd, maxLagCS, true);
+        lagThis=subms_peaklag(cc, lg, lagStepFine);   % sub-ms soma->distal lag for THIS CS (req 5)
+        lags_ev(end+1,1)=lagThis;   %#ok<SAGROW>
+        somaEv=[somaEv; s]; distEv=[distEv; dd];        %#ok<AGROW>
+
+        % ---- peak distal dV/dt & V timing relative to CS onset (first spike) ----
+        % Build DISTAL and SOMA slow traces from the RAW compartments: blank frames
+        % [-spkPre..+spkPost] around every somatic spike, interpolate, then movmean(slowSm) --
+        % tracks the depolarization rise without the heavy subthreshold smoothing.
+        onF  = Et.Frame(Et.LocalIdx==csIdx(ii));
+        stev = SpikeTable(SpikeTable.Neuron==f & SpikeTable.EventLocalIdx==csIdx(ii),:);
+        nAl  = size(A1,2); spCols = onsetCol + (stev.Frame - onF)';   % somatic spike columns
+        bad  = false(1,nAl);
+        for sc = spCols(:)', bad(max(1,sc-spkPre):min(nAl,sc+spkPost))=true; end
+        rawD = OrthAxis_vec(distalAxis,:) * A1(:,:,csIdx(ii)); rawD(bad)=NaN;   % RAW distal
+        rawS = OrthAxis_vec(somaAxis,:)   * A1(:,:,csIdx(ii)); rawS(bad)=NaN;   % RAW soma
+        ddF = movmean(interpolateNaN(rawD), slowSm, 'omitnan');   % cleaned distal slow
+        sdF = movmean(interpolateNaN(rawS), slowSm, 'omitnan');   % cleaned soma slow
+        % restrict the peak search to WITHIN this CS: stop before the next somatic event onset
+        maxT = maxSearch(end); nextOn = min(Et.Frame(Et.IsValid & Et.Frame>onF));
+        if ~isempty(nextOn), maxT = min(maxT, (nextOn-onF)-1); end
+        srch = 0:max(0,maxT); sCols = onsetCol+srch;
+        keep = sCols>=2 & sCols<=nAl; sCols=sCols(keep); srch=srch(keep);
+        if numel(sCols)>10 && any(isfinite(ddF(sCols)))
+            base = mean(ddF(max(1,onsetCol-20):onsetCol-1),'omitnan');
+            baseS= mean(sdF(max(1,onsetCol-20):onsetCol-1),'omitnan');
+            Vseg = ddF(sCols)-base; dvseg = ddF(sCols)-ddF(sCols-1);   % V and dV/dt over search window
+            [~,iV]=max(Vseg); tVv=srch(iV);                            % peak distal V (within this CS)
+            [~,iR]=min(Vseg(1:iV)); tRise=srch(iR);                    % rise onset = trough before the peak
+            seg=iR:iV; [mdv,rel]=max(dvseg(seg)); iD=seg(rel); tDd=srch(iD);   % max dV/dt LEADING to the peak
+            ordAt = sum((stev.Frame-onF)>=0 & (stev.Frame-onF)<=tDd);  % # bAPs by the peak-dV/dt time
+            CSt_maxdVdt(end+1,1)=tDd; CSt_maxV(end+1,1)=tVv; CSt_rise(end+1,1)=tRise;   %#ok<AGROW>
+            CSdVdt_val(end+1,1)=mdv; CSV_val(end+1,1)=Vseg(iD); CSorder_at(end+1,1)=ordAt;   %#ok<AGROW>
+            % record this event for the interactive browser (fig 3052)
+            ec=onsetCol+exWin;
+            if all(ec>=1 & ec<=nAl)
+                spk   =spikes_in_window(PCresult{f}.SpikeClassVecMat, onF, exWin, nTime);   % SS/CS/BS/dSpike times
+                feat  =struct('riseOnset',tRise,'maxdVdt',tDd,'maxV',tVv);   % TIME markers (drawn on panels)
+                scalar=struct('riseOnset',tRise,'maxdVdt',tDd,'maxV',tVv,'lag',lagThis);   % scatter-axis scalars
+                CSmeta(end+1)=struct('f',f,'ev',csIdx(ii),'feat',feat,'scalar',scalar, ...
+                    'dist',ddF(ec)-base,'somaSlow',sdF(ec)-baseS,'spk',spk, ...
+                    'label',sprintf('f%d ev%d',f,csIdx(ii)));   %#ok<SAGROW>
+            end
+        end
+    end
+    CSlag_perEv{f}=lags_ev;
+    if size(somaEv,1)>=3
+        sM=mean(somaEv,1,'omitnan'); dM=mean(distEv,1,'omitnan');
+        [cc,lg]=nanXCorr(sM, dM, maxLagCS, true);
+        CSlag(f)=subms_peaklag(cc, lg, lagStepFine);           % sub-ms lag on mean CS waveform
+        if max(sM)>0 && max(dM)>0                        % peak-normalize for shape overlay
+            CSsomaGrand=[CSsomaGrand; sM./max(sM)];      %#ok<AGROW>
+            CSdistGrand=[CSdistGrand; dM./max(dM)];      %#ok<AGROW>
+        end
+    end
+
+    % ---- (2) dendritic slow dV/dt vs fast somatic bAP order within the CS ----
+    SubBA  = (PCresult{f}.Subthreshold' * OrthAxis_vec')';    % 4 x nTime slow components
+    distTr = movmean(SubBA(distalAxis,:), smoothMs, 'omitnan');
+    apicTr = movmean(SubBA(apicalAxis,:), smoothMs, 'omitnan');
+    dV_dist=[NaN diff(distTr)];  dV_apic=[NaN diff(apicTr)];  % dF/F per ms (fs=1000 Hz)
+    St = SpikeTable(SpikeTable.Neuron==f & SpikeTable.EventClass=="CS" & SpikeTable.IsValid,:);
+    for o=1:maxOrder
+        fr = St.Frame(St.SpikeOrder==o);
+        fr = fr(fr>dVdtWin & fr<=nTime-dVdtWin);
+        if isempty(fr), continue; end
+        % dV/dt at the somatic spike (+-dVdtWin ms)
+        dVdt_distal(f,o)=mean(arrayfun(@(x) mean(dV_dist(x+[-dVdtWin:dVdtWin]),'omitnan'), fr),'omitnan');
+        dVdt_apical(f,o)=mean(arrayfun(@(x) mean(dV_apic(x+[-dVdtWin:dVdtWin]),'omitnan'), fr),'omitnan');
+    end
+end
+
+% ---- figure ----
+figure(305); clf; tiledlayout(2,3,'TileSpacing','compact','Padding','compact');
+tAx=tWin_ms(1):tWin_ms(2);
+nexttile; hold on; box off;                              % (a) grand-avg CS slow soma vs distal
+errorbar_shade(tAx, mean(CSsomaGrand,1,'omitnan'), std(CSsomaGrand,0,1,'omitnan')./sqrt(max(1,size(CSsomaGrand,1))), [0 0 0]);
+errorbar_shade(tAx, mean(CSdistGrand,1,'omitnan'), std(CSdistGrand,0,1,'omitnan')./sqrt(max(1,size(CSdistGrand,1))), [0.85 0.3 0.1]);
+xline(0,'k:'); xlabel('Time from CS onset (ms)'); ylabel('Slow \DeltaF/F (peak-norm.)');
+legend({'Soma','Distal'},'Box','off','Location','southeast'); title('CS slow depolarization');
+nexttile; hold on; box off;                              % (b) soma-vs-distal lag: EACH event
+allLags=cell2mat(CSlag_perEv(foi));
+if ~isempty(allLags)
+    histogram(allLags, -maxLagCS:2:maxLagCS, 'FaceColor',[0.2 0.4 0.8],'EdgeColor','none','Normalization','probability');
+    xline(median(allLags,'omitnan'),'r-','LineWidth',1.5); xline(0,'k:');
+end
+xlabel('xcorr lag soma\rightarrowdistal (ms)'); ylabel('P(CS event)');
+title(sprintf('Each CS (n=%d); - = distal precedes soma (median %.1f)', numel(allLags), median(allLags,'omitnan')));
+nexttile; hold on; box off;                              % (c) dendritic dV/dt vs bAP order (@spike)
+ord=1:maxOrder; sem=@(M) std(M,0,1,'omitnan')./sqrt(max(1,sum(~isnan(M),1)));
+errorbar_shade(ord, mean(dVdt_distal(foi,:),1,'omitnan'), sem(dVdt_distal(foi,:)), [0.85 0.3 0.1]);
+errorbar_shade(ord, mean(dVdt_apical(foi,:),1,'omitnan'), sem(dVdt_apical(foi,:)), [0.2 0.5 0.2]);
+xlabel('Fast somatic bAP order within CS'); ylabel('Slow dV/dt (\DeltaF/F per ms)');
+legend({'Distal','Apical'},'Box','off','Location','best'); title('Dendritic dV/dt vs bAP order'); xlim([0.5 maxOrder+0.5]);
+nexttile; hold on; box off;                              % (d) timing of rise onset / peak dV/dt / peak V vs 1st spike
+tEdges=maxSearch(1):10:maxSearch(end);
+histogram(CSt_rise,    tEdges,'FaceColor',[0.2 0.6 0.2], 'EdgeColor','none','FaceAlpha',0.5,'Normalization','probability');
+histogram(CSt_maxdVdt, tEdges,'FaceColor',[0.85 0.3 0.1],'EdgeColor','none','FaceAlpha',0.5,'Normalization','probability');
+histogram(CSt_maxV,    tEdges,'FaceColor',[0.2 0.3 0.8], 'EdgeColor','none','FaceAlpha',0.5,'Normalization','probability');
+xlabel('Time from first spike (ms)'); ylabel('P(CS event)');
+legend({'rise onset','peak distal dV/dt','peak distal V'},'Box','off','Location','best'); title('Peak dendritic timing');
+nexttile; hold on; box off;                              % (e) at peak dV/dt: dV/dt(x) vs V(y), color=bAP order
+if ~isempty(CSdVdt_val)
+    scatter(CSdVdt_val, CSV_val, 14, CSorder_at, 'filled','MarkerFaceAlpha',0.6);
+    colormap(gca, turbo(256)); cb=colorbar; cb.Label.String='# bAPs by peak dV/dt';
+    if max(CSorder_at)>min(CSorder_at), clim([min(CSorder_at) max(CSorder_at)]); end
+end
+xlabel('peak distal dV/dt (\DeltaF/F per ms)'); ylabel('distal V at that time (\DeltaF/F)');
+title('Distal phase-plane at peak dV/dt');
+set_fontsize(11);
+sgtitle('[3f] CS soma-vs-dendrite timing (each event, sub-ms) & distal peak dV/dt / V vs first spike');
+
+%% [3f++] Figure 3052 - INTERACTIVE feature browser: click a point -> that event's raw kymograph + traces
+% LEFT: scatter, x = peak dV/dt time, y = soma->distal slow-component lag (ms; + = distal lags
+% soma). RIGHT (top->bottom): RAW dendritic kymograph (soma top -> distal bottom), the somatic
+% slow-component trace, and the dendritic slow-component trace -- time-aligned. Every panel marks
+% the TIME features (green=rise onset, red=peak dV/dt, blue=peak V) as dotted lines and all spikes
+% in the window (SS=magenta, CS=teal, BS=purple, dSpike=orange). Generalizable: add fields to
+% CSmeta(i).feat (time markers) and/or .scalar (scatter axes); pass any two scalar names as x/y.
+if isempty(CSmeta)
+    warning('fig 3052: CSmeta is empty; run the fig-305 loop first.');
+else
+    featColors=struct('riseOnset',[0.2 0.6 0.2], 'maxdVdt',[0.85 0.1 0.1], 'maxV',[0.1 0.3 0.85]);
+    spkColors =struct('SS',[1 0 1], 'CS',[0 0.7 0.7], 'BS',[0.5 0.2 0.75], 'dSpike',[0.9 0.6 0]);
+    getKymo=@(i) fetch_raw_kymo(CSmeta(i), AlignedEvntall, PCresult, onsetCol, exWin);
+    interactive_feature_kymo(3052, CSmeta, featColors, 'maxdVdt', 'lag', getKymo, exWin, spkColors, ...
+        '[3f++] Click a CS: kymo + soma/distal slow traces.  features green=rise red=dV/dt blue=V.  spikes SS=magenta CS=teal BS=purple dSpike=orange');
+end
+
+%% [3h] Figures 313 (pooled) & 314 (per neuron) - CS first-spike STA + spike-order timing
+% Somatic (black) and distal-dendrite (red) STA (soma/distal-class ROIs of NormalizedTrace_dirt,
+% /spike ht, pre-onset baseline-subtracted) aligned via get_STA to the FIRST spike of each complex
+% spike (SpikeOrder==1 within a CS), EXCLUDING CS onsets during blue. Overlaid (right y-axis) are the timing histograms
+% of the 1st, 2nd, 3rd ... somatic spikes within the CS relative to the first spike -- obtained by
+% aligning each per-order spike train with the same get_STA call -- each order a different colour.
+tWinSTA=-50:250; tauPre=50; tauPost=250; maxOrd=6; cmapOrd=turbo(maxOrd); binE=tWinSTA(1):1:tWinSTA(end);
+cSoma=[0 0 0]; cDist=[0.85 0.3 0.1];                                                 % soma / distal STA colours
+somaEvN=cell(1,numel(foi)); distEvN=cell(1,numel(foi)); ordCntN=cell(1,numel(foi)); nEvN=zeros(1,numel(foi));
+somaEvAll=[]; distEvAll=[]; ordCntAll=zeros(maxOrd,numel(tWinSTA)); nEvAll=0;         % pooled
+for i=1:numel(foi)
+    f=foi(i);
+    somaROI=ismember(PCresult{f}.roi_dClass,2);
+    distROI=ismember(PCresult{f}.roi_dClass,5);                                 % distal dendrite class
+    somaTr = mean(PCresult{f}.NormalizedTrace_dirt(somaROI,:),1,'omitnan') / PCresult{f}.SpikeHeight;
+    distTr = mean(PCresult{f}.NormalizedTrace_dirt(distROI,:),1,'omitnan') / PCresult{f}.SpikeHeight;
+    csSpk  = (PCresult{f}.SpikeMat(1,:)>0) & (PCresult{f}.CStrace>0);            % somatic spikes in a CS
+    trig   = csSpk & (PCresult{f}.SpikeOrder==1) & ~(PCresult{f}.BlueStim>0);    % CS first spikes, no blue
+    ordCntN{i}=zeros(maxOrd,numel(tWinSTA));
+    if ~any(somaROI) || ~any(trig), continue; end
+    [~, evSoma] = get_STA(somaTr, trig, tauPre, tauPost);        % 1 x nEv x W soma windows
+    evSoma = squeeze(evSoma); if size(evSoma,2)~=numel(tWinSTA), evSoma=evSoma(:)'; end   % nEv x W
+    evSoma = evSoma - mean(evSoma(:, tWinSTA<-5), 2, 'omitnan');  % per-event pre-onset baseline
+    somaEvN{i}=evSoma; nEvN(i)=size(evSoma,1);
+    if any(distROI)                                              % distal dendrite STA (same triggers)
+        [~, evDist] = get_STA(distTr, trig, tauPre, tauPost);
+        evDist = squeeze(evDist); if size(evDist,2)~=numel(tWinSTA), evDist=evDist(:)'; end
+        evDist = evDist - mean(evDist(:, tWinSTA<-5), 2, 'omitnan');
+        distEvN{i}=evDist; distEvAll=[distEvAll; evDist];        %#ok<AGROW>
+    end
+    for o=1:maxOrd                                                % per-order spike-train alignment
+        [~, evO] = get_STA(double(csSpk & (PCresult{f}.SpikeOrder==o)), trig, tauPre, tauPost);
+        if ~isempty(evO), ordCntN{i}(o,:)=reshape(sum(evO,2),1,[]); end   % spike counts per ms offset
+    end
+    somaEvAll=[somaEvAll; evSoma]; ordCntAll=ordCntAll+ordCntN{i}; nEvAll=nEvAll+nEvN(i);   %#ok<AGROW>
+end
+% ---- pooled across neurons (fig 313) ----
+figure(313); clf;
+yyaxis left; hold on; set(gca,'YColor','k'); hSTA=gobjects(1,2);
+if ~isempty(somaEvAll)
+    hSTA(1)=errorbar_shade(tWinSTA, mean(somaEvAll,1,'omitnan'), std(somaEvAll,0,1,'omitnan')./sqrt(max(1,size(somaEvAll,1))), cSoma);
+end
+if ~isempty(distEvAll)
+    hSTA(2)=errorbar_shade(tWinSTA, mean(distEvAll,1,'omitnan'), std(distEvAll,0,1,'omitnan')./sqrt(max(1,size(distEvAll,1))), cDist);
+end
+ylabel('STA (/spike ht)'); xline(0,'k:');
+yyaxis right; hold on; set(gca,'YColor',[0.3 0.3 0.3]); hh=gobjects(1,maxOrd);
+for o=1:maxOrd
+    ts=repelem(tWinSTA, ordCntAll(o,:)); if isempty(ts), continue; end   % reconstruct spike-offset times
+    hh(o)=histogram(ts, binE, 'DisplayStyle','stairs', 'EdgeColor',cmapOrd(o,:), 'LineWidth',1.3);
+end
+ylabel('# spikes'); xlim([tWinSTA(1) tWinSTA(end)]);
+hLeg=[hSTA hh]; lblLeg=[{'soma STA','distal STA'}, arrayfun(@(o)sprintf('spike %d',o),1:maxOrd,'UniformOutput',false)];
+vv=isgraphics(hLeg); legend(hLeg(vv), lblLeg(vv), 'Box','off','Location','northeast');
+xlabel('Time from first CS spike (ms)'); box off;
+title(sprintf('CS first-spike STA (soma & distal) + spike-order timing (pooled: %d CS, %d neurons, no blue)', nEvAll, numel(foi)));
+set_fontsize(11);
+
+% ---- per neuron (fig 314) ----
+figure(314); clf; nN=numel(foi); nc=ceil(sqrt(nN)); nr=ceil(nN/nc);
+tiledlayout(nr,nc,'TileSpacing','compact','Padding','compact');
+for i=1:nN
+    nexttile; yyaxis left; hold on; set(gca,'YColor','k'); hSTA=gobjects(1,2);
+    if ~isempty(somaEvN{i})
+        hSTA(1)=errorbar_shade(tWinSTA, mean(somaEvN{i},1,'omitnan'), std(somaEvN{i},0,1,'omitnan')./sqrt(max(1,size(somaEvN{i},1))), cSoma);
+    end
+    if ~isempty(distEvN{i})
+        hSTA(2)=errorbar_shade(tWinSTA, mean(distEvN{i},1,'omitnan'), std(distEvN{i},0,1,'omitnan')./sqrt(max(1,size(distEvN{i},1))), cDist);
+    end
+    if mod(i-1,nc)==0, ylabel('STA'); end
+    xline(0,'k:');
+    yyaxis right; hold on; set(gca,'YColor',[0.3 0.3 0.3]); hh=gobjects(1,maxOrd);
+    for o=1:maxOrd
+        ts=repelem(tWinSTA, ordCntN{i}(o,:)); if isempty(ts), continue; end
+        hh(o)=histogram(ts, binE, 'DisplayStyle','stairs', 'EdgeColor',cmapOrd(o,:), 'LineWidth',1);
+    end
+    xlim([tWinSTA(1) tWinSTA(end)]); box off;
+    title(sprintf('f%d (n=%d CS)',foi(i),nEvN(i)),'FontSize',8);
+    if i>nN-nc, xlabel('t from 1st CS spike (ms)'); end
+    if i==1
+        hLeg=[hSTA hh]; lblLeg=[{'soma','distal'}, arrayfun(@(o)sprintf('spk %d',o),1:maxOrd,'UniformOutput',false)];
+        vv=isgraphics(hLeg); if any(vv), legend(hLeg(vv), lblLeg(vv), 'Box','off','FontSize',6,'Location','northeast'); end
+    end
+end
+sgtitle('[3h] CS first-spike STA (soma black, distal red) + spike-order timing, per neuron (no blue)');
+set_fontsize(8);
+
 %% ===== Local helper functions (shared by the cells above) =====
+
+function K = fetch_raw_kymo(m, AlignedEvntall, PCresult, onsetCol, exWin)
+% On-demand RAW dendritic kymograph for one event record m (fields .f, .ev, .dist).
+% Returns K.img (dist x time), K.y (dendritic distance), K.t (ms rel. onset), K.overlay (a
+% 1-D trace over K.t to draw on top, e.g. the detector's slow trace). Kept light so the
+% interactive browser can fetch per click instead of caching every event's image.
+ec = onsetCol + exWin;
+img = AlignedEvntall{m.f,1}(:, ec, m.ev);                 % RAW aligned window (nROI x nT)
+img = img - mean(img(:, exWin>=-40 & exWin<0), 2, 'omitnan');   % per-ROI baseline
+K = struct('img', img, 'y', PCresult{m.f}.dendaxis(:), 't', exWin, 'overlay', m.dist(:)');
+end
+
+function interactive_feature_kymo(figNum, EV, featColors, xName, yName, getKymo, tOv, spkColors, ttl)
+% Generalizable interactive event browser.
+%   LEFT (tall): scatter of scalar xName vs yName, one point per event in EV(i).scalar.
+%   RIGHT top->bottom: RAW kymograph via getKymo(i) (soma top -> distal bottom); the somatic
+%   slow trace EV(i).somaSlow; the dendritic slow trace EV(i).dist -- all sampled on tOv and
+%   sharing the time axis. Every panel marks each field of EV(i).feat as a dotted line coloured
+%   by featColors, and the spikes in EV(i).spk (struct of per-class time vectors) coloured by
+%   spkColors (somatic classes on the soma trace, dSpike on the distal trace, all on the kymo).
+% To visualize other features: add fields to EV.feat / EV.scalar and pass their names.
+nE = numel(EV); if nE==0, return; end
+X = arrayfun(@(e) e.scalar.(xName), EV);
+Y = arrayfun(@(e) e.scalar.(yName), EV);
+fnames  = fieldnames(EV(1).feat);              % time-marker features (drawn on every panel)
+somaCls = {'SS','CS','BS'};                    % somatic classes -> soma trace; dSpike -> distal
+fig = figure(figNum); clf(fig); set(fig,'Color','w');
+ax1 = subplot(3,2,[1 3 5]); hold(ax1,'on'); box(ax1,'on');
+scatter(ax1, X, Y, 18, 'filled', 'MarkerFaceAlpha',0.45, 'MarkerFaceColor',[0.35 0.35 0.85], ...
+    'HitTest','off','PickableParts','none');
+xline(0,'k:'); yline(0,'k:');                   % reference lines (0 = first spike / zero lag)
+hSel = plot(ax1, NaN, NaN, 'ko', 'MarkerSize',11, 'LineWidth',1.8);            % selected-point ring
+xlabel(ax1, sprintf('%s (ms)', xName)); ylabel(ax1, sprintf('%s (ms)', yName));
+title(ax1, sprintf('click a point  (n=%d events)', nE));
+ax1.ButtonDownFcn = @onClick;
+ax2 = subplot(3,2,2); ax3 = subplot(3,2,4); ax4 = subplot(3,2,6);
+sgtitle(ttl);
+showEvent(1);                                             % show one by default
+    function onClick(src, ~)
+        cp = src.CurrentPoint(1,1:2);
+        rx = max(max(X)-min(X),eps); ry = max(max(Y)-min(Y),eps);   % normalize so "nearest" is visual
+        [~, sel] = min(((X-cp(1))/rx).^2 + ((Y-cp(2))/ry).^2);
+        showEvent(sel);
+    end
+    function showEvent(idx)
+        E = EV(idx); K = getKymo(idx);
+        % --- kymograph (soma top -> distal bottom) ---
+        cla(ax2); imagesc(ax2, K.t, K.y, K.img); set(ax2,'YDir','reverse'); hold(ax2,'on');
+        vv = K.img(isfinite(K.img));
+        if ~isempty(vv), c = max(abs(prctile(vv,[2 98]))); if c>0, clim(ax2,[-1 1]*c); end, end
+        colormap(ax2, turbo);
+        mark_panel(ax2, E, fnames, featColors, spkColors, fieldnames(spkColors), true);
+        ylabel(ax2, 'dist. from soma (\mum)'); title(ax2, E.label);
+        % --- somatic slow-component trace ---
+        cla(ax3); hold(ax3,'on'); plot(ax3, tOv, E.somaSlow, 'k-', 'LineWidth',1.2);
+        mark_panel(ax3, E, fnames, featColors, spkColors, somaCls, false);
+        ylabel(ax3, 'soma slow (\DeltaF/F)');
+        % --- dendritic slow-component trace ---
+        cla(ax4); hold(ax4,'on'); plot(ax4, tOv, E.dist, '-', 'Color',[0.85 0.3 0.1], 'LineWidth',1.2);
+        mark_panel(ax4, E, fnames, featColors, spkColors, {'dSpike'}, false);
+        ylabel(ax4, 'distal slow (\DeltaF/F)'); xlabel(ax4, 't from 1st spike (ms)');
+        linkaxes([ax2 ax3 ax4], 'x'); xlim(ax4, [tOv(1) tOv(end)]);
+        set(hSel, 'XData', X(idx), 'YData', Y(idx));       % ring the selected point
+    end
+end
+
+function mark_panel(ax, E, fnames, featColors, spkColors, spkTypes, topTicks)
+% Overlay the first-spike line, the feature dotted lines, and the spike markers on one panel.
+yl = ylim(ax); if diff(yl)<=0, yl=[-1 1]; end
+plot(ax, [0 0], yl, 'k:');                                  % first spike (t=0)
+for q = 1:numel(fnames)                                     % feature time markers
+    fn = fnames{q}; tv = E.feat.(fn);
+    if isfield(featColors,fn), col = featColors.(fn); else, col = [0.4 0.4 0.4]; end
+    plot(ax, [tv tv], yl, ':', 'Color',col, 'LineWidth',1.8);
+end
+for q = 1:numel(spkTypes)                                   % spikes in the window
+    tp = spkTypes{q}; if ~isfield(E.spk,tp) || isempty(E.spk.(tp)), continue; end
+    col = spkColors.(tp); ts = E.spk.(tp);
+    if topTicks                                             % short ticks along the top edge (kymo)
+        for tt = ts(:)', plot(ax, [tt tt], yl(1)+[0 0.06]*(yl(2)-yl(1)), '-', 'Color',col, 'LineWidth',1.5); end
+    else                                                    % full-height thin lines (trace panels)
+        for tt = ts(:)', plot(ax, [tt tt], yl, '-', 'Color',col, 'LineWidth',0.8); end
+    end
+end
+ylim(ax, yl);
+end
+
+function spk = spikes_in_window(scv, onF, tRel, nTime)
+% Times (rel. to onset, ms) of each spike class within a display window.
+% scv rows: 1 SS, 2 CS, 3 BS, 4 dSpike (PCresult.SpikeClassVecMat). onF = onset frame.
+names = {'SS','CS','BS','dSpike'}; spk = struct();
+fr = onF + tRel; ok = fr>=1 & fr<=nTime;
+for c = 1:numel(names)
+    hit = false(1, numel(tRel));
+    if size(scv,1) >= c, hit(ok) = scv(c, fr(ok)) > 0; end
+    spk.(names{c}) = tRel(hit);
+end
+end
+
+function [mu, se] = phase_tuning(x, y, edges)
+% Mean +- s.e.m. of y within bins of x (edges). Bins with <3 finite points -> NaN.
+b = discretize(x, edges); nb = numel(edges)-1; mu = nan(1,nb); se = nan(1,nb);
+for k = 1:nb
+    yy = y(b==k & isfinite(y));
+    if numel(yy) >= 3, mu(k) = mean(yy); se(k) = std(yy)/sqrt(numel(yy)); end
+end
+end
+
+function lag = subms_peaklag(cc, lg, step)
+% Sub-millisecond peak lag of a cross-correlation: spline-interpolate cc (given
+% at integer-sample lags lg) onto a fine lag grid and return the argmax lag.
+if nargin<3 || isempty(step), step = 0.05; end
+cc = cc(:)'; lg = lg(:)';
+good = isfinite(cc);
+if nnz(good) < 4, [~,mi]=max(cc); lag = lg(mi); return; end
+lagFine = lg(1):step:lg(end);
+ccFine  = interp1(lg(good), cc(good), lagFine, 'spline');
+[~,mi]  = max(ccFine);
+lag = lagFine(mi);
+end
+
+function OrthAxis_vec = build_orthaxis_vec(OrthAxis, roisD_order_f, nROI)
+% Map the dendrite-class weighting OrthAxis (rows = projection axes, columns =
+% dClass 1..5) onto per-ROI weights, matching the inline construction used by
+% the CS-vs-SS cells: each axis distributes its per-class weight equally over the
+% ROIs of that class; a requested-but-absent class marks the whole axis NaN.
+roisD_order_ind = cellfun(@find, roisD_order_f, 'UniformOutput', false);
+OrthAxis_vec = zeros(size(OrthAxis,1), nROI);
+for d = 1:5
+    dclassinds = cell2mat(roisD_order_ind(d,:)');
+    for v = 1:size(OrthAxis,1)
+        if abs(OrthAxis(v,d))>0 && isempty(dclassinds)
+            OrthAxis_vec(v,:) = NaN;
+        else
+            suborthvec = ind2vec(nROI, dclassinds, OrthAxis(v,d)/length(dclassinds));
+            OrthAxis_vec(v,abs(suborthvec)>0) = suborthvec(abs(suborthvec)>0);
+        end
+    end
+end
+end
 
 function showScaleScatter_rot(vals, str, ftprnt, cmapName, cmapRange, Rv)
 % Like showScaleScatter, but ROI membership/coloring is computed in the ORIGINAL
@@ -2840,6 +4022,7 @@ spikeClassNames = ["SS" "CS" "BS" "dSP"];   % PCresult.SpikeClassVecMat row orde
 eventClassNames = ["SS" "CS" "BS"];         % EventPropsMat.Spike_type
 
 Scell = cell(numel(foi),1); Ecell = cell(numel(foi),1); Ncell = cell(numel(foi),1);
+Dcell = cell(numel(foi),1);   % dSpike (dendritic-spike) event rows, appended to EventTable
 spikeOffset = 0; eventOffset = 0;
 
 for k = 1:numel(foi)
@@ -3023,16 +4206,63 @@ for k = 1:numel(foi)
     N.RecDuration_s = size(VR,2)/1000;
     N.dendaxis = {dax'};  N.roi_dClass = {dc'};
 
+    % ---- dSpike (dendritic-spike, class 4) events for this neuron ----
+    % dSpikes are NOT in AlignedEvntall, so LocalIdx / bAP / AUC fields are NaN; only
+    % Frame, class, validity, ISI and behavioural placeholders are filled. Built from a
+    % 1-row template of E so the schema matches exactly for vertcat.
+    dsp = PCresult{f}.SpikeClassVecMat(4,:) > 0;
+    dspFrames = find(diff([0 dsp])==1)';        % rising edges = dSpike onsets (column)
+    if ~isempty(dspFrames) && height(E)>=1      % need >=1 somatic event as a schema template
+        nds = numel(dspFrames);
+        Dtab = repmat(E(1,:), nds, 1);          % template row -> exact schema
+        vn = E.Properties.VariableNames;
+        for kk = 1:numel(vn)                    % clear all inherited values to NaN/false/[]
+            col = E.(vn{kk});
+            if     isnumeric(col), Dtab.(vn{kk}) = nan(nds, size(col,2));
+            elseif islogical(col), Dtab.(vn{kk}) = false(nds,1);
+            elseif iscell(col),    Dtab.(vn{kk}) = repmat({[]}, nds,1);
+            end
+        end
+        blue = PCresult{f}.BlueStim;
+        Dtab.EventUID   = nan(nds,1);           % renumbered after assembly
+        Dtab.Neuron     = repmat(f,nds,1);
+        Dtab.LocalIdx   = nan(nds,1);           % no AlignedEvntall slice for dSpikes
+        Dtab.Frame      = dspFrames;
+        Dtab.Time_s     = dspFrames/1000;
+        Dtab.EventClass = repmat(categorical("dSpike"), nds, 1);
+        Dtab.Length     = ones(nds,1);
+        Dtab.Nspike     = ones(nds,1);
+        Dtab.IsBlue     = blue(dspFrames)' > 0;    % blue is a row vector -> transpose to nds x 1
+        Dtab.IsNA       = false(nds,1);
+        Dtab.IsPF       = false(nds,1);
+        Dtab.IsRun      = false(nds,1);
+        Dtab.IsValid    = ~Dtab.IsBlue;
+        Dtab.ISI        = [NaN; diff(dspFrames)];
+        Dtab.logISI     = log10(Dtab.ISI);
+        Dcell{k} = Dtab;
+    end
+
     Scell{k} = S; Ecell{k} = E; Ncell{k} = N;
     spikeOffset = spikeOffset + ns;  eventOffset = eventOffset + nev;
 end
 
 SpikeTable  = sortrows(vertcat(Scell{:}), {'Neuron','Frame'});
-EventTable  = sortrows(vertcat(Ecell{:}), {'Neuron','Frame'});
+Dall = Dcell(~cellfun(@isempty, Dcell));
+if isempty(Dall)
+    EventTable = sortrows(vertcat(Ecell{:}), {'Neuron','Frame'});
+else
+    EventTable = sortrows([vertcat(Ecell{:}); vertcat(Dall{:})], {'Neuron','Frame'});
+end
 NeuronTable = vertcat(Ncell{:});
+% assign fresh unique EventUIDs to the appended dSpike rows (above the somatic ones)
+isD = EventTable.EventClass=="dSpike";
+if any(isD)
+    base = max(EventTable.EventUID(~isD)); if isempty(base)||isnan(base), base=0; end
+    EventTable.EventUID(isD) = base + (1:sum(isD))';
+end
 
 SpikeTable.Properties.Description = 'One row per somatic spike (bAP), all neurons, sorted by neuron then frame.';
-EventTable.Properties.Description = 'One row per spike event (SS/CS/BS), all neurons, sorted by neuron then frame.';
+EventTable.Properties.Description = 'One row per spike event (SS/CS/BS/dSpike), all neurons, sorted by neuron then frame.';
 NeuronTable.Properties.Description = 'One row per neuron: dendritic axis, ROI dendrite classes, geometry.';
 SpikeTable.Properties.VariableUnits = table_units(SpikeTable);
 EventTable.Properties.VariableUnits = table_units(EventTable);
@@ -3077,6 +4307,7 @@ corrTXnPreSub = NaN(max(foi),4);
 corrTXnPreSub_timelapse = NaN(max(foi),4,length(t2avg)-1);
 for f = foi
     Et = EventTable(EventTable.Neuron==f,:);
+    Et = Et(~isnan(Et.LocalIdx),:);            % keep only AlignedEvntall-backed events (drop dSpike)
     apAUC = Et.AUCapical_frst_norm;
     validInd = ~isnan(apAUC) & ~isnan(Et.PreSub_Distal);
     [corrTXnPreSub(f,1), corrTXnPreSub(f,3)] = corr(apAUC(validInd), Et.PreSub_Distal(validInd), 'Type', 'Pearson');
