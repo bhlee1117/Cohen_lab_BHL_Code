@@ -51,9 +51,19 @@ elseif size(faceColor,1) ~= numGroups
 end
 
 % --- Plot ---
+% Groups with no finite data are skipped (Violin/ksdensity errors on empty
+% input), but their x position is still reserved so group i always sits at
+% x==i and stays aligned with faceColor / XTickLabel.
 hold on;
+emptyGroups = [];
 for i = 1:numGroups
-    Violin({Xcell{i}}, i, ...
+    vi = Xcell{i}(:);
+    vi = vi(~isnan(vi));
+    if isempty(vi)
+        emptyGroups(end+1) = i;   %#ok<AGROW>
+        continue
+    end
+    Violin({vi}, i, ...
         'ViolinColor', {faceColor(i,:)}, ...
         'EdgeColor', [0.3 0.3 0.3], ...
         'ShowMean', false, ...
@@ -62,6 +72,10 @@ for i = 1:numGroups
         'ShowMedian', true, ...
         'ShowData', true, ...
         'HalfViolin', 'full');
+end
+if ~isempty(emptyGroups)
+    warning('Violin_wPoints: group(s) %s contain no finite data - not plotted.', ...
+        mat2str(emptyGroups));
 end
 % --- Connect paired points ---
 if isPaired
@@ -92,7 +106,11 @@ for i = 1:numGroups
         if isPaired
             pairedData = [data(:,i), data(:,j)];
             mask = all(~isnan(pairedData), 2);
-            [~, p] = ttest(pairedData(mask,1), pairedData(mask,2));
+            if sum(mask) > 1
+                [~, p] = ttest(pairedData(mask,1), pairedData(mask,2));
+            else
+                p = NaN;
+            end
         else
             xi = Xcell{i}(~isnan(Xcell{i}));
             xj = Xcell{j}(~isnan(Xcell{j}));

@@ -364,8 +364,53 @@ else
     save(fullfile(save_figto,'bAPdecay_fit.mat'),'RobustdFF_decay','STAdecay_cat','-v7.3');
 end
 %%
-figure(27); clf; tiledlayout(5,3);
-nexttile(10,[2 2]);
+bapLcdat=cellfun(@(x) x(2),RobustdFF_decay.c_fit);
+fprintf('Fitted L_c, %2.0f ± %2.0f, mean ± std \n',mean(bapLcdat),std(bapLcdat));
+
+bin_edges=[-20:40:200 260 320 400 460 600];
+tvec=[-win_pre:win_post];
+
+% Collect normalized Robust dF/F kymographs (across all cells) and their distances
+allKymo=[]; allDist=[];
+for i=1:size(RobustdFF_decay,1)
+    f=foi(i);
+    STA=STAdecay_cat{f}.STA{1};
+    RobustF0=STAdecay_cat{f}.RobustF0{1};
+    dendax=STAdecay_cat{f}.dendaxis{1};
+    Peri=abs(dendax)<50;
+    maxSTA_f=max(STA(:,win_pre+[-2:4]),[],2);
+    normFactor_Rob=mean(maxSTA_f(Peri)./RobustF0(Peri));
+    kymo=STA./RobustF0./normFactor_Rob;                 % normalized dF/F kymograph
+    norm2show=median(maxSTA_f(Peri)./RobustF0(Peri)./normFactor_Rob); % per-cell perisomatic normalization (matches decay plot)
+    allKymo=[allKymo; kymo./norm2show];
+    allDist=[allDist; abs(dendax(:))];
+end
+
+% Average kymographs within distance bins
+nBins=length(bin_edges)-1;
+kymoAvg=nan(nBins,length(tvec)); centers=nan(nBins,1);
+for b=1:nBins
+    sel=allDist>=bin_edges(b) & allDist<bin_edges(b+1);
+    if any(sel)
+        kymoAvg(b,:)=mean(allKymo(sel,:),1,'omitnan');
+        centers(b)=(bin_edges(b)+bin_edges(b+1))/2;
+    end
+end
+validBins=~isnan(centers); kymoAvg=kymoAvg(validBins,:); centers=centers(validBins);
+
+figure(27); clf;
+tiledlayout(3,1); cax=[-0.1 1.2];
+
+% Top: averaged kymograph
+ax_kymo=nexttile([2 1]);
+imagesc(tvec,1:length(centers),kymoAvg,cax);
+set(gca,'YTick',[1:2:length(centers)],'YTickLabel',num2str(round(centers([1:2:length(centers)]))));
+ylabel('Distance from soma (µm)');
+colormap(turbo); cb=colorbar; cb.Label.String='Normalized amplitude';
+xlim([-50 30]);
+title(sprintf('Average across neurons \n(n = %d neurons)',size(RobustdFF_decay,1)))
+% Bottom: population bAP amplitude decay
+ax_decay=nexttile;
 shade2show=[];
 for f=1:size(RobustdFF_decay,1)
     [dax, dsort]=sort(RobustdFF_decay.dax{f});
@@ -378,17 +423,14 @@ for f=1:size(RobustdFF_decay,1)
 end
 % dat2bin=cellfun(@(x,y) [x(:,1) y(:,1)],RobustdFF_decay.dax,RobustdFF_decay.maxSTA,'UniformOutput',0)';
 % dat2exp=cell2mat(cellfun(@(x) [x(2)],RobustdFF_decay.c_fit,'UniformOutput',0))';
-STAdecay_bin=binning_data(shade2show,[-20:40:200 260 320 400 460 600]);
+STAdecay_bin=binning_data(shade2show,bin_edges);
 errorbar_shade(STAdecay_bin.centers,STAdecay_bin.mean,STAdecay_bin.sem,[1 0 0]);
 xlim([0 500]); ylim([0 1.3]);
-xlabel('Distance from soma (µm)'); ylabel('Normalized amplitude');
+xlabel('Distance from soma (µm)'); ylabel(sprintf('Normalized \namplitude'));
 set(gca,'xtick',[0 500]);
-nexttile(12,[2 1]);
-Boxplot_wPoints2(dat2exp',[0.4 0.4 0.4]);
-ylim([0 500]); box off; ylabel('Decay length (µm)');
-set(gca,'xtick',[],'linewidth',1);
-set_font('Arial'); set_fontsize(18); set_figsize(128,112);
+set_font('Arial'); set_fontsize(15);
 
+%fprintf('\\rmFitted \\itL_c\\rm = %2.0f \\pm %2.0f µm (mean \\pm std)',mean(bapLcdat),std(bapLcdat));
 %% Plot and compare different methods
 omitROI=[6 7 20];
 f2show=23;

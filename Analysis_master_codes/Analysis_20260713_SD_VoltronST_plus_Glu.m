@@ -29,14 +29,14 @@ for gi = 1:numel(gshadow)
     end
 end
 
-[~, ~, raw] = xlsread('/Volumes/cohen_lab/Lab/Labmembers/Byung Hun Lee/Data/Prism_V2+Glu_Data_Arrangement.xlsx', 'Sheet1', 'C5:AA31');
+[~, ~, raw] = xlsread('/Volumes/cohen_lab/Lab/Labmembers/Byung Hun Lee/Data/Prism_V2+Glu_Data_Arrangement.xlsx', 'Sheet1', 'C5:AA45');
 load('/Volumes/BHL18TB_D2/20260203_SD_V2+iGluSNFR4/25X_transformationMatrix.mat');   % tformReg
 fpath           = raw(:,1)';
 V2moviemaxTime  = 15000;   % voltage movie chunk length (frames)
 GlumoviemaxTime = 5000;    % glutamate movie chunk length (frames)
 o_laser         = 200001;  % 607/488 modulation onset (DAQ sample index, ~2 s after acq start)
 mod488          = 200001;
-foi             = [14:19];   % files of interest
+foi             = [20:29];   % files of interest
 set(0,'DefaultFigureWindowStyle','docked')
 
 %% Section 1a : Voltage — timing setup + reference-chunk ROI (clicky)
@@ -44,7 +44,7 @@ set(0,'DefaultFigureWindowStyle','docked')
 %  builds the rough soma trace across all chunks and finds spikes; Section 1c builds
 %  a spike-triggered footprint (pooled over all chunks) and projects it back.
 %  Per-chunk residual movies come from local function loadVoltChunk (end of file).
-for f=[14:19]
+for f=foi
 refSeg = 1;     % chunk to draw ROIs on
 fprintf('=== Voltage (Voltron-ST) file #%2.0f : %s\n', f, fpath{f});
 Result = struct();
@@ -98,14 +98,21 @@ end
 
 staTau   = -20:20;    % frames averaged around each spike to form the footprint
 dilatePx = 5;       % px dilation of each ROI bounding its footprint
-[H,W]    = size(Result.ref_im);
 
-for f=[16]
+for f=[29] %26:29
 load(fullfile(fpath{f},'VoltResult.mat'));
 load(fullfile(fpath{f}, 'output_data.mat'));   % Device_Data
 
 nROI = numel(Result.ROIpoly);
 sz       = double(Device_Data{3}.ROI([2 4]));     % [nCol nRow] orange cam
+% Frame size of THIS file (loadVoltChunk returns sz(2) x sz(1) x nT). Must be
+% re-derived per file — the cameras' ROI differs between recordings.
+H = sz(2); W = sz(1);
+if ~isequal(size(Result.ref_im), [H W])
+    error(['File #%d: ref_im is %dx%d but the movie is %dx%d. ' ...
+           'Re-run Section 1a for this file (ROIs were drawn on a different frame size).'], ...
+          f, size(Result.ref_im,1), size(Result.ref_im,2), H, W);
+end
 readFrames  = diff(Result.VmovTimesegments);
 nSeg        = length(Result.VmovTimesegments)-1;
 rough_tr  = [];
@@ -122,11 +129,14 @@ end
 
 % z-score (high-pass) and detect spikes per ROI
 tr_hi = rough_tr - movmedian(rough_tr, 30, 2);
+tr_hi(:,500000:end)=0;
 tr_z  = tr_hi ./ get_threshold(tr_hi, 1);
 sp=[];
 for n=1:size(tr_z,1)
-[spInd]=interactive_spike_finder(tr_z(n,:));
-sp(n,:)=ind2vec(size(tr_hi,2),spInd,1);
+% [spInd]=interactive_spike_finder(tr_z(n,:));
+% sp(n,:)=ind2vec(size(tr_hi,2),spInd,1);
+spInd=find_spike_bh(tr_z(n,:),4.2,1.5);
+sp(n,:)=spInd;
 end
 sp(:,round(end*0.8):end)=0;
 Result.spike_rough = sp;
@@ -135,7 +145,7 @@ fprintf('  spikes per ROI: %s\n', mat2str(sum(sp,2)'));
 
 % quick look
 figure(3*f-1); clf;
-show_traces_spikes(rescale2(rough_tr(:,1:580000),2),sp(:,1:580000),sum(sp(:,1:580000),1));
+show_traces_spikes(rescale2(rough_tr,2),sp,sum(sp,1));
 drawnow;
 
 % Section 1c : Voltage — spike-triggered footprint (pooled) + projection + save
@@ -198,16 +208,37 @@ end
 Result.F0      = F0_all;
 Result.traces           = T_all;
 
-% ---- Diagnostics + save ----
+% ---- Save first, then diagnostics ----
+% The .mat is the expensive product of this loop; write it before any figure
+% export so a graphics failure cannot discard a full extraction.
+save(fullfile(fpath{f}, 'Volt_Result.mat'), 'Result', '-v7.3');
+fprintf('Saved Volt_Result.mat to %s\n', fpath{f});
+
 figure(2*f); clf; tiledlayout(2,2);
 ax1 = nexttile([1 1]); show_footprnt_contour(Result.ftprnt, Result.ref_im); colormap(ax1,gray(256));
 nexttile([1 1]); imshow2(im_merge(Result.ftprnt, lines(size(Result.ftprnt,3)))*10, []);
-nexttile(3,[1 2]); plot(rescale2(Result.traces(:,1:58000),2)' + (1:size(Result.traces,1)));
+nShow = min(size(Result.traces,2), 58000);
+nexttile(3,[1 2]); plot(rescale2(Result.traces(:,1:nShow),2)' + (1:size(Result.traces,1)));
 sgtitle(fpath{f}, 'Interpreter','none'); drawnow;
-saveas(gcf, fullfile(fpath{f}, 'Volt_extraction_result.fig'));
-saveas(gcf, fullfile(fpath{f}, 'Volt_extraction_result.png'), 'png');
-save(fullfile(fpath{f}, 'Volt_Result.mat'), 'Result', '-v7.3');
-fprintf('Saved Volt_Result.mat to %s\n', fpath{f});
+savefig(gcf, fullfile(fpath{f}, 'Volt_extraction_result.fig'));
+
+% PNG export. saveas/print can die inside alternatePrintPath (the hardware-OpenGL
+% print path); exportgraphics, a vector print and getframe each use a different
+% path, so try them in turn and never let a screenshot abort the file loop.
+pngfile = fullfile(fpath{f}, 'Volt_extraction_result.png');
+try
+    exportgraphics(gcf, pngfile, 'Resolution', 150);
+catch
+    try
+        print(gcf, pngfile, '-dpng', '-r150', '-painters');
+    catch
+        try
+            imwrite(frame2im(getframe(gcf)), pngfile);
+        catch ME
+            warning('PNG export failed for %s : %s', fpath{f}, ME.message);
+        end
+    end
+end
 end
 %% Section 2 : Glutamate extraction via extractGluSNFR3
 %  Interactive per file (PC-regression prompt + optional UIs inside extractGluSNFR3).

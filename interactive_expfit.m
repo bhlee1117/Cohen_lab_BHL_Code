@@ -1,15 +1,30 @@
 function results = interactive_expfit(X, Y, opt)
 % interactive_expfit - Interactive exponential fit GUI (single or double exp).
 %
-% Fits Y = sum_i c_i*exp(-X/tau_i) (NO offset, c0 = 0) with expfit_bnd (same
-% fitter as the batch analysis, so interactive refinement stays consistent).
-% The number of exponentials is set by opt.t_guess: a scalar -> single
-% exponential, a 2-element vector -> double exponential. Time constants are
-% constrained to [opt.tau_lb, opt.tau_ub].
+% Fits Y = sum_i c_i*exp(-X/tau_i) + c0 with expfit_bnd (same fitter as the batch
+% analysis, so interactive refinement stays consistent). The number of
+% exponentials is set by opt.t_guess: a scalar -> single exponential, a 2-element
+% vector -> double exponential. Time constants are constrained to
+% [opt.tau_lb, opt.tau_ub].
+%
+% opt.use_offset controls the constant term:
+%   false (default) - c0 = 0, the model decays to zero.
+%   true            - c0 is free, i.e. the single-exponential model is
+%                     y = a*exp(-t/b) + c. Use it when the data settles at a
+%                     non-zero plateau; c is returned in results.offset and shown
+%                     in the plot title.
 %
 % Shows a scatter of X vs Y. Use Automatic (all points) or Manual (lasso-
 % select a subset) to choose which points are used for the fit. The fit curve
 % and parameters update live. Click Finish (or close the window) to return.
+%
+% Three ways to leave, and they mean different things to the caller:
+%   Finish  - keep the current fit.                     done=1 skipped=0 aborted=0
+%   NaN     - this data is not worth fitting. Returns an all-NaN result so the
+%             caller can record "no fit" and carry on to the next item.
+%                                                       done=1 skipped=1 aborted=0
+%   Abort   - stop everything; callers use this to break out of their loop.
+%                                                       done=0 skipped=0 aborted=1
 %
 % Usage:
 %   results = interactive_expfit(X, Y)
@@ -22,6 +37,7 @@ function results = interactive_expfit(X, Y, opt)
 %                                                     (default: range(X)/2)
 %   .tau_lb         lower bound(s) on tau              (default: 0)
 %   .tau_ub         upper bound(s) on tau              (default: Inf)
+%   .use_offset     fit a free constant term c0 -> a*exp(-t/b)+c (default false)
 %   .x_fit          x values at which to sample the fit curve (default: dense)
 %   .predefined_idx indices into X/Y to use for the fit; skips interactive GUI
 %
@@ -36,7 +52,7 @@ function results = interactive_expfit(X, Y, opt)
 %   .p          [a b]
 %   .idxSel     indices (into X/Y) used for the fit
 %   .xFit,.yFit fit curve (dense, for plotting)
-%   .done, .aborted
+%   .done, .aborted, .skipped
 %
 % See also: expfitDM_2
 
@@ -53,6 +69,7 @@ if nargin < 3 || isempty(opt), opt = struct(); end
 if ~isfield(opt, 't_guess') || isempty(opt.t_guess), opt.t_guess = max(range(X)/2, eps); end
 if ~isfield(opt, 'tau_lb') || isempty(opt.tau_lb), opt.tau_lb = 0;   end
 if ~isfield(opt, 'tau_ub') || isempty(opt.tau_ub), opt.tau_ub = Inf; end
+if ~isfield(opt, 'use_offset') || isempty(opt.use_offset), opt.use_offset = false; end
 if ~isfield(opt, 'x_fit'),          opt.x_fit          = [];    end
 if ~isfield(opt, 'predefined_idx'), opt.predefined_idx = [];    end
 
@@ -64,7 +81,8 @@ nExp  = numel(opt.t_guess);
 % -------------------------------------------------------------------------
 results = struct('a', NaN, 'b', NaN, 'tau', nan(1,nExp), 'amp', nan(1,nExp), ...
                  'offset', NaN, 'Rsq', NaN, 'Stds', NaN, 'p', [NaN NaN], ...
-                 'idxSel', [], 'xFit', [], 'yFit', [], 'done', false, 'aborted', false);
+                 'idxSel', [], 'xFit', [], 'yFit', [], 'done', false, 'aborted', false, ...
+                 'skipped', false);
 
 % -------------------------------------------------------------------------
 % Predefined-index mode: skip GUI entirely
@@ -82,7 +100,7 @@ end
 % -------------------------------------------------------------------------
 hFig = figure('Name', 'interactive_expfit', ...
     'NumberTitle', 'off', ...
-    'Position',    [80 120 760 640], ...
+    'Position',    [80 120 890 640], ...
     'CloseRequestFcn', @onClose);
 
 tl = tiledlayout(hFig, 1, 1, 'TileSpacing', 'compact', 'Padding', 'compact');
@@ -113,6 +131,13 @@ hFinBtn = uicontrol(hFig, 'Style', 'pushbutton', 'String', 'Finish', ...    %#ok
     'Callback', @(~,~) cbFinish());
 x = x + BW + G;
 
+uicontrol(hFig, 'Style', 'pushbutton', 'String', 'NaN', ...
+    'Position', [x BY BW BH], ...
+    'BackgroundColor', [0.95 0.85 0.35], ...
+    'TooltipString', 'Not worth fitting: return an all-NaN result and move on', ...
+    'Callback', @(~,~) cbSkip());
+x = x + BW + G;
+
 uicontrol(hFig, 'Style', 'pushbutton', 'String', 'Abort', ...
     'Position', [x BY BW BH], ...
     'BackgroundColor', [0.90 0.40 0.40], ...
@@ -121,9 +146,10 @@ uicontrol(hFig, 'Style', 'pushbutton', 'String', 'Abort', ...
     'Callback', @(~,~) cbAbort());
 x = x + BW + G*2;
 
+if opt.use_offset, mdlStr = ' + c'; else, mdlStr = ''; end
 hLbl = uicontrol(hFig, 'Style', 'text', ...
-    'Position', [x BY+2 260 BH-4], ...
-    'String', sprintf('%d points | %d-exp', nPts, nExp), ...
+    'Position', [x BY+2 240 BH-4], ...
+    'String', sprintf('%d points | %d-exp%s', nPts, nExp, mdlStr), ...
     'FontSize', 12, 'FontWeight', 'bold', ...
     'HorizontalAlignment', 'left');                                          %#ok<NASGU>
 
@@ -150,7 +176,7 @@ if isvalid(hFig), delete(hFig); end
 
     % ---------------------------------------------------------------------
     function [p, Rsq_val, Stds_val, xFit, yFit, tcon, amp, offset] = fitSelection(idx)
-    % Fit Y = sum c_i*exp(-X/tau_i) (no offset) on the selected indices via expfit_bnd.
+    % Fit Y = sum c_i*exp(-X/tau_i) + c0 on the selected indices via expfit_bnd.
         if numel(idx) < 3
             p = [NaN NaN]; Rsq_val = NaN; Stds_val = NaN; xFit = []; yFit = [];
             tcon = nan(1,nExp); amp = nan(1,nExp); offset = 0;
@@ -162,8 +188,8 @@ if isvalid(hFig), delete(hFig); end
         tg = opt.t_guess(:)';                 % row of guesses (1 or 2 -> single/double)
 
         % Fit on the selected points, evaluate at the same points for R^2
-        [yhat_sel, tcon, coeff] = expfit_bnd(xs, ys, xs, tg, opt.tau_lb, opt.tau_ub);
-        offset = 0;                           % no offset in this model (c0 = 0)
+        [yhat_sel, tcon, coeff, offset] = expfit_bnd(xs, ys, xs, tg, opt.tau_lb, ...
+                                                     opt.tau_ub, opt.use_offset);
         amp    = coeff(:)';                   % 1 x nExp exponential amplitudes
 
         SS_res = sum((ys - yhat_sel).^2);
@@ -177,7 +203,7 @@ if isvalid(hFig), delete(hFig); end
         else
             xFit = linspace(min(xs), max(xs), 200)';
         end
-        yFit = expfit_bnd(xs, ys, xFit, tg, opt.tau_lb, opt.tau_ub);
+        yFit = expfit_bnd(xs, ys, xFit, tg, opt.tau_lb, opt.tau_ub, opt.use_offset);
 
         % Back-compat scalars: slowest exponential component
         [~, islow] = max(tcon);
@@ -200,7 +226,7 @@ if isvalid(hFig), delete(hFig); end
     end
 
     % ---------------------------------------------------------------------
-    function refreshAx(idx, p, Rsq_val, xFit, yFit, tcon)
+    function refreshAx(idx, p, Rsq_val, xFit, yFit, tcon, c0)
         cla(ax1);
         hold(ax1, 'on');
 
@@ -230,8 +256,13 @@ if isvalid(hFig), delete(hFig); end
         ylabel(ax1, 'Y');
         if ~any(isnan(p))
             tauStr = strjoin(compose('%.3g', tcon(:)'), ', ');
-            title(ax1, sprintf('\\tau = [%s]  |  R^2 = %.3f  |  n = %d', ...
-                tauStr, Rsq_val, numel(idx)), 'FontSize', 10);
+            if opt.use_offset
+                title(ax1, sprintf('\\tau = [%s]  |  c = %.4g  |  R^2 = %.3f  |  n = %d', ...
+                    tauStr, c0, Rsq_val, numel(idx)), 'FontSize', 10);
+            else
+                title(ax1, sprintf('\\tau = [%s]  |  R^2 = %.3f  |  n = %d', ...
+                    tauStr, Rsq_val, numel(idx)), 'FontSize', 10);
+            end
         else
             title(ax1, 'Select at least 3 points to fit', 'FontSize', 10);
         end
@@ -242,7 +273,7 @@ if isvalid(hFig), delete(hFig); end
         idxSel = (1:nPts)';
         [p, Rsq_val, Stds_val, xFit, yFit, tcon, amp, offset] = fitSelection(idxSel);
         storeResult(p, Rsq_val, Stds_val, idxSel, xFit, yFit, tcon, amp, offset);
-        refreshAx(idxSel, p, Rsq_val, xFit, yFit, tcon);
+        refreshAx(idxSel, p, Rsq_val, xFit, yFit, tcon, offset);
     end
 
     % ---------------------------------------------------------------------
@@ -288,7 +319,8 @@ if isvalid(hFig), delete(hFig); end
 
         if numel(xv) < 3
             % Cancelled — redisplay current stored state without changes
-            refreshAx(results.idxSel, results.p, results.Rsq, results.xFit, results.yFit, results.tau);
+            refreshAx(results.idxSel, results.p, results.Rsq, results.xFit, results.yFit, ...
+                results.tau, results.offset);
             return;
         end
 
@@ -303,7 +335,7 @@ if isvalid(hFig), delete(hFig); end
         idxSel = idx;
         [p, Rsq_val, Stds_val, xFit, yFit, tcon, amp, offset] = fitSelection(idxSel);
         storeResult(p, Rsq_val, Stds_val, idxSel, xFit, yFit, tcon, amp, offset);
-        refreshAx(idxSel, p, Rsq_val, xFit, yFit, tcon);
+        refreshAx(idxSel, p, Rsq_val, xFit, yFit, tcon, offset);
     end
 
     % ---------------------------------------------------------------------
@@ -316,7 +348,19 @@ if isvalid(hFig), delete(hFig); end
     function cbAbort()
         results = struct('a', NaN, 'b', NaN, 'tau', nan(1,nExp), 'amp', nan(1,nExp), ...
                          'offset', NaN, 'Rsq', NaN, 'Stds', NaN, 'p', [NaN NaN], ...
-                         'idxSel', [], 'xFit', [], 'yFit', [], 'done', false, 'aborted', true);
+                         'idxSel', [], 'xFit', [], 'yFit', [], 'done', false, ...
+                         'aborted', true, 'skipped', false);
+        isDone = true;
+    end
+
+    % ---------------------------------------------------------------------
+    function cbSkip()
+    % "Not worth fitting": all-NaN result, done (so the caller stores it and
+    % advances) but NOT aborted (so the caller's loop keeps going).
+        results = struct('a', NaN, 'b', NaN, 'tau', nan(1,nExp), 'amp', nan(1,nExp), ...
+                         'offset', NaN, 'Rsq', NaN, 'Stds', NaN, 'p', [NaN NaN], ...
+                         'idxSel', [], 'xFit', [], 'yFit', [], 'done', true, ...
+                         'aborted', false, 'skipped', true);
         isDone = true;
     end
 

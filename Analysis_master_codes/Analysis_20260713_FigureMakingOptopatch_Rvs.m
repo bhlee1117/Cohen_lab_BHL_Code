@@ -266,6 +266,64 @@ fieldName={'Stim_Region_Waveform','Repeat','Neuron','BlueStim_Order'};
 if ~istable(OpResultLabel)
     OpResultLabel=array2table(OpResultLabel,'VariableNames',fieldName);
 end
+
+%% Section 3.1 Dataset summary (Iso vs Awake)
+% Compact printout of what is actually in OpResult/OpTable: mouse / neuron /
+% recording counts per brain State, then recordings (neurons) broken down by
+% stimulation region x waveform. Run right after Section 1 or Section 3.
+if ~exist('OpTable','var') || isempty(OpTable)
+    fprintf('No OpTable in the workspace - run Section 1 or Section 3 first.\n');
+else
+    Tsum = OpTable;
+    Tsum.State      = strtrim(string(Tsum.State));
+    Tsum.StimRegion = string(Tsum.StimRegion);
+    Tsum.Waveform   = string(Tsum.Waveform);
+
+    states  = unique(Tsum.State,'stable');
+    regions = ["Soma","DistalDend","WF"];
+    wvfs    = ["Ramp","ShortPulse"];
+
+    nNeu = @(T) numel(unique(T.NeuronID));
+    nMou = @(T) numel(unique(T.MouseID));
+
+    fprintf('\n================= Loaded dataset summary =================\n');
+    fprintf('%-10s %8s %10s %12s\n','State','#Mice','#Neurons','#Recordings');
+    fprintf('%s\n',repmat('-',1,44));
+    for s = 1:numel(states)
+        Ts = Tsum(Tsum.State==states(s),:);
+        fprintf('%-10s %8d %10d %12d\n', states(s), nMou(Ts), nNeu(Ts), height(Ts));
+    end
+    fprintf('%s\n',repmat('-',1,44));
+    fprintf('%-10s %8d %10d %12d\n','ALL', nMou(Tsum), nNeu(Tsum), height(Tsum));
+
+    % --- Per-state breakdown: cells are "#recordings (#neurons)" ---
+    for s = 1:numel(states)
+        Ts = Tsum(Tsum.State==states(s),:);
+        fprintf('\n-- %s : recordings (neurons) per stim region x waveform --\n', states(s));
+        fprintf('%-12s',''); fprintf('%14s', wvfs); fprintf('%14s\n','Total');
+        for r = 1:numel(regions)
+            Tr = Ts(Ts.StimRegion==regions(r),:);
+            fprintf('%-12s', regions(r));
+            for w = 1:numel(wvfs)
+                Trw = Tr(Tr.Waveform==wvfs(w),:);
+                fprintf('%14s', sprintf('%d (%d)', height(Trw), nNeu(Trw)));
+            end
+            fprintf('%14s\n', sprintf('%d (%d)', height(Tr), nNeu(Tr)));
+        end
+        somaNeu = unique(Ts.NeuronID(Ts.StimRegion=="Soma"));
+        dendNeu = unique(Ts.NeuronID(Ts.StimRegion=="DistalDend"));
+        fprintf('   neurons with BOTH soma & distal-dend stim : %d\n', ...
+            numel(intersect(somaNeu,dendNeu)));
+        fprintf('   mice : %s\n', strjoin(string(unique(Ts.MouseID))', ', '));
+    end
+
+    if exist('OpTable_skipped','var') && ~isempty(OpTable_skipped)
+        fprintf('\n(%d recording(s) skipped: missing RobustdFFfit.mat)\n', height(OpTable_skipped));
+    end
+    fprintf('==========================================================\n\n');
+    clear Tsum states regions wvfs nNeu nMou Ts Tr Trw somaNeu dendNeu
+end
+
 %% Show representative neuron
 figure(20); clf; tiledlayout(2,1,'padding','compact');
 nexttile([1 1])
@@ -448,6 +506,19 @@ dendriteaxis_bin2=[-300 -50 50 140 460];
 perisomadist=[-70 70]; cmap=[0 0 0; 1 0 0];  cmap_light=[0.7 0.7 0.7; 1 0.7 0.7];
 prespikesubtime=[-10:-3]; dax=[];
 LabelMat_SP=[]; AlignedbAPall_SP=[]; dax_all=[]; g=1;
+% --- STA-based transmission ratio, resolved by evoked spike order ---------
+% Second, independent estimate of the same quantity: instead of one TX ratio
+% per spike, the N-th spikes of a recording are first averaged into a
+% stimulation-order-triggered average, and the ratio is measured on that STA.
+% One value per (recording, spike order), so a recording contributes maxSPorder
+% rows at most. Each event is baselined over preStimWinSTA, a window that ends
+% before its own blue onset (events are spike-aligned, so the onset index is
+% nTau(1)+1-sptimefromblueonset); prespikesubtime is the fallback when that
+% window runs off the front of the segment. AUC windows are identical to the
+% per-spike version, so the two are directly comparable.
+maxSPorder=4;
+preStimWinSTA=[-25 -5];             % baseline window (frames) rel. to BLUE ONSET
+staEntry=struct([]); kSTA=0; nFallbackSTA=0; STA_SPorder={};
 for n=1:size(OpResult,3) %neuron
     for wvf=[2 4] %stim region
         for rep=1:size(OpResult,2) %repeat 
@@ -522,6 +593,42 @@ for n=1:size(OpResult,3) %neuron
                 bAPAmp_SP_Apical=cellfun(@(x) x(4,2),AmpbAPbin_SP_cell(~emptycell));
                 ISI=[NaN diff(Sptime)]';
 
+                % ---- STA-based TX ratio, one value per evoked spike order ----
+                for spN=1:maxSPorder
+                    evN=find(sporderinblue==spN);
+                    if isempty(evN); continue; end
+                    Kn=AlignedbAP_SP(:,:,evN);
+                    for e=1:numel(evN)
+                        onsetIdx=nTau(1)+1-sptimefromblueonset(evN(e));
+                        w=(onsetIdx+preStimWinSTA(1)):(onsetIdx+preStimWinSTA(2));
+                        w=w(w>=1 & w<=size(Kn,2));
+                        if numel(w)<3          % pre-onset window off the segment
+                            w=nTau(1)+prespikesubtime; w=w(w>=1 & w<=size(Kn,2));
+                            nFallbackSTA=nFallbackSTA+1;
+                        end
+                        Kn(:,:,e)=Kn(:,:,e)-median(Kn(:,w,e),2,'omitnan');
+                    end
+                    STAn=mean(Kn,3,'omitnan');                   % ROI x time
+                    [~, AUCn_long ]=get_AUC(STAn,tmax,2,3);      % apical, 3 samples
+                    [~, AUCn_short]=get_AUC(STAn,tmax,1,1);      % soma, peak sample
+                    [~, binLong ]=zscore_binning({[dax' AUCn_long ]},dendriteaxis_bin2);
+                    [~, binShort]=zscore_binning({[dax' AUCn_short]},dendriteaxis_bin2);
+
+                    kSTA=kSTA+1;
+                    STA_SPorder{kSTA,1}       = STAn(dOrder,:);  % dist-ordered kymo
+                    staEntry(kSTA).NeuronID   = n;
+                    staEntry(kSTA).MouseID    = MouseInd;
+                    staEntry(kSTA).FileID     = fileInd;
+                    staEntry(kSTA).StimRegion = wvf;
+                    staEntry(kSTA).RepeatID   = rep;
+                    staEntry(kSTA).SpikeOrder = spN;
+                    staEntry(kSTA).nEvents    = numel(evN);
+                    staEntry(kSTA).MedLatency = median(sptimefromblueonset(evN));
+                    staEntry(kSTA).AUC_apical = binLong{1}(4,2);
+                    staEntry(kSTA).AUC_Soma   = binShort{1}(2,2);
+                    staEntry(kSTA).TransmissionRatio = binLong{1}(4,2)/binShort{1}(2,2);
+                end
+
                 catlab=[repmat(n,length(Sptime),1) Sptime' sptimefromblueonset' ...
                     BluePulseN' repmat(MouseInd,length(Sptime),1) repmat(fileInd,length(Sptime),1) repmat(wvf,length(Sptime),1) repmat(rep,length(Sptime),1)...
                     sporderinblue' trnsmit_SP_bAPAUC bAPAUC_SP_Apical bAPAUC_SP_Soma ISI preSub_SP_Apical preSub_SP_Soma bAPKink_SP_Soma bAPKink_SP_Apical, bAPAmp_SP_Soma, bAPAmp_SP_Apical];
@@ -538,6 +645,30 @@ LabelMat_SP=array2table(LabelMat_SP,'VariableNames',fieldName);
 for n=unique(LabelMat_SP.NeuronID)'
     nindex=find(LabelMat_SP.NeuronID==n);
     LabelMat_SP.AUC_apical_norm(nindex)=zscore(LabelMat_SP.AUC_apical(nindex));
+end
+
+% --- STA-based table: one row per (recording, spike order) ---
+% STA_SPorder{i} holds the dist-ordered STA kymograph behind row i.
+if isempty(staEntry)
+    LabelMat_SPSTA=table();
+    warning('No STA-based rows built (no recording had a resolvable spike order).');
+else
+    LabelMat_SPSTA=struct2table(staEntry);
+    % brain State, looked up per row through the spreadsheet file index
+    stSTA=repmat("Unknown",height(LabelMat_SPSTA),1);
+    stRawSTA=State(LabelMat_SPSTA.FileID);
+    for i=1:numel(stRawSTA)
+        if ischar(stRawSTA{i}) || isstring(stRawSTA{i})
+            s=lower(strtrim(string(stRawSTA{i})));
+            if contains(s,'awake');    stSTA(i)="Awake";
+            elseif contains(s,'iso');  stSTA(i)="Iso";
+            end
+        end
+    end
+    LabelMat_SPSTA.State=stSTA;
+    fprintf(['STA-based TX ratio: %d rows (%d recordings x spike orders), ' ...
+        '%d event(s) used the pre-spike fallback baseline.\n'], ...
+        height(LabelMat_SPSTA), numel(unique(LabelMat_SPSTA.FileID)), nFallbackSTA);
 end
 
 %% Monitor kymographs of negative transmission-ratio spikes (QC before figure 4)
@@ -739,21 +870,455 @@ set_figsize(100,120);
 %     xlabel(counting_string(sporder)); ylabel('Transmission ratio'); box off;
 % end
 
+%% STA-based TX ratio: spike order, Soma vs Dend (figure 21)
+% Same layout as figure 14, but each point is a recording-level STA rather
+% than a single spike: LabelMat_SPSTA carries one transmission ratio per
+% (recording, spike order), measured on the N-th-spike average with a
+% pre-blue-onset baseline. Points are per-neuron means over that neuron's
+% recordings; gray lines connect the same neuron across the two stim sites.
+% Significance: signrank soma vs dend within each order, and across orders
+% for soma stimulation.
+if ~exist('LabelMat_SPSTA','var') || isempty(LabelMat_SPSTA)
+    warning('figure(21): LabelMat_SPSTA is missing - re-run "Short pulses Soma vs Dend".');
+else
+maxTXratioSTA=6; minTXratioSTA=-1; ordersSTA=1:3;
+ordStrSTA=counting_string(ordersSTA);
+pairGap=1; groupGap=1.6; bw=0.6; jitter=0.10;
+faceCol={[1 1 1],[0.6 0.6 0.6]};  edgeCol={[0 0 0],[0.5 0.5 0.5]};
+faceA=[1 0.35];                   ptCol={[0.2 0.2 0.2],[0.45 0.45 0.45]};
+
+okSTA = abs(LabelMat_SPSTA.TransmissionRatio)<maxTXratioSTA & ...
+        LabelMat_SPSTA.TransmissionRatio>minTXratioSTA;
+neuronsSTA=unique(LabelMat_SPSTA.NeuronID)';
+mouseOfSTA=arrayfun(@(n) LabelMat_SPSTA.MouseID(find(LabelMat_SPSTA.NeuronID==n,1)), neuronsSTA);
+VsomaSTA=nan(numel(neuronsSTA),numel(ordersSTA));
+VdendSTA=nan(numel(neuronsSTA),numel(ordersSTA));
+NrecSTA=zeros(numel(ordersSTA),2);          % contributing recordings per bar
+xS=zeros(1,numel(ordersSTA)); xD=zeros(1,numel(ordersSTA));
+
+figure(21); clf; hold on;
+for si=1:numel(ordersSTA)
+    xc=(si-1)*(pairGap+groupGap); xS(si)=xc+1; xD(si)=xc+1+pairGap;
+    inOrder = okSTA & LabelMat_SPSTA.SpikeOrder==ordersSTA(si);
+    NrecSTA(si,1)=sum(inOrder & LabelMat_SPSTA.StimRegion==2);
+    NrecSTA(si,2)=sum(inOrder & LabelMat_SPSTA.StimRegion==4);
+    for k=1:numel(neuronsSTA)
+        iS = inOrder & LabelMat_SPSTA.NeuronID==neuronsSTA(k) & LabelMat_SPSTA.StimRegion==2;
+        iD = inOrder & LabelMat_SPSTA.NeuronID==neuronsSTA(k) & LabelMat_SPSTA.StimRegion==4;
+        if any(iS); VsomaSTA(k,si)=mean(LabelMat_SPSTA.TransmissionRatio(iS),'omitnan'); end
+        if any(iD); VdendSTA(k,si)=mean(LabelMat_SPSTA.TransmissionRatio(iD),'omitnan'); end
+    end
+    % paired connecting lines (neurons measured at both sites)
+    for k=1:numel(neuronsSTA)
+        if ~isnan(VsomaSTA(k,si)) && ~isnan(VdendSTA(k,si))
+            plot([xS(si) xD(si)],[VsomaSTA(k,si) VdendSTA(k,si)],'-','Color',[0.82 0.82 0.82],'LineWidth',1);
+        end
+    end
+    % boxes + jittered points
+    dataCond={VsomaSTA(:,si), VdendSTA(:,si)}; xpos=[xS(si) xD(si)];
+    for cc=1:2
+        v=dataCond{cc}; v=v(~isnan(v)); xx=xpos(cc);
+        if isempty(v); continue; end
+        q1=prctile(v,25); med=prctile(v,50); q3=prctile(v,75); iqrv=q3-q1;
+        lo=max(min(v),q1-1.5*iqrv); hi=min(max(v),q3+1.5*iqrv);
+        patch([xx-bw/2 xx+bw/2 xx+bw/2 xx-bw/2],[q1 q1 q3 q3],faceCol{cc}, ...
+            'FaceAlpha',faceA(cc),'EdgeColor',edgeCol{cc},'LineWidth',1);
+        plot([xx-bw/2 xx+bw/2],[med med],'-','Color',edgeCol{cc},'LineWidth',2);
+        plot([xx-bw/10 xx+bw/20],[hi hi],'-','Color',edgeCol{cc},'LineWidth',1);
+        plot([xx-bw/10 xx+bw/20],[lo lo],'-','Color',edgeCol{cc},'LineWidth',1);
+        plot([xx xx],[q3 hi],'-','Color',edgeCol{cc},'LineWidth',1);
+        plot([xx xx],[q1 lo],'-','Color',edgeCol{cc},'LineWidth',1);
+        plot(xx+jitter*(2*rand(size(v))-1),v,'o','MarkerSize',6, ...
+            'MarkerFaceColor',ptCol{cc},'MarkerEdgeColor','none');
+    end
+end
+
+set(gca,'XTick',(xS+xD)/2,'XTickLabel',counting_string(ordersSTA));
+xlabel('Evoked spike order'); ylabel('Transmission ratio (STA)'); box off;
+xlim([xS(1)-0.9 xD(end)+0.9]);
+
+% --- significance: soma vs dend within each order ---
+starOf=@(p) repmat('*',1,(p<0.05)+(p<0.01)+(p<0.001));
+ymaxSTA=max([VsomaSTA(:);VdendSTA(:)],[],'omitnan');
+for si=1:numel(ordersSTA)
+    cs=~isnan(VsomaSTA(:,si)) & ~isnan(VdendSTA(:,si));
+    if sum(cs)>=2
+        p=signrank(VsomaSTA(cs,si),VdendSTA(cs,si));
+        if p<0.05
+            yl=max([VsomaSTA(cs,si);VdendSTA(cs,si)])+0.15;
+            plot([xS(si) xS(si) xD(si) xD(si)],[yl yl+0.05 yl+0.05 yl],'k-','LineWidth',1);
+            text((xS(si)+xD(si))/2,yl+0.06,starOf(p),'HorizontalAlignment','center', ...
+                'VerticalAlignment','bottom','FontSize',12);
+        end
+    end
+end
+% --- significance: soma across spike orders (stacked brackets) ---
+yb=ymaxSTA+0.5; step=0.32; lvl=0; somaPairs=[1 2; 1 3; 2 3];
+for r=1:size(somaPairs,1)
+    a=somaPairs(r,1); b=somaPairs(r,2);
+    if a>numel(ordersSTA) || b>numel(ordersSTA); continue; end
+    cs=~isnan(VsomaSTA(:,a)) & ~isnan(VsomaSTA(:,b));
+    if sum(cs)>=2
+        p=signrank(VsomaSTA(cs,a),VsomaSTA(cs,b));
+        if p<0.05
+            yy=yb+lvl*step;
+            plot([xS(a) xS(a) xS(b) xS(b)],[yy yy+0.05 yy+0.05 yy],'k-','LineWidth',1);
+            text((xS(a)+xS(b))/2,yy+0.06,starOf(p),'HorizontalAlignment','center', ...
+                'VerticalAlignment','bottom','FontSize',12);
+            lvl=lvl+1;
+        end
+    end
+end
+
+% --- report N (neurons / mice / recordings) ---
+fprintf('\nfigure(21) STA-based transmission ratio (%.1f < TX < %.1f):\n', minTXratioSTA, maxTXratioSTA);
+regnameSTA={'Soma','Dend'}; VcondSTA={VsomaSTA, VdendSTA};
+for cc=1:2
+    for si=1:numel(ordersSTA)
+        has=~isnan(VcondSTA{cc}(:,si));
+        fprintf('  %-4s %s spike: %4.2f+-%4.2f, %2d neurons, %2d mice, %2d recordings\n', ...
+            regnameSTA{cc}, ordStrSTA{si}, ...
+            mean(VcondSTA{cc}(has,si)), std(VcondSTA{cc}(has,si))/sqrt(max(sum(has),1)), ...
+            sum(has), numel(unique(mouseOfSTA(has))), NrecSTA(si,cc));
+    end
+end
+anyHasSTA=any(~isnan([VsomaSTA VdendSTA]),2);
+text(0.02,0.98,sprintf('%d neurons, %d mice', sum(anyHasSTA), numel(unique(mouseOfSTA(anyHasSTA)))), ...
+    'Units','normalized','HorizontalAlignment','left','VerticalAlignment','top','Color',[0.2 0.2 0.2]);
+title('N-th spike STA, pre-blue-onset baseline');
+set_fontsize(16); set_font('Arial'); set_figsize(100,120);
+end
+
+%% Iso vs Awake: example kymographs + N-th spike TX ratio (figures 18, 19)
+% Same short-pulse dataset as figure 14, additionally split by brain State.
+% State is not stored in LabelMat_SP, so it is looked up per row through
+% FileID (the spreadsheet row index carried by every spike).
+%
+%   figure(18)  one representative AWAKE neuron, FIRST evoked spike only:
+%               spike-triggered-average kymograph for soma (left) vs distal-
+%               dendrite (right) stimulation, with the peri-soma and distal-
+%               apical traces (mean +- SEM over spikes) underneath.
+%   figure(19)  N-th spike transmission ratio, Awake vs Iso, in two panels:
+%               soma stimulation (left) and dendrite stimulation (right).
+%               Mean +- SEM across neurons, one point per neuron (mean over
+%               its spikes); Awake vs Iso tested within each order (ranksum,
+%               unpaired: a neuron is recorded in a single state).
+%
+% Units: kymographs/traces are normTraces./ScaleFactor, i.e. genuine dF/F -
+% ScaleFactor = (raw STA bAP peak) / (robust dF/F of the bAP from the pixel-
+% wise dF~F0 fit), so each ROI is scaled such that its mean bAP peaks at the
+% measured dF/F. Every event is baseline-subtracted over a PRE-STIMULATION
+% window (preStimWin, relative to that event's blue onset) before averaging,
+% so 0 = the level before the light came on and the stim-evoked depolarization
+% is preserved in the image rather than being absorbed into the baseline.
+
+% ---- filters / geometry (kept identical to figure 14) ----
+maxTXratio=6; minTXratio=-1; orders2show=1:3;
+nTauSP=[60 100]; tSP=-nTauSP(1):nTauSP(2);   % must match the Short-pulse section
+ordStr=counting_string(orders2show);
+exNeuronAwake=[];        % [] = auto-pick the awake example; set a NeuronID to force it
+exOrder=1;               % spike order shown in figure(18)
+% The figure(18) baseline must sit OUTSIDE the blue pulse. Events are spike-
+% aligned, so the pulse onset falls at a different index in each event; it is
+% recovered per event from SpikeFrameBlueonset (frames from the true blue
+% onset to the spike - blueDialated only extends the mask AFTER blue offset,
+% so the onset itself is exact). preWinEx is a pre-SPIKE fallback, used only
+% for events whose pre-onset window runs off the front of the +-nTauSP segment.
+preStimWin=[-35 -25];     % baseline window (frames) relative to BLUE ONSET
+preWinEx=-50:-30;        % fallback pre-spike window (still inside the pulse if latency is short)
+climEx=[];               % [] = auto (robust percentiles); e.g. [-0.02 0.12] to fix it
+somaBinEx=[-50 50];      % peri-soma ROIs   (dendriteaxis_bin2 bin 2, TX denominator)
+apicBinEx=[140 460];     % distal apical ROIs (dendriteaxis_bin2 bin 4, TX numerator)
+
+% ---- attach brain State to every short-pulse spike ----
+stateRaw=State(LabelMat_SP.FileID);
+SPstate=repmat("Unknown",height(LabelMat_SP),1);
+for i=1:numel(stateRaw)
+    if ischar(stateRaw{i}) || isstring(stateRaw{i})
+        s=lower(strtrim(string(stateRaw{i})));
+        if contains(s,'awake');    SPstate(i)="Awake";
+        elseif contains(s,'iso');  SPstate(i)="Iso";
+        end
+    end
+end
+LabelMat_SP.State=SPstate;
+if any(SPstate=="Unknown")
+    warning('%d / %d short-pulse spikes have an unrecognized State and are excluded.', ...
+        sum(SPstate=="Unknown"), height(LabelMat_SP));
+end
+
+okTX = abs(LabelMat_SP.TransmissionRatio)<maxTXratio & LabelMat_SP.TransmissionRatio>minTXratio;
+
+% =============== figure(18): representative awake neuron ===============
+exRows = okTX & LabelMat_SP.State=="Awake" & LabelMat_SP.SpikeOrder==exOrder;
+if isempty(exNeuronAwake)
+    % awake neuron with the best-balanced soma/dend event counts at exOrder
+    cand=unique(LabelMat_SP.NeuronID(exRows))';
+    score=zeros(1,numel(cand));
+    for k=1:numel(cand)
+        nS=sum(exRows & LabelMat_SP.NeuronID==cand(k) & LabelMat_SP.StimRegion==2);
+        nD=sum(exRows & LabelMat_SP.NeuronID==cand(k) & LabelMat_SP.StimRegion==4);
+        score(k)=min(nS,nD);
+    end
+    if ~isempty(cand) && max(score)>0
+        [~,bi]=max(score); exNeuronAwake=cand(bi);
+    end
+end
+
+kymoReady = exist('AlignedbAPall_SP','var') && numel(AlignedbAPall_SP)==height(LabelMat_SP);
+if isempty(exNeuronAwake)
+    warning('figure(18): no awake neuron has both soma and dendrite short-pulse spikes.');
+elseif ~kymoReady
+    warning(['figure(18): AlignedbAPall_SP is missing or out of sync with LabelMat_SP ' ...
+        '(it is built in the Short-pulse section and is not part of the saved bundle) - ' ...
+        're-run "Short pulses Soma vs Dend" to draw the example kymographs.']);
+else
+    exRegions=[2 4]; exRegName={'Soma stim.','Distal dend. stim.'};
+    exRep=nan(1,2); exIdx=cell(1,2); Kavg=cell(1,2); Tsoma=cell(1,2); Tapic=cell(1,2);
+    onsetT=cell(1,2);
+    for cc=1:2
+        rr = okTX & LabelMat_SP.State=="Awake" & LabelMat_SP.NeuronID==exNeuronAwake ...
+           & LabelMat_SP.StimRegion==exRegions(cc) & LabelMat_SP.SpikeOrder==exOrder;
+        reps=unique(LabelMat_SP.RepeatID(rr))';
+        if isempty(reps); continue; end
+        % a single repeat, so all events share one ROI set / dendrite axis
+        cnt=arrayfun(@(r) sum(rr & LabelMat_SP.RepeatID==r), reps);
+        [~,bi]=max(cnt); exRep(cc)=reps(bi);
+        exIdx{cc}=find(rr & LabelMat_SP.RepeatID==exRep(cc));
+
+        % ROI x time x spike. Baseline is taken per event BEFORE that event's
+        % blue onset: the segment index of the onset is nTauSP(1)+1-d, where
+        % d = SpikeFrameBlueonset (spike is at index nTauSP(1)+1).
+        K3=cat(3,AlignedbAPall_SP{exIdx{cc}});
+        dEv=LabelMat_SP.SpikeFrameBlueonset(exIdx{cc});
+        nFallback=0;
+        for e=1:size(K3,3)
+            onsetIdx=nTauSP(1)+1-dEv(e);
+            w=(onsetIdx+preStimWin(1)):(onsetIdx+preStimWin(2));
+            w=w(w>=1 & w<=size(K3,2));
+            if numel(w)<3                       % pre-onset window does not fit
+                w=nTauSP(1)+preWinEx; w=w(w>=1 & w<=size(K3,2));
+                nFallback=nFallback+1;
+            end
+            K3(:,:,e)=K3(:,:,e)-median(K3(:,w,e),2,'omitnan');
+        end
+        onsetT{cc}=-dEv;                        % blue onset in peri-spike time (ms)
+        fprintf(['figure(18) %s: %d events, spike latency from blue onset ' ...
+            'median %.0f ms (range %.0f-%.0f), %d event(s) fell back to the pre-spike window.\n'], ...
+            exRegName{cc}, numel(dEv), median(dEv), min(dEv), max(dEv), nFallback);
+        Kavg{cc}=mean(K3,3,'omitnan');
+
+        % peri-soma and distal-apical compartment traces (same bins as the TX ratio)
+        R=OpResult{exRegions(cc),exRep(cc),exNeuronAwake};
+        daxOrd=R.dendaxis(R.dist_order);
+        rS=daxOrd>somaBinEx(1) & daxOrd<=somaBinEx(2);
+        rA=daxOrd>apicBinEx(1) & daxOrd<=apicBinEx(2);
+        Tsoma{cc}=squeeze(mean(K3(rS,:,:),1,'omitnan'));   % time x spike
+        Tapic{cc}=squeeze(mean(K3(rA,:,:),1,'omitnan'));
+    end
+
+    if all(cellfun(@isempty,Kavg))
+        warning('figure(18): neuron %d has no %s-order awake spikes passing the TX filter.', ...
+            exNeuronAwake, ordStr{exOrder});
+    else
+        % Shared color scale over the two spike-triggered averages only (not
+        % over single events), so the range matches what is actually drawn.
+        if isempty(climEx)
+            Kfull=Kavg(~cellfun(@isempty,Kavg));
+            % Kfull(:) forces a COLUMN cell so cell2mat stacks vertically -
+            % a row cell would give an N x 2 matrix and prctile would then
+            % return one clim per column (a 1x4 caxEx that imagesc rejects).
+            pooled=cell2mat(cellfun(@(K) K(:),Kfull(:),'UniformOutput',false));
+            caxEx=[prctile(pooled,1) prctile(pooled,99.8)];
+            if ~(caxEx(2)>caxEx(1)); caxEx=[min(pooled) max(pooled)+eps]; end
+        else
+            caxEx=climEx;
+        end
+        caxEx=reshape(caxEx(1:2),1,2);      % imagesc only accepts a 1x2 clim
+        cmapEx=[0 0 0; parula(10)]; cmapEx=gen_colormap(cmapEx);
+
+        figure(18); clf;
+        tiledlayout(2,2,'Padding','compact','TileSpacing','compact');
+        % --- row 1: spike-triggered-average kymographs ---
+        for cc=1:2
+            nexttile(cc);
+            if isempty(Kavg{cc}); axis off; title(sprintf('%s (n=0)',exRegName{cc}),'FontSize',10); continue; end
+            imagesc(tSP,1:size(Kavg{cc},1),Kavg{cc},caxEx); colormap(gca,cmapEx); hold on;
+            xline(0,'w:');
+            % events are spike-aligned, so blue onset smears across events:
+            % solid = median onset, dashed = full range
+            hOn=xline(median(onsetT{cc}),'-'); hOn.Color=[0 0.8 1]; hOn.LineWidth=1.2;
+            for hv=[min(onsetT{cc}) max(onsetT{cc})]
+                hh=xline(hv,'--'); hh.Color=[0 0.8 1]; hh.Alpha=0.5;
+            end
+            R=OpResult{exRegions(cc),exRep(cc),exNeuronAwake};
+            set_kymoYtick(R.dendaxis(R.dist_order));
+            title(sprintf('%s  -  %s spike (n=%d events)',exRegName{cc},ordStr{exOrder},numel(exIdx{cc})),'FontSize',10);
+            xlabel('peri-spike (ms)');
+            if cc==1; ylabel('Distance from soma (µm)'); end
+            cb=colorbar; cb.Label.String='\DeltaF/F';
+        end
+        % --- row 2: one panel per COMPARTMENT (left peri-soma, right distal
+        %     apical), with the two stimulation sites overlaid in each ---
+        stimCol=gen_colormap(Plasma,2);   % soma stim, distal dend stim
+        compTr={Tsoma,Tapic};
+        compName={sprintf('Peri-soma (%d to %d \µm)',somaBinEx), ...
+                  sprintf('Distal apical (%d to %d \µm)',apicBinEx)};
+        yl=[inf -inf];
+        for tt=1:2                          % compartment -> panel
+            nexttile(2+tt); hold on; h=[]; lab={};
+            for cc=1:2                      % stimulation site -> line
+                if isempty(Kavg{cc}); continue; end
+                Tr=compTr{tt}{cc};
+                if isvector(Tr); Tr=Tr(:); end     % single event -> column
+                if isempty(Tr) || all(isnan(Tr(:))); continue; end
+                m=mean(Tr,2,'omitnan'); se=std(Tr,0,2,'omitnan')/sqrt(size(Tr,2));
+                fill([tSP fliplr(tSP)],[m'-se' fliplr(m'+se')],stimCol(cc,:), ...
+                    'FaceAlpha',0.2,'EdgeColor','none');
+                h(end+1)=plot(tSP,m,'-','Color',stimCol(cc,:),'LineWidth',1.5); %#ok<SAGROW>
+                lab{end+1}=exRegName{cc};                                       %#ok<SAGROW>
+                % each stim site has its own median blue onset (events are
+                % spike-aligned), so mark them in the matching colour
+                hOn=xline(median(onsetT{cc}),'--'); hOn.Color=stimCol(cc,:); hOn.Alpha=0.6;
+                yl=[min(yl(1),min(m-se)) max(yl(2),max(m+se))];
+            end
+            xline(0,':','Color',[0.5 0.5 0.5]);
+            yline(0,':','Color',[0.7 0.7 0.7]);      % pre-stim baseline
+            xlabel('peri-spike (ms)'); box off; title(compName{tt},'FontSize',10);
+            if tt==1; ylabel('\DeltaF/F'); end
+            if ~isempty(h); legend(h,lab,'Box','off','Location','northwest'); end
+        end
+        % common y-range so the two compartments are directly comparable
+        if all(isfinite(yl)) && yl(2)>yl(1)
+            pad=0.06*diff(yl);
+            for tt=1:2
+                nexttile(2+tt); ylim(yl+[-pad pad]);
+            end
+        end
+        exMouse=LabelMat_SP.MouseID(find(LabelMat_SP.NeuronID==exNeuronAwake,1));
+        sgtitle(sprintf('Awake example - neuron %d (mouse %d), short pulse, %s spike', ...
+            exNeuronAwake, exMouse, ordStr{exOrder}));
+        set_fontsize(12); set_font('Arial');
+    end
+end
+
+% =============== figure(19): N-th spike TX ratio, region x state ===============
+condReg   = [2 2 4 4];                            % 1,2 = soma stim ; 3,4 = dend stim
+condState = ["Awake" "Iso" "Awake" "Iso"];
+
+neuronsAll = unique(LabelMat_SP.NeuronID)';
+mouseOfN   = arrayfun(@(n) LabelMat_SP.MouseID(find(LabelMat_SP.NeuronID==n,1)), neuronsAll);
+Vcond = nan(numel(neuronsAll),numel(orders2show),numel(condReg));  % per-neuron mean TX
+Nspk  = zeros(numel(orders2show),numel(condReg));                  % spikes behind each bar
+for oi=1:numel(orders2show)
+    for c=1:numel(condReg)
+        selC = okTX & LabelMat_SP.SpikeOrder==orders2show(oi) & ...
+               LabelMat_SP.StimRegion==condReg(c) & LabelMat_SP.State==condState(c);
+        Nspk(oi,c)=sum(selC);
+        for k=1:numel(neuronsAll)
+            sel = selC & LabelMat_SP.NeuronID==neuronsAll(k);
+            if any(sel); Vcond(k,oi,c)=mean(LabelMat_SP.TransmissionRatio(sel),'omitnan'); end
+        end
+    end
+end
+
+% One panel per stimulation site; within a panel, Awake vs Iso side by side
+% for each evoked spike order.
+prName   = {'Soma','Dend'};
+prTitle  = {'Soma stimulation','Distal dendrite stimulation'};
+stCol    = [0.15 0.15 0.15; 0.35 0.6 0.95];      % Awake, Iso
+starOf   = @(p) repmat('*',1,(p<0.05)+(p<0.01)+(p<0.001));
+groupGap = 1.2; barW = 0.75; jitterB = 0.10;
+xpos = zeros(numel(orders2show),numel(condReg));
+axPr = gobjects(1,2);
+
+figure(19); clf;
+tiledlayout(1,2,'Padding','compact','TileSpacing','compact');
+fprintf('\nfigure(19) N-th spike transmission ratio, Awake vs Iso (%.1f < TX < %.1f):\n', ...
+    minTXratio, maxTXratio);
+for pr=1:2                      % 1: soma stim (cond 1,2)   2: dend stim (cond 3,4)
+    cA=2*pr-1; cI=2*pr;         % Awake / Iso column of Vcond
+    axPr(pr)=nexttile; hold on;
+    for oi=1:numel(orders2show)
+        for jj=1:2
+            c=cA+jj-1;
+            xpos(oi,c)=(oi-1)*(2+groupGap)+jj;
+            v=Vcond(:,oi,c); v=v(~isnan(v));
+            if isempty(v); continue; end
+            m=mean(v); se=std(v)/sqrt(numel(v));
+            bar(xpos(oi,c),m,barW,'FaceColor',stCol(jj,:),'FaceAlpha',0.75, ...
+                'EdgeColor',[0.2 0.2 0.2],'LineWidth',1);
+            errorbar(xpos(oi,c),m,se,'k','LineStyle','none','LineWidth',1,'CapSize',6);
+            plot(xpos(oi,c)+jitterB*(2*rand(size(v))-1),v,'o','MarkerSize',5, ...
+                'MarkerFaceColor',[0.25 0.25 0.25],'MarkerEdgeColor','none');
+        end
+    end
+
+    % --- Awake vs Iso within each order (unpaired: one state per neuron) ---
+    yTop=max(reshape(Vcond(:,:,[cA cI]),[],1),[],'omitnan');
+    for oi=1:numel(orders2show)
+        vA=Vcond(:,oi,cA); vI=Vcond(:,oi,cI);
+        hasA=~isnan(vA); hasI=~isnan(vI);
+        fprintf('  %-4s %s spike: Awake %4.2f+-%4.2f (%d neurons, %d mice, %d spikes) | Iso %4.2f+-%4.2f (%d neurons, %d mice, %d spikes)', ...
+            prName{pr}, ordStr{oi}, ...
+            mean(vA(hasA)), std(vA(hasA))/sqrt(max(sum(hasA),1)), sum(hasA), numel(unique(mouseOfN(hasA))), Nspk(oi,cA), ...
+            mean(vI(hasI)), std(vI(hasI))/sqrt(max(sum(hasI),1)), sum(hasI), numel(unique(mouseOfN(hasI))), Nspk(oi,cI));
+        if sum(hasA)>1 && sum(hasI)>1
+            p=ranksum(vA(hasA),vI(hasI));
+            fprintf('  p=%.3g\n', p);
+            if p<0.05
+                yy=yTop+0.12;
+                plot([xpos(oi,cA) xpos(oi,cA) xpos(oi,cI) xpos(oi,cI)],[yy yy+0.04 yy+0.04 yy],'k-','LineWidth',1);
+                text(mean(xpos(oi,[cA cI])),yy+0.05,starOf(p),'HorizontalAlignment','center', ...
+                    'VerticalAlignment','bottom','FontSize',12);
+            end
+        else
+            fprintf('  p=n/a\n');
+        end
+    end
+
+    hUnity=yline(1,':'); hUnity.Color=[0.6 0.6 0.6];
+    set(gca,'XTick',mean(xpos(:,[cA cI]),2),'XTickLabel',ordStr);
+    xlim([xpos(1,cA)-1 xpos(end,cI)+1]);
+    xlabel('Evoked spike order'); box off; title(prTitle{pr});
+    if pr==1
+        ylabel('Transmission ratio');
+        hleg=gobjects(1,2);
+        for jj=1:2
+            hleg(jj)=patch(NaN,NaN,stCol(jj,:),'FaceAlpha',0.75,'EdgeColor',[0.2 0.2 0.2]);
+        end
+        legend(hleg,{'Awake','Iso'},'Location','northwest','Box','off');
+    end
+end
+linkaxes(axPr,'y');       % same TX ratio scale in both panels
+ylim(axPr(1), ylim(axPr(1)) + [0 0.10*diff(ylim(axPr(1)))]);   % headroom for the stars
+set_fontsize(14); set_font('Arial');
+
 %% Show spike order and bAP apical AUC (figure 4)
 
 timebin=[0 5 20 40 60 100];
 maxTXratio=6; stimstr={'Soma','Dendrite'}; g=1; cmap_sporder=gray(10); cmap_sporder=cmap_sporder(1:2:10,:);
+neuronSel=5;        % restrict figure(14) to these NeuronIDs; [] = all neurons
 figure(14); clf; tiledlayout(2,1);
 for wvf=[2 4]
     nexttile([1 1]);
     % [M S t_center N SubSet]=binning_data({[LabelMat_SP.SpikeFrameBlueonset(show_ind) LabelMat_SP.TransmissionRatio(show_ind)]},timebin);
     % %p=get_pValue(SubSet,0);
     % scatter_heatmap(LabelMat_SP.SpikeFrameBlueonset(show_ind),LabelMat_SP.TransmissionRatio(show_ind),100,200);
-    sp2show_sporder=[];
+    sp2show_sporder=cell(1,4);
     for sporder=1:4
-        % show_ind=find(LabelMat_SP.StimRegion==wvf & abs(LabelMat_SP.TransmissionRatio)<maxTXratio & LabelMat_SP.SpikeOrder==sporder); %Pulse & Soma
-        show_ind=find(LabelMat_SP.NeuronID==5 & LabelMat_SP.StimRegion==wvf & abs(LabelMat_SP.TransmissionRatio)<maxTXratio & LabelMat_SP.SpikeOrder==sporder); %Pulse & Soma
-        sp2show_sporder{sporder}=LabelMat_SP.AUC_apical_norm(show_ind);
+        % NOTE: neuronSel (top of this section) restricts the pool. Set it to []
+        % for the population-level version of this panel.
+        keep = LabelMat_SP.StimRegion==wvf & abs(LabelMat_SP.TransmissionRatio)<maxTXratio ...
+             & LabelMat_SP.SpikeOrder==sporder;                       %Pulse & Soma
+        if ~isempty(neuronSel); keep = keep & ismember(LabelMat_SP.NeuronID,neuronSel); end
+        sp2show_sporder{sporder}=LabelMat_SP.AUC_apical_norm(find(keep));
+    end
+    nPer = cellfun(@(x) sum(~isnan(x)), sp2show_sporder);
+    fprintf('figure(14) %s stim: n per spike order 1-4 = [%s]\n', stimstr{g}, num2str(nPer));
+    if all(nPer==0)
+        warning('figure(14): no spikes pass the filter for %s stim (neuronSel = %s).', ...
+            stimstr{g}, mat2str(neuronSel));
     end
     p=Violin_wPoints(sp2show_sporder,cmap_sporder(1:4,:));
     % hold all;
@@ -1012,6 +1577,10 @@ timebin=[0 30 35 70 100 200:100:500];
 Rheobin=[1 1.3 1.6 2 3 4 5];
 perisomadist=[-30 30]; cmap=[0 0 0; 1 0 0];  cmap_light=[0.7 0.7 0.7; 1 0.7 0.7];
 Kymos=[]; AUCbAPall=[];
+% Per blue epoch, alongside Kymos{session,wvf}: the time axis relative to that
+% epoch's blue onset, and the epoch duration. Needed to draw a single pulse
+% with a real x-axis and a pre-blue-onset baseline (figure 28).
+KymoT=[]; KymoDur=[];
 % Guard: if OpResultLabel was accidentally passed through array2table twice it
 % becomes a nested table-of-tables, and OpResultLabel.Stim_Region_Waveform==wvf
 % then returns a table (breaking find). Un-nest to a flat numeric-column table.
@@ -1021,7 +1590,13 @@ while istable(OpResultLabel) && any(varfun(@istable,OpResultLabel,'OutputFormat'
 end
 
 SpikeAmp=[]; SpikeAUC=[]; dax=[]; g=1;
-for wvf=[1]; % wvf=1 : soma stimulation, wvf=3 : Dendrite stimulation, wvf =5 : WF stimulation
+% wvf codes: 1 = soma stimulation, 3 = dendrite stimulation, 5 = WF stimulation.
+% Dendrite sessions are now loaded too, so the awake Soma/Dend x Pulse/Ramp
+% panel (figure 22) has data. Every downstream block filters on StimRegion,
+% so the extra rows are inert elsewhere - see the note at the spike-order
+% loop below, which is pinned to region 1 to keep figure(24) unchanged.
+wvfList=[1 3];
+for wvf=wvfList
     BlueStimN=OpResultLabel(find(Kymo2use'>0 & OpResultLabel.Stim_Region_Waveform==wvf),[3 4 2]); %Neuron#, bwBlue, Repeat
     fprintf('[Pulse&Ramp] wvf %d: %d blue-stim sessions\n', wvf, size(BlueStimN,1));
     for n=1:size(BlueStimN,1) % session
@@ -1052,6 +1627,11 @@ for wvf=[1]; % wvf=1 : soma stimulation, wvf=3 : Dendrite stimulation, wvf =5 : 
             if ismember(wvf,[1 3]) && BluePulseN <= max(bwBlue)-6
                 continue;
             end
+            % Is this blue epoch the ramp or a short pulse? Decided by epoch
+            % duration, the same rule Section 1 uses to find the ramp
+            % (bluePeriod>2500). More robust than "StimOrder==6", which only
+            % identifies the ramp when the session has exactly 6 blue periods.
+            isRampEpoch = sum(bwBlue==BluePulseN) > 2500;
 
             [STAbAP]=get_STA(normTr,max(som_spike>0,[],1),-nTau(1),nTau(2));
             [~, tmax]=max(STAbAP(:,-nTau(1)+[-2:4]),[],2);
@@ -1071,6 +1651,8 @@ for wvf=[1]; % wvf=1 : soma stimulation, wvf=3 : Dendrite stimulation, wvf =5 : 
             kymoFrames=unique(find(bwBlue==BluePulseN)'+[-50:50]);
             kymoFrames(kymoFrames<1 | kymoFrames>nTime)=[];   % clip ±50 window to trace bounds
             Kymos{n,wvf}=normTr(OpResult{wvf,rep,Neuron}.dist_order,kymoFrames);
+            KymoT{n,wvf}=(kymoFrames-BlueOnset)';        % frames rel. to blue onset
+            KymoDur{n,wvf}=sum(bwBlue==BluePulseN);      % blue epoch length (frames)
 
             [~, AlignedbAP, Sptime]=get_STA(normTrSub,SpikeinBlue>0,-nTau(1),nTau(2));
             % RheobaseBlue only exists for ramp sessions (Rheobase computed from
@@ -1127,14 +1709,28 @@ for wvf=[1]; % wvf=1 : soma stimulation, wvf=3 : Dendrite stimulation, wvf =5 : 
 
             catlab=[repmat(n,length(Sptime),1) repmat(Neuron,length(Sptime),1) Sptime_inBlue' ...
                 repmat(BluePulseN,length(Sptime),1) RheoBaseAmp' [1:length(Sptime)]'  repmat(MouseInd,length(Sptime),1) repmat(fileInd,length(Sptime),1) repmat(wvf,length(Sptime),1) ...
-                IsCS' BurstOrder' repmat(rep,length(Sptime),1) SpType trnsmit_bAPAUC bAPAUC_Apical bAPAUC_Soma ISI];
+                IsCS' BurstOrder' repmat(rep,length(Sptime),1) SpType trnsmit_bAPAUC bAPAUC_Apical bAPAUC_Soma ISI ...
+                repmat(isRampEpoch,length(Sptime),1)];
             LabelMat=[LabelMat; catlab];  %Session number, Neuron #, Spike Frame, Stimulation Pattern, Rheobase, Spike Order, Mouse#
         end
     end
 end
 fieldName={'SessionID','NeuronID','SpikeFrame','StimOrder','Rheobase','SpikeOrder','MouseID','FileID','StimRegion',...
-    'InCS','BurstOrder','RepeatID','SpikeType','TransmissionRatio','AUC_apical','Amp_Soma','ISI'};
+    'InCS','BurstOrder','RepeatID','SpikeType','TransmissionRatio','AUC_apical','Amp_Soma','ISI','IsRamp'};
 LabelMat=array2table(LabelMat,'VariableNames',fieldName);
+
+% brain State per spike, looked up through the spreadsheet file index
+stRawLM=State(LabelMat.FileID);
+stLM=repmat("Unknown",height(LabelMat),1);
+for i=1:numel(stRawLM)
+    if ischar(stRawLM{i}) || isstring(stRawLM{i})
+        s=lower(strtrim(string(stRawLM{i})));
+        if contains(s,'awake');    stLM(i)="Awake";
+        elseif contains(s,'iso');  stLM(i)="Iso";
+        end
+    end
+end
+LabelMat.State=stLM;
 
 NeuronIDs_unq=unique(LabelMat.NeuronID)';
 NormConstant=NaN(1,max(NeuronIDs_unq));
@@ -1155,14 +1751,30 @@ LabelMat.AUC_apical_norm=LabelMat.AUC_apical./NormConstant_vecAA;
 %% Soma normalized transmission ratio over time (Figure 5D)
 % The single best panel: soma stimulation (wvf==1), normalized transmission
 % ratio vs time after blue onset. One dot per pulse spike (density-coloured)
-% with the binned mean +/- SEM, plus pairwise statistical tests between time
-% bins (ranksum; full pairwise matrix printed, adjacent-bin significance drawn).
+% with the binned mean +/- SEM. Statistics: the full pairwise ranksum matrix
+% between time bins is printed, and the pooled early spikes (< earlyT ms) are
+% tested against the pooled late spikes (> refT ms) - one ranksum, one star
+% bracket on the panel.
 timebin=[0 30 35 85 110 200:100:500]; maxTXratio=10;
 badNeurons=[1 13 22 32];                 % neurons flagged noisy by the figure(27) diagnostic
+earlyT=50;                               % early group = spikes in [0, earlyT) ms
+refT=250; refMax=timebin(end);           % late  group = spikes in (refT, refMax] ms
+                                         % refMax=Inf also pools spikes past the x-axis
+showPairwiseLines=false;                 % true = also draw the all-pairs comparison
+                                         % lines; off so they do not collide with
+                                         % the bin-vs-late stars
 figure(23); clf; hold on;
 show_ind=find(LabelMat.StimOrder~=6 & LabelMat.StimRegion==1 & abs(LabelMat.TransmissionRatio)<maxTXratio ...
     & ~ismember(LabelMat.NeuronID, badNeurons) & LabelMat.TransmissionRatio_norm>0.3);
 Xt=LabelMat.SpikeFrame(show_ind); Y=LabelMat.TransmissionRatio_norm(show_ind);
+
+% --- pooled sample size (spikes / neurons / mice / recordings) ---
+fprintf(['\nfigure(23) Figure 5D pooled sample (|TX|<%g, TXnorm>0.3, soma stim, pulse):\n' ...
+    '  %d spikes, %d neurons, %d mice, %d recordings, %d sessions\n'], maxTXratio, ...
+    numel(show_ind), numel(unique(LabelMat.NeuronID(show_ind))), ...
+    numel(unique(LabelMat.MouseID(show_ind))), numel(unique(LabelMat.FileID(show_ind))), ...
+    numel(unique(LabelMat.SessionID(show_ind))));
+
 scatter_density(Xt, Y, 50, parula(256));
 cb=colorbar;
 cb.Label.String='Relative density';
@@ -1177,9 +1789,294 @@ pAdj = nan(size(pBins));                           % draw only adjacent-bin comp
 for b=1:numel(br.centers)-1
     pAdj(b,b+1)=pBins(b,b+1); pAdj(b+1,b)=pBins(b,b+1);
 end
-drawPValueLines(pBins, 0.1, 'XCoord', br.centers);
+if showPairwiseLines; drawPValueLines(pBins, 0.1, 'XCoord', br.centers); end
+
+% --- pooled EARLY vs pooled LATE spikes (one two-sided ranksum, star on plot) ---
+% Two disjoint windows, all spikes pooled across neurons: early = [0, earlyT) ms
+% (the transient) and late = (refT, refMax] ms (the steady state).
+isEarly = Xt>=timebin(1) & Xt<earlyT;
+isLate  = Xt>refT & Xt<=refMax;
+yE=Y(isEarly); yL=Y(isLate);
+pEL=NaN; if numel(yE)>1 && numel(yL)>1; pEL=ranksum(yE,yL); end
+starStr=@(p) repmat('*',1,(p<0.001)+(p<0.01)+(p<0.05));   % ***<0.001 **<0.01 *<0.05
+sEL=starStr(pEL);
+if isnan(pEL); sEL='n/a'; elseif isempty(sEL); sEL='n.s.'; end
+grpN={'early','late'}; grpW={[timebin(1) earlyT],[refT refMax]}; grpM={isEarly,isLate};
+fprintf('  pooled <%g ms vs >%g ms (two-sided ranksum): p = %.3g  (%s)\n', earlyT, refT, pEL, sEL);
+for g=1:2
+    yg=Y(grpM{g}); ig=show_ind(grpM{g});
+    fprintf(['    %-5s (%3g-%3g ms): n=%4d spikes, %2d neurons, %2d mice | ' ...
+        'mean=%.3f +/- %.3f SEM, median=%.3f\n'], grpN{g}, grpW{g}(1), grpW{g}(2), numel(yg), ...
+        numel(unique(LabelMat.NeuronID(ig))), numel(unique(LabelMat.MouseID(ig))), ...
+        mean(yg,'omitnan'), std(yg,'omitnan')./sqrt(max(numel(yg),1)), median(yg,'omitnan'));
+end
+fprintf('    early/late ratio of means = %.3f\n', mean(yE,'omitnan')./mean(yL,'omitnan'));
+
 ylim([0.3 2]);
 set_fontsize(14); set_font('Arial'); set_figsize(110,100);
+
+% annotation drawn last: set_fontsize() would otherwise rescale it with the axes
+if ~isnan(pEL)
+    xE=mean([timebin(1) earlyT]); xL=mean([refT min(refMax,timebin(end))]);
+    yl=ylim; yBar=yl(1)+0.92*diff(yl); tick=0.02*diff(yl);
+    plot([xE xE xL xL],[yBar-tick yBar yBar yBar-tick],'-','Color',[0 0 0],'LineWidth',1.2);
+    text(mean([xE xL]), yBar, sEL, 'HorizontalAlignment','center', ...
+        'VerticalAlignment','bottom', 'FontSize',15, 'FontName','Arial', 'Color',[0 0 0]);
+end
+
+%% TX ratio over time by state: Soma/Dend x Pulse/Ramp (figures 22, 26, 28)
+% Figure 5D generalized: same quantity (TransmissionRatio_norm vs time after
+% blue onset, density scatter + binned mean +- SEM) in a 2x2 grid.
+%   rows    = stimulation site   (Soma = StimRegion 1, Dendrite = StimRegion 3)
+%   columns = blue waveform      (Pulse = IsRamp 0,    Ramp = IsRamp 1)
+% One grid per brain state: figure(22) Awake, figure(26) Iso. figure(28) adds a
+% representative single soma pulse (kymograph + peri-soma / distal-apical
+% traces) for each state. Pulse and ramp epochs come from the same sessions -
+% IsRamp is set per blue epoch by its duration (>2500 frames), not by
+% StimOrder==6, so it stays correct when a session has more than 6 epochs.
+%
+% Note on normalization: TransmissionRatio_norm divides by each NEURON's median
+% soma-pulse TX ratio, so a neuron with no soma-pulse data has NaN here and
+% drops out (counted below). Dendrite panels therefore only show neurons that
+% also have a soma-pulse session.
+timebinPulse=[0 30 35 85 110 200:100:500];   % as in figure 5D
+nBinRamp=10;                                  % ramp bins are data-adaptive
+maxTXratio=10; minTXnorm=0.3;
+badNeurons=[1 13 22 32];                      % flagged noisy by the figure(27) diagnostic
+regionsF22=[1 3]; regNameF22={'Soma','Dendrite'};
+rampF22=[0 1];    wvfNameF22={'Pulse','Ramp'};
+statesF22=["Awake" "Iso"]; figNumF22=[22 26];   % one 2x2 grid per brain state
+somaBinF22=[-50 50];   apicBinF22=[140 460];    % same bins as the TX ratio
+% --- figure(28), the representative single pulse ---
+exStateF28="Awake";    % state shown in figure(28)
+exSessionF28=104;      % [] = auto-pick; a SessionID from the printed list to force it
+listROIF28=true;       % print the row list (distance + peak) for nominating bad ROIs
+badROIF28=[1 2 5 9 10 16 20 32 38];          % rows to drop from the kymograph AND from the traces. These
+                       % are row numbers of the FULL distance-sorted list printed
+                       % below; that list is always printed unfiltered, so the
+                       % numbers stay valid after you exclude some and re-run.
+cmapKymoF28=turbo;     % kymograph colormap
+pcaKeepF28=setdiff([1:30],[3 4 8 12]);       % PCs kept by pcafilterTrace for the KYMOGRAPH image only
+                       % ([] = show it unfiltered). The traces stay unfiltered:
+                       % averaging over a distance bin is its own denoiser, and
+                       % they carry the quantitative comparison.
+
+if ~ismember('IsRamp',LabelMat.Properties.VariableNames)
+    warning(['figure(22): LabelMat has no IsRamp column - re-run the Pulse & Ramp ' ...
+        'section so the ramp/pulse split and the dendrite sessions are built.']);
+else
+okSel = abs(LabelMat.TransmissionRatio)<maxTXratio & LabelMat.TransmissionRatio_norm>minTXnorm ...
+      & ~ismember(LabelMat.NeuronID,badNeurons);
+
+for stIdx=1:numel(statesF22)
+stNow=statesF22(stIdx); figNow=figNumF22(stIdx);
+baseSel = okSel & LabelMat.State==stNow;
+nNoNorm = sum(isnan(LabelMat.TransmissionRatio_norm) & LabelMat.State==stNow);
+if nNoNorm>0
+    fprintf(['figure(%d) [%s]: %d spikes have no TransmissionRatio_norm ' ...
+        '(their neuron has no soma-pulse session) and are excluded.\n'], figNow, stNow, nNoNorm);
+end
+
+figure(figNow); clf; tiledlayout(2,2,'Padding','compact','TileSpacing','compact');
+fprintf('\nfigure(%d) %s TX ratio over time (|TX|<%g, TXnorm>%g):\n', figNow, stNow, maxTXratio, minTXnorm);
+poolSel = baseSel & ismember(LabelMat.StimRegion,regionsF22) & ismember(LabelMat.IsRamp,rampF22);
+fprintf('  %-22s: %4d spikes, %2d neurons, %2d mice, %2d recordings, %2d sessions\n', ...
+    'ALL panels pooled', sum(poolSel), numel(unique(LabelMat.NeuronID(poolSel))), ...
+    numel(unique(LabelMat.MouseID(poolSel))), numel(unique(LabelMat.FileID(poolSel))), ...
+    numel(unique(LabelMat.SessionID(poolSel))));
+for ri=1:2                                    % stimulation site -> row
+    for wi=1:2                                % waveform -> column
+        nexttile; hold on;
+        sel = baseSel & LabelMat.StimRegion==regionsF22(ri) & LabelMat.IsRamp==rampF22(wi);
+        panelName=sprintf('%s stim. (%s)',regNameF22{ri},wvfNameF22{wi});
+        if sum(sel)<3
+            axis off; title(sprintf('%s  n=%d',panelName,sum(sel)),'FontSize',10);
+            fprintf('  %-22s: %d spikes - panel skipped\n', panelName, sum(sel));
+            continue
+        end
+        Xt=LabelMat.SpikeFrame(sel); Y=LabelMat.TransmissionRatio_norm(sel);
+
+        % pulse keeps the figure 5D bins; ramp spans seconds, so bin adaptively
+        if rampF22(wi)==0
+            tb=timebinPulse;
+        else
+            tb=linspace(0,prctile(Xt,99),nBinRamp+1);
+        end
+        scatter_density(Xt,Y,40);
+        br=binning_data({[Xt Y]},tb);
+        Nb=cellfun(@numel,br.values);
+        errorbar(br.centers,br.mean,br.std./sqrt(max(Nb,1)),'Color',[1 0 0],'LineWidth',1.5);
+        xlim([tb(1) tb(end)]); ylim([0 2.5]);
+        caxis([0 0.0012]); colormap(gen_colormap([0 0 0; parula(10)]));
+        xlabel('Time after blue onset (ms)'); box off;
+        if wi==1; ylabel('Normalized transmission ratio'); end
+        title(panelName);
+
+        % adjacent-bin comparison (ranksum on pooled spikes), as in figure 5D
+        pAdj=nan(1,numel(br.centers)-1);
+        for b=1:numel(br.centers)-1
+            if Nb(b)>1 && Nb(b+1)>1; pAdj(b)=ranksum(br.values{b},br.values{b+1}); end
+        end
+        fprintf(['  %-22s: %4d spikes, %2d neurons, %2d mice, %2d recordings, %2d sessions' ...
+            ' | min adjacent-bin p = %.3g\n'], ...
+            panelName, sum(sel), numel(unique(LabelMat.NeuronID(sel))), ...
+            numel(unique(LabelMat.MouseID(sel))), numel(unique(LabelMat.FileID(sel))), ...
+            numel(unique(LabelMat.SessionID(sel))), min(pAdj,[],'omitnan'));
+    end
+end
+cb=colorbar; cb.Layout.Tile='east'; cb.Label.String='Relative density';
+sgtitle(sprintf('%s: normalized transmission ratio vs time after blue onset',stNow));
+set_fontsize(13); set_font('Arial');
+end
+
+% ===== figure(28): representative SINGLE PULSE, soma stim (exStateF28) =====
+% Kymos{SessionID,StimRegion} holds one blue epoch (+-50 frames) of the raw
+% normalized trace, dist-ordered; KymoT is its time axis relative to blue
+% onset. Baseline is the pre-blue-onset part of that same epoch (KymoT<0), so
+% the stim-evoked depolarization stays visible. Somatic spikes of that pulse
+% are marked with triangles: LabelMat.SpikeFrame counts 1-based from blue
+% onset (Sptime-BlueOnset+1) while KymoT counts 0-based, hence the -1 shift.
+if isempty(Kymos) || isempty(KymoT)
+    warning('figure(28): Kymos/KymoT are empty - re-run the Pulse & Ramp section.');
+else
+    % --- list the soma-pulse sessions available in this state, so a different
+    %     example can be chosen via exSessionF28 ---
+    selS = okSel & LabelMat.State==exStateF28 & LabelMat.StimRegion==1 & LabelMat.IsRamp==0;
+    sids = unique(LabelMat.SessionID(selS))';
+    autoSid = NaN;
+    fprintf('\nfigure(28) soma-pulse sessions [%s]:\n', exStateF28);
+    if isempty(sids)
+        fprintf('  (none pass the filters)\n');
+    else
+        cnt  = arrayfun(@(s) sum(selS & LabelMat.SessionID==s), sids);
+        hasK = arrayfun(@(s) s<=size(Kymos,1) && ~isempty(Kymos{s,1}), sids);
+        score = cnt; score(~hasK) = -1;         % only sessions with a kymograph
+        if any(hasK); [~,bi] = max(score); autoSid = sids(bi); end
+        fprintf('  %-9s %-6s %-5s %-4s %-5s %-6s %-5s\n', ...
+            'Session','Neuron','Mouse','Rep','Epoch','spikes','kymo');
+        for q=1:numel(sids)
+            r = find(selS & LabelMat.SessionID==sids(q),1);
+            yn = {'no','yes'};
+            mark = ''; if isequaln(sids(q),autoSid); mark = '  <- auto-picked'; end
+            fprintf('  %-9d %-6d %-5d %-4d %-5d %-6d %-5s%s\n', ...
+                sids(q), LabelMat.NeuronID(r), LabelMat.MouseID(r), LabelMat.RepeatID(r), ...
+                LabelMat.StimOrder(r), cnt(q), yn{hasK(q)+1}, mark);
+        end
+        fprintf('  (set exSessionF28 = <Session> to override, exStateF28 to switch state)\n');
+    end
+
+    if ~isempty(exSessionF28)
+        sid=exSessionF28;
+    else
+        sid=autoSid;
+    end
+    if isnan(sid) || sid>size(Kymos,1) || isempty(Kymos{sid,1})
+        warning('figure(28): no plottable %s soma-pulse session (see the list above).', exStateF28);
+    else
+        K=Kymos{sid,1}; t=KymoT{sid,1}; dur=KymoDur{sid,1}; dxx=dax{sid,1};
+        K=K-mean(K(:,t<0),2,'omitnan');       % pre-blue-onset baseline
+        % every somatic spike of this pulse (unfiltered - this is one raw epoch)
+        spkT=LabelMat.SpikeFrame(LabelMat.SessionID==sid & LabelMat.StimRegion==1)'-1;
+
+        % --- rows sorted by signed distance from soma (basal top -> apical
+        %     bottom). dist_order walks the dendrite path, which is not
+        %     monotonic in distance once the tree branches; sorting also makes
+        %     set_kymoYtick correct, since it assumes a monotonic axis. ---
+        [dxx, sortR]=sort(dxx,'ascend');
+        K=K(sortR,:);
+
+        % --- ROI rows: list the FULL sorted set, then drop badROIF28 ---
+        keepR=true(size(K,1),1);
+        dropR=badROIF28(badROIF28>=1 & badROIF28<=numel(keepR));
+        keepR(dropR)=false;
+        if numel(dropR)<numel(badROIF28)
+            warning('figure(28): %d entry of badROIF28 is outside 1..%d and was ignored.', ...
+                numel(badROIF28)-numel(dropR), numel(keepR));
+        end
+        if listROIF28
+            pkR=max(K,[],2,'omitnan');
+            fprintf('  rows of session %d (sorted by distance, top to bottom) - put row numbers in badROIF28:\n', sid);
+            for rr=1:size(K,1)
+                mk=''; if ~keepR(rr); mk='   [excluded]'; end
+                fprintf('    %3d  %8.1f um   peak %7.4f%s\n', rr, dxx(rr), pkR(rr), mk);
+            end
+        end
+        K=K(keepR,:); dxx=dxx(keepR);
+        if isempty(K)
+            error('figure(28): badROIF28 excluded every row of session %d.', sid);
+        end
+
+        % PCA-denoise the image only (after the bad-ROI drop, so excluded rows
+        % cannot pollute the components). pcafilterTrace returns all-NaN when
+        % the kept-component count reaches the row count, hence the guard.
+        Kimg=K;
+        if ~isempty(pcaKeepF28)
+            nPC=pcaKeepF28(pcaKeepF28>=1 & pcaKeepF28<=min(size(K)));
+            if numel(nPC)<size(K,1) && ~isempty(nPC)
+                Kimg=pcafilterTrace(K,nPC);
+                fprintf('  kymograph PCA-filtered: kept %d of %d components.\n', numel(nPC), size(K,1));
+            else
+                warning(['figure(28): pcaKeepF28 keeps %d components for %d rows - ' ...
+                    'kymograph shown unfiltered.'], numel(nPC), size(K,1));
+            end
+        end
+
+        caxF28=[prctile(Kimg(:),1) prctile(Kimg(:),99.8)];
+        if ~(caxF28(2)>caxF28(1)); caxF28=[min(Kimg(:)) max(Kimg(:))+eps]; end
+        caxF28=reshape(caxF28(1:2),1,2);
+
+        figure(28); clf;
+        tiledlayout(2,1,'Padding','compact','TileSpacing','compact');
+        % --- top: single-pulse kymograph ---
+        axKy=nexttile(1);
+        imagesc(t,1:size(Kimg,1),Kimg,caxF28);
+        colormap(gca,cmapKymoF28); hold on;
+        xline(0,'w-'); xline(dur,'w--');                  % blue on / off
+        set_kymoYtick(dxx);
+        ylim([0 size(K,1)+0.5]);                          % headroom for the markers
+        % plot(spkT,repmat(0.45,size(spkT)),'v','MarkerSize',6, ...
+        %     'MarkerFaceColor','w','MarkerEdgeColor','k');
+        title(sprintf('%s - soma pulse (session %d, neuron %d, %d spikes)', ...
+            exStateF28, sid, LabelMat.NeuronID(find(LabelMat.SessionID==sid,1)), numel(spkT)),'FontSize',10);
+        xlabel('Time from blue onset (ms)'); ylabel(sprintf('Distance from \nsoma (µm)'));
+        cb=colorbar; cb.Label.String='\DeltaF/F';
+
+        % --- bottom: peri-soma and distal-apical traces of that same pulse ---
+        axTr=nexttile(2); hold on; h=[]; lab={}; ylF28=[inf -inf];
+        binsF28={somaBinF22,apicBinF22};
+        labF28={[], ...
+                []};
+        colF28=[0 0 0; 0.85 0.2 0.1];
+        for bb=1:2
+            rws=dxx>binsF28{bb}(1) & dxx<=binsF28{bb}(2);
+            if ~any(rws); continue; end
+            m=mean(K(rws,:),1,'omitnan');
+            h(end+1)=plot(t,m,'-','Color',colF28(bb,:),'LineWidth',1.2); %#ok<SAGROW>
+            lab{end+1}=labF28{bb};                                       %#ok<SAGROW>
+            ylF28=[min(ylF28(1),min(m)) max(ylF28(2),max(m))];
+        end
+        xline(0,'-','Color',[0 0.6 1]); xline(dur,'-','Color',[0 0.6 1]);
+        yline(0,':','Color',[0.7 0.7 0.7]);
+        xlabel('Time from blue onset (ms)'); ylabel('\DeltaF/F'); box off;
+        if all(isfinite(ylF28)) && ylF28(2)>ylF28(1)
+            pad=0.10*diff(ylF28);
+            ylim(axTr, ylF28+[-pad 2*pad]);               % room for the markers on top
+        end
+        yr=ylim(axTr);
+        plot(spkT,repmat(yr(2)-0.04*diff(yr),size(spkT)),'v','MarkerSize',6, ...
+            'MarkerFaceColor','k','MarkerEdgeColor','none');
+        hasLab=~cellfun(@isempty,lab);
+        if ~isempty(h) && any(hasLab)
+            legend(h(hasLab),lab(hasLab),'Box','off','Location','northwest');
+        end
+        legend(h,{'Soma','Distal dendrite'},'box','off');
+        linkaxes([axKy axTr],'x'); xlim(axTr,[t(1) t(end)]);
+        sgtitle('Representative single soma pulse');
+        set_fontsize(14); set_font('Arial');
+        set_figsize(215,100)
+    end
+end
+end
 
 %% Per-neuron transmission ratio vs time -- soma stim, normalized & un-normalized (figure 27)
 % Transmission ratio as a function of time after blue onset, traced separately
@@ -1257,7 +2154,12 @@ end
 
 % Show TX ratio, spike order
 TXratio_sporder=[]; g2=1;
-for stimregion2show=[1 3];
+% Pinned to region 1. g restarts at 1 for every stimregion2show and
+% TXratio_sporder is not indexed by g2, so a second region would overwrite the
+% first rather than add to it. This was latent while LabelMat held soma
+% sessions only; it matters now that wvfList also loads region 3. Restore
+% [1 3] only together with a g2 (or region) index on TXratio_sporder.
+for stimregion2show=[1];
     for sporder=1:20
         g=1;
         [unqLab, refind]=unique([LabelMat.SessionID LabelMat.StimRegion],'row');
@@ -1333,7 +2235,12 @@ end
 
 % Show TX ratio, spike order
 TXratio_sporder=[]; g2=1;
-for stimregion2show=[1 3];
+% Pinned to region 1. g restarts at 1 for every stimregion2show and
+% TXratio_sporder is not indexed by g2, so a second region would overwrite the
+% first rather than add to it. This was latent while LabelMat held soma
+% sessions only; it matters now that wvfList also loads region 3. Restore
+% [1 3] only together with a g2 (or region) index on TXratio_sporder.
+for stimregion2show=[1];
     for sporder=1:13
         g=1;
         [unqLab, refind]=unique([LabelMat.SessionID LabelMat.StimRegion],'row');
@@ -2087,7 +2994,7 @@ set(gca, 'YDir', 'reverse');
 colormap("turbo")
 %zlim([0.3 1.6])
 xlabel('Optical Rheobase')
-ylabel('Distance from soma (\mum)')
+ylabel('Distance from soma (µm)')
 title('Normalized Spike Amplitude')
 
 
@@ -2275,7 +3182,7 @@ set(gca, 'YDir', 'reverse');
 colormap("turbo")
 %zlim([0.3 1.6])
 xlabel('Optical Rheobase')
-ylabel('Distance from soma (\mum)')
+ylabel('Distance from soma (µm)')
 title('Normalized Spike Amplitude')
 %view(0,90)
 %
@@ -2297,7 +3204,7 @@ title('Normalized Spike Amplitude')
 % colormap("turbo")
 % %zlim([0.3 1.4])
 % xlabel('Optical Rheobase')
-% ylabel('Distance from soma (\mum)')
+% ylabel('Distance from soma (µm)')
 % title('Normalized Spike AUC')
 % %view(0,90)
 
@@ -2390,7 +3297,7 @@ title('Normalized Spike Amplitude')
 % colormap("turbo")
 % %zlim([0.3 1.6])
 % xlabel('Time after blue onset (ms)')
-% ylabel('Distance from soma (\mum)')
+% ylabel('Distance from soma (µm)')
 % title('Normalized Spike Amplitude')
 % %view(0,90)
 %
@@ -2411,7 +3318,7 @@ title('Normalized Spike Amplitude')
 % colormap("turbo")
 % %zlim([0.3 1.4])
 % xlabel('Time after blue onset (ms)')
-% ylabel('Distance from soma (\mum)')
+% ylabel('Distance from soma (µm)')
 % title('Normalized Spike AUC')
 % %view(0,90)
 
@@ -2508,7 +3415,7 @@ title('Normalized Spike Amplitude')
 % colormap("turbo")
 % %zlim([0.3 1.6])
 % xlabel('Optical Rheobase')
-% ylabel('Distance from soma (\mum)')
+% ylabel('Distance from soma (µm)')
 % title('Normalized Spike Amplitude')
 % %view(0,90)
 %
@@ -2529,7 +3436,7 @@ title('Normalized Spike Amplitude')
 % colormap("turbo")
 % %zlim([0.3 1.4])
 % xlabel('Optical Rheobase')
-% ylabel('Distance from soma (\mum)')
+% ylabel('Distance from soma (µm)')
 % title('Normalized Spike AUC')
 % %view(0,90)
 

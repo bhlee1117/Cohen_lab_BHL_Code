@@ -1,4 +1,4 @@
-function result = binning_data(data_cells, bin_edges)
+function varargout = binning_data(data_cells, bin_edges)
 % binning_data  Bin multi-recording data along an x-axis and compute statistics per bin.
 %
 % For each bin defined by bin_edges, collects all y-values across every
@@ -7,6 +7,11 @@ function result = binning_data(data_cells, bin_edges)
 %
 % Usage:
 %   result = binning_data(data_cells, bin_edges)
+%
+%   Legacy (pre-2026.06) multi-output form, still supported:
+%   [mean_amplitudes std_amplitudes x_bin_centers indicies binnedData] = ...
+%       binning_data(data_cells, bin_edges)
+%   which maps to result.mean, .std, .centers, .membership, .values
 %
 % Inputs:
 %   data_cells  - {nRecordings x 1} cell array. Each cell contains an
@@ -75,5 +80,13 @@ for iBin = 1:nBins
         result.sem(iBin)    = result.std(iBin) / sqrt(nRec_in_bin);
         result.values{iBin} = pooled_y;
     end
+end
+
+if nargout <= 1
+    varargout{1} = result;
+else
+    % Legacy output order, for callers written before the struct refactor
+    legacy = {result.mean, result.std, result.centers, result.membership, result.values};
+    varargout = legacy(1:min(nargout, numel(legacy)));
 end
 end

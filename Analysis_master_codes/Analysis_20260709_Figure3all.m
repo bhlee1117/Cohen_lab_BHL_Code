@@ -191,6 +191,10 @@ for f = [foi]
     SpikeClassvec = Classvec .* Result.spike(1,:);
 
     PCresult{f}.SpikeMat = double(Result.spike>0);
+    % Canonical somatic spike train: every somatic AP from the reference row 1
+    % (unmasked). This is the single source of truth for "a somatic spike occurred
+    % here" and is used consistently for dSpike exclusion and the QC.
+    PCresult{f}.SomaSpike = find(Result.spike(1,:) > 0);
     PCresult{f}.SpikeMat(:, Result.motionReject > 0) = NaN;
     if ifdirtRemov(f)
         PCresult{f}.SpikeMat(Result.dirtTrace > 0) = NaN;
@@ -536,6 +540,118 @@ save(bAPampDataFile, 'bAPPropsMat', 'EventPropsMat', 'AlignedbAPall', ...
     'presub_readtime', 'PerisomaRange', 'foi', '-v7.3');
 end
 
+%%
+
+fprintf('  Building unified SpikeTable / EventTable ...\n');
+[SpikeTable, EventTable, NeuronTable] = build_spike_event_tables(PCresult, bAPPropsMat, EventPropsMat, foi);
+fprintf('    %d spikes, %d events, %d neurons\n', height(SpikeTable), height(EventTable), height(NeuronTable));
+%% Example events: bAP kymograph + soma/dendrite traces with AUC shading
+% The original version of this panel read loop-local variables (AlignedbAP,
+% AlignedBaseline, AlignedSpike, AlignedSilentVec, delayMat, nROI) that no
+% longer survive the build loop. The current pipeline persists everything in
+% AlignedbAPall{f,:} / SpikeTable / PCresult, so here we reconstruct exactly
+% those arrays for the neuron being shown before plotting.
+fprintf('Section: Example event traces (fig 23)\n');
+f2show=23;
+
+% --- rebuild the per-spike aligned arrays for f2show from saved data ---------
+nROI = size(AlignedbAPall{f2show,1},1);
+% AlignedbAPall{f,1} is (ROI x time x spike); the old plotting code expects
+% (ROI x spike x time), so permute dims 2<->3.
+AlignedbAP      = permute(AlignedbAPall{f2show,1},[1 3 2]);                       % raw
+% AlignedbAPall{f,2} = raw - baseline  =>  baseline = raw - subtracted.
+AlignedBaseline = permute(AlignedbAPall{f2show,1}-AlignedbAPall{f2show,2},[1 3 2]);
+
+% Aligned somatic spike raster (1 x spike x time), same triggers/order as the
+% aligned bAP arrays (both align on PCresult{f}.SpikeMat(1,:)>0).
+spikeTrig = PCresult{f2show}.SpikeMat(1,:)>0;
+[~, AlignedSpike] = get_STA(double(spikeTrig), spikeTrig, -nTau(1), nTau(end));
+
+% Silent-period marker: frames outside the peri-activity dilation used by
+% get_subthreshold (dilate=40), i.e. the baseline-estimation regions.
+ActivityTr = max([spikeTrig; PCresult{f2show}.BStrace>0; PCresult{f2show}.CStrace>0],[],1)>0;
+silentVec  = double(~imdilate(ActivityTr, strel('square',40)));
+[~, AlignedSilentVec] = get_STA(silentVec, spikeTrig, -nTau(1), nTau(end));
+
+% Per-ROI peak delay per spike order (matches the build-loop delayMat).
+St = SpikeTable(SpikeTable.Neuron==f2show,:);
+[~,ord]=sort(St.LocalIdx); SpikeOrder = St.SpikeOrder(ord);   % slice-aligned
+delayMat = NaN(nROI,1,size(AlignedbAPall{f2show,1},3));
+for spo=unique(SpikeOrder(~isnan(SpikeOrder)))'
+    STAbAP=mean(AlignedbAPall{f2show,1}(:,:,SpikeOrder==spo),3,'omitnan');
+    [~, tmax]=max(STAbAP(:,-nTau(1)+[-2:4]),[],2);
+    tmax=tmax-nTau(1)-3;
+    delayMat(:,:,SpikeOrder==spo)=repmat(tmax,1,1,sum(SpikeOrder==spo));
+end
+
+% --- plot --------------------------------------------------------------------
+figure(23); clf; tiledlayout(2,2);
+n2show=[8 28 36]; spike2show=[60 231]; omitROI=[38];
+showXlim=[-90 35];   % visible time window (ms); TX-ratio text is limited to this range
+scaleoffset=0.17; ax1=[]; cmap_ROI=gen_colormap(Plasma,length(n2show)); gg=1;
+for sp=spike2show
+    g=1;
+    ax1=[ax1 nexttile(gg,[1 1])];
+    ROI2show=setdiff([1:nROI],omitROI);
+    kymo2show=permute(AlignedbAP(ROI2show,sp,:),[1 3 2]);
+    [dax, dsort]=sort(PCresult{f}.dendaxis(ROI2show),'ascend');
+    kymo2show=kymo2show(dsort,:);
+    imagesc(nTau,[1:length(ROI2show)],kymo2show); colormap(turbo);
+    cb=colorbar;  cb.Label.String='∆F/F';
+    ylabel('Distance (µm)'); xlabel('Time (ms)');
+    set_kymoYtick(dax);
+    %title(['TX ratio: ' num2str(SpikeTable.TransmissionRate(SpikeTable.Neuron==f2show & SpikeTable.LocalIdx==sp),2)])
+    ax1=[ax1 nexttile(gg+2,[1 1])];
+    % transmission ratio (dendritic AUC / somatic AUC) of the spike shown here
+    trRatio = St.TransmissionRate(St.LocalIdx==sp);
+    if isempty(trRatio), trRatio = NaN; end
+    fprintf('  Neuron %d, spike LocalIdx %d (right panel): transmission ratio = %.2f\n', f2show, sp, trRatio);
+    spikeAligned=squeeze(AlignedSpike(1,sp,:));   % somatic spike raster in window
+    spikeTau = find(spikeAligned)+nTau(1)-1;          % time (frames) of each spike vs ref
+    refFrame = St.Frame(St.LocalIdx==sp);             % global frame of the ref spike
+    % map each in-window spike to its SpikeTable row (LocalIdx) via global frame
+    spikeIdx = nan(size(spikeTau));
+    for k=1:numel(spikeTau)
+        idxK = St.LocalIdx(St.Frame==refFrame+spikeTau(k));
+        if ~isempty(idxK), spikeIdx(k)=idxK(1); end
+    end
+    for n=n2show
+        spiktrace2show=squeeze(AlignedbAP(n,sp,:))-scaleoffset*g;
+        baseline2show=squeeze(AlignedBaseline(n,sp,:))-scaleoffset*g;
+        plot(nTau,spiktrace2show,'color',cmap_ROI(g,:),'LineWidth',1.5); hold all;
+        if g==1, aucwin=[-1:1]; else, aucwin=[-2:3]; end
+        % shade the AUC window of EVERY spike in the window, each at that
+        % spike's own per-ROI peak delay (delayMat is indexed by LocalIdx).
+        for k=1:numel(spikeTau)
+            if isnan(spikeIdx(k)), continue; end
+            xbound = delayMat(n,1,spikeIdx(k)) + spikeTau(k) + aucwin;
+            xbound = xbound(xbound>=1 & xbound<=numel(spiktrace2show));
+            if isempty(xbound), continue; end
+            upper=spiktrace2show(xbound)';
+            lower=baseline2show(xbound)';
+            fill([xbound, fliplr(xbound)]+nTau(1)-1,[upper, fliplr(lower)],cmap_ROI(g,:), 'FaceAlpha', 0.5, 'LineStyle', 'none');
+        end
+        plot(nTau,baseline2show,'k');
+        g=g+1;
+    end
+    scatter(spikeTau,0.05,10,[0 0 0],'filled');
+    % annotate every spike in the window with its transmission ratio (voltage
+    % trace panel only; not shown on the kymograph)
+    for k=1:numel(spikeTau)
+        if isnan(spikeIdx(k)), continue; end
+        if spikeTau(k)<showXlim(1) || spikeTau(k)>showXlim(2), continue; end   % only spikes in view
+        text(spikeTau(k),0.07,sprintf('%.1f',St.TransmissionRate(spikeIdx(k))),...
+            'HorizontalAlignment','center','VerticalAlignment','bottom','FontSize',10,'Color',[0 0 0]);
+    end
+    % plot(nTau,squeeze(AlignedSilentVec(1,sp,:))*5-scaleoffset*g,'.','color',[0.8 0 0.7]); axis off;
+    linkaxes(ax1,'x'); axis off;
+    xlim(showXlim); ylim([-scaleoffset*g 0.1]);
+    gg=gg+1;
+end
+drawScaleBar(10,'horizontal','color',[0 0 0],'Linewidth',3,'Position',[23 -0.05]);
+drawScaleBar(0.1,'vertical','color',[0 0 0],'Linewidth',3,'Position',[23 -0.05]);
+set_fontsize(15); set_font('Arial');
+set_figsize(350,170);
 %% Coorelation mat of spike AUC
 fprintf('Section: Correlation matrix of spike AUC\n');
 figure(53); clf;
@@ -1314,6 +1430,8 @@ fprintf('Section: Figure 4G - multiple neurons\n');
 figure(11); clf; tiledlayout('horizontal');
 showDat=[]; showDatall=[]; bAPdecayConst=[];
 M=[]; N=[]; S=[]; t_edge=[0.5:0.25:1.6 2 2.6 3.2 3.8]; R2=[];
+Nspk=[];   % Nspk(f,b) = number of spikes contributing to neuron f, ISI bin b
+Xfit_all=cell(1,max(foi));   % Xfit_all{f} = ISI (ms) of the points offered to the fit
 
 % Per-neuron interactive exponential fits of the raw (unbinned) ISI vs bAP
 % apical AUC data, replacing expfitDM_2. One fit per neuron, cached so the GUIs
@@ -1332,11 +1450,15 @@ for f=foi
     bR=binning_data({showDat},t_edge);
     M(f,:)=bR.mean;
     S(f,:)=bR.std;
+    Nspk(f,:)=cellfun(@numel,bR.values);
     t_center=bR.centers;
     showDatall=[showDatall; showDat];
 
+    % ISI (ms) and AUC-1 for the exponential fit; computed unconditionally so the
+    % fitted ISI range can be reported even when the fits are loaded from cache.
+    Xf=10.^showDat(:,1); Yf=showDat(:,2)-1; v=~isnan(Xf)&~isnan(Yf);
+    Xfit_all{f}=Xf(v);
     if ~haveFit    % interactively fit this neuron's raw showDat
-        Xf=10.^showDat(:,1); Yf=showDat(:,2)-1; v=~isnan(Xf)&~isnan(Yf);
         if nnz(v)>=5
             optFit=struct('t_guess',20,'tau_lb',0,'tau_ub',Inf,'predefined_idx',[(Xf(v)<250) & (Xf(v)>2)]);
             fprintf('  Interactive ISI fit, neuron %d ...\n', f);
@@ -1393,23 +1515,76 @@ xlabel('Time since previous spike (ms)'); ylabel('Normalized bAP apical AUC');
 ylim([0.7 1.8]); xlim([0.5 3.6]);
 set(gca,'xdir','reverse','YAxisLocation','right')
 
-% pairwise significance vs the pooled long-ISI baseline (bins 7:8), stars over bins 1:6
+% Significance vs the long-ISI baseline, PAIRED within neuron.
+% Each neuron contributes one value per bin (its mean over spikes in that bin) and
+% one baseline value (its mean over bins 7:8, i.e. ISI > ~400 ms). Pairing within
+% neuron removes between-neuron variability and avoids treating the same neurons as
+% independent samples in the two groups.
 meanM = mean(M(foi,:),1,'omitnan');
-pooledRef = M(foi,7:8); pooledRef = pooledRef(:);   % baseline group (2 x nNeuron values)
-p_bin = nan(1,6);
-for b=1:6
-    pp = get_pValue({pooledRef, M(foi,b)}, 0);      % unpaired (different group sizes)
+refPerNeuron = mean(M(foi,6:8),2,'omitnan');   % one baseline value per neuron
+nTest = 5;
+p_bin = nan(1,nTest); nPair = nan(1,nTest);
+for b=1:nTest
+    pp = get_pValue([refPerNeuron M(foi,b)], 1, 'ttest');   % paired t-test
     p_bin(b) = pp(1,2);
+    nPair(b) = sum(~isnan(refPerNeuron) & ~isnan(M(foi,b)));
 end
+% Holm-Bonferroni correction across the nTest comparisons against one baseline
+[ps,ord] = sort(p_bin); p_holm = nan(1,nTest); running = 0;
+for k=1:nTest
+    running = max(running, (nTest-k+1)*ps(k));
+    p_holm(ord(k)) = min(1, running);
+end
+
+% ---- report sample sizes behind the binned means and the statistical test ----
+% NOTE: the test operates on per-neuron bin MEANS (one value per neuron per bin),
+% not on individual spikes. Spike counts below say how many spikes went into each
+% of those means.
+binEdges_ms = 10.^t_edge;
+fprintf('\nISI bin sample sizes (n = %d neurons):\n', numel(foi));
+fprintf('%-4s %-18s %10s %10s %12s\n','bin','ISI range (ms)','n spikes','n neurons','spikes/neuron');
+for b=1:numel(t_center)
+    nsp = sum(Nspk(foi,b),'omitnan');
+    nnr = sum(Nspk(foi,b)>0);
+    fprintf('%-4d %6.1f - %-9.1f %10d %10d %12.1f\n', ...
+        b, binEdges_ms(b), binEdges_ms(b+1), nsp, nnr, nsp/max(nnr,1));
+end
+nRefSpk = sum(sum(Nspk(foi,7:8),'omitnan'));
+fprintf('Baseline (bins 7-8, ISI > %.0f ms): %d spikes, %d neurons\n', ...
+    binEdges_ms(7), nRefSpk, sum(~isnan(refPerNeuron)));
+fprintf('Total spikes in plot: %d\n', sum(Nspk(foi,:),'all','omitnan'));
+fprintf('Paired t-test vs long-ISI baseline (per neuron):\n');
+for b=1:nTest
+    fprintf('  bin %d (%.0f-%.0f ms): %d spikes | n = %d paired neurons | mean %.3f vs %.3f | p = %.2e (Holm %.2e)\n', ...
+        b, binEdges_ms(b), binEdges_ms(b+1), sum(Nspk(foi,b),'omitnan'), nPair(b), ...
+        meanM(b), mean(refPerNeuron,'omitnan'), p_bin(b), p_holm(b));
+end
+p_star = p_bin;   % <- switch to p_holm to plot multiple-comparison-corrected stars
 yl=ylim; yoff=0.03*diff(yl);
-for b=1:4
-    if p_bin(b)<0.05
-        if p_bin(b)<0.001, star='***'; elseif p_bin(b)<0.01, star='**'; else, star='*'; end
+for b=1:nTest     % all tested bins, so a significant bin is never silently unmarked
+    if p_star(b)<0.05
+        if p_star(b)<0.001, star='***'; elseif p_star(b)<0.01, star='**'; else, star='*'; end
         text(t_center(b), meanM(b)+Sall(b)+yoff, star, 'Color','k','FontWeight','bold', ...
              'FontSize',12,'HorizontalAlignment','center','VerticalAlignment','bottom');
     end
 end
 
+% ---- report the ISI range and number of spikes used for each decay fit ----
+fprintf('\nExponential decay fits (T_C):\n');
+fprintf('%-6s %12s %12s %10s %8s %8s\n','neuron','ISI min (ms)','ISI max (ms)','n spikes','tau (ms)','R^2');
+fitLo=nan(1,max(foi)); fitHi=nan(1,max(foi)); fitN=nan(1,max(foi));
+for f=foi
+    r=isiFit{f};
+    if isempty(r) || isempty(r.idxSel) || isempty(Xfit_all{f}), continue; end
+    xs=Xfit_all{f}(logical(r.idxSel));
+    fitLo(f)=min(xs); fitHi(f)=max(xs); fitN(f)=numel(xs);
+    fprintf('%-6d %12.2f %12.2f %10d %8.2f %8.3f\n', ...
+        f, fitLo(f), fitHi(f), fitN(f), max(r.tau), r.Rsq);
+end
+fprintf('Fit range across neurons: %.1f - %.1f ms (min of lower bounds - max of upper bounds); %d spikes total\n', ...
+    min(fitLo(foi)), max(fitHi(foi)), sum(fitN(foi),'omitnan'));
+fprintf('Spikes per fit: %.0f +- %.0f (mean +- s.d.), R^2 = %.2f +- %.2f\n', ...
+    mean(fitN(foi),'omitnan'), std(fitN(foi),'omitnan'), mean(R2(foi),'omitnan'), std(R2(foi),'omitnan'));
 fprintf('Decay cont; mean: %.2f, std: %.2f\n',mean(bAPdecayConst(foi)),std(bAPdecayConst(foi)))
 set_font('Arial'); set_fontsize(16);
 set_figsize(150,110);
@@ -1568,6 +1743,9 @@ legend(counting_string(1:maxspikeN),'Location','northwest')
 fprintf('Section: dSpikes\n');
 nTauDelay=[-3:4]; % Short time window to estimate delay.
 nTauAlign=[20 15];
+dSpikeSomaExclWin=4; % ms; a dendrite-only spike (dSpike) must be MORE than this far
+                    % from ANY somatic spike (canonical PCresult{f}.SomaSpike), i.e.
+                    % no somatic spike within +/-4 ms -- the dSpike definition.
 dclass_str={'Basal','Soma','Trunk','Oblique','Distal'};
 for f=[foi]
     [nROI nTime]=size(PCresult{f}.Subthreshold);
@@ -1582,7 +1760,7 @@ for f=[foi]
     dSpikeTAsp_Branch=zeros(max(branchInd),length(nTau)); dSpikeTAsp_dClass=zeros(5,length(nTau));
     FtprntBranch=[]; FtprntdClass=[];
 
-    SomaSpikeFrame=find(max(PCresult{f}.SpikeMat(PCresult{f}.BranchLabel==1,:),[],1)>0);
+    SomaSpikeFrame=PCresult{f}.SomaSpike; % canonical somatic spikes (set in load section) — used consistently
     SpikeMatsorted=PCresult{f}.SpikeMat;
     SpikeMatsorted=SpikeMatsorted(PCresult{f}.sortDist,:);
     bAPFrame=unique(SomaSpikeFrame'+[0:3]);
@@ -1668,6 +1846,13 @@ for f=[foi]
     dSpikeFrame=unique(dSpikePropsMat{f}.Spike_frame(DendOnlySpikes));
     dSpikeFrame(find(diff(dSpikeFrame)==1)+1)=[];
     FiringRate{f}.DendOnlySpFrame=setdiff(dSpikeFrame,FiringRate{f}.DendIntSpFrame);
+    % Consistency guard: a dSpike must NOT be synchronized with ANY somatic spike.
+    % Drop any dSpike within +/- dSpikeSomaExclWin ms of a canonical somatic spike.
+    if ~isempty(FiringRate{f}.DendOnlySpFrame)
+        somaFr=PCresult{f}.SomaSpike(:);
+        dkeep=arrayfun(@(d) min([inf; abs(somaFr-d)])>dSpikeSomaExclWin, FiringRate{f}.DendOnlySpFrame);
+        FiringRate{f}.DendOnlySpFrame=FiringRate{f}.DendOnlySpFrame(dkeep);
+    end
 
     DendIntSpClassMat=NaN(5,length(FiringRate{f}.DendIntSpFrame));
     for d=1:length(FiringRate{f}.DendIntSpFrame)
@@ -1704,6 +1889,163 @@ for f=[foi]
 
     [~, AligndSpiketr{f}]=get_STA(PCresult{f}.NormalizedTrace_dirt,dSpikePropsMat{f}.Spike_frame,nTauAlign(1),nTauAlign(2));
     AligndSpiketr{f}=permute(AligndSpiketr{f},[1 3 2]);
+end
+
+%% dSpike-triggered average: spike composition & dendritic-peak PETH
+% Two subplots (blue-off, pooled over all neurons in foi):
+%  (1) dSpike-triggered histogram over time bins. Each bar's HEIGHT = probability
+%      of seeing ANY somatic spike in that bin (per dSpike), and the bar is split
+%      (stacked) into the SS/CS/BS ratio of the spikes in that bin. "Any spikes"
+%      counts every somatic AP including the Nth spikes within CS/BS (from
+%      SpikeClassVecMat rows 1/2/3, which label each spike by its ongoing class).
+%  (2) dSpike-triggered PETH of dendritic (apical) subthreshold peaks (peakvec):
+%      probability of >=1 peak in each time bin.
+% 1 frame = 1 ms. Denominator = dSpikes whose full window lies in the recording.
+fprintf('Section: dSpike-triggered spike composition & peak PETH (blue OFF)\n');
+
+STAwin = [-500 1000];                              % ms window around dSpike
+binw   = 20;                                       % ms bin width
+edges  = STAwin(1):binw:STAwin(2);
+ctrs   = edges(1:end-1) + binw/2; nB = numel(ctrs);
+winOff = STAwin(1):STAwin(2)-1;                    % integer offset columns (ms)
+binOfCol = discretize(winOff, edges);             % bin index (1..nB) per column
+evNamesC = {'SS','CS','BS'};
+cmapC    = [0.2 0.2 0.2; 0.9 0.35 0.15; 0.2 0.5 1];
+
+countAny  = zeros(1, nB);       % # dSpikes with >=1 somatic spike in bin
+cntType   = zeros(3, nB);       % pooled SS/CS/BS spike counts per bin
+countPeak = zeros(1, nB);       % # dSpikes with >=1 dendritic peak in bin
+nDspTot   = 0;
+for f = foi
+    nTime = size(PCresult{f}.NormalizedTrace_dirt, 2);
+    blueOff = PCresult{f}.BlueStim(:)' == 0;
+    dsp  = FiringRate{f}.DendOnlySpFrame(:)';
+    dsp  = dsp(blueOff(dsp));
+    dinR = dsp(dsp + STAwin(1) >= 1 & dsp + STAwin(2) <= nTime);
+    if isempty(dinR); continue; end
+
+    % ALL somatic spikes labeled by type (incl. Nth spikes in CS/BS), blue-off
+    Tss  = (PCresult{f}.SpikeClassVecMat(1,:) > 0) & blueOff;
+    Tcs  = (PCresult{f}.SpikeClassVecMat(2,:) > 0) & blueOff;
+    Tbs  = (PCresult{f}.SpikeClassVecMat(3,:) > 0) & blueOff;
+    Tany = Tss | Tcs | Tbs;
+    % dendritic (apical) subthreshold peaks (peakvec already blue-off / peri-spike zeroed)
+    apicalROI = find(ismember(PCresult{f}.branch_dClass, [3 4 5]));
+    if isempty(apicalROI); Tpk = false(1, nTime);
+    else; Tpk = (max(PCresult{f}.peakvec(apicalROI,:), [], 1) > 0) & blueOff; end
+
+    W = dinR(:) + winOff;                          % nDsp x winLen frame indices
+    Mss = Tss(W); Mcs = Tcs(W); Mbs = Tbs(W); Many = Tany(W); Mpk = Tpk(W);
+    for b = 1:nB
+        cols = (binOfCol == b);
+        countAny(b)  = countAny(b)  + sum(any(Many(:,cols), 2));
+        countPeak(b) = countPeak(b) + sum(any(Mpk(:,cols),  2));
+        cntType(1,b) = cntType(1,b) + sum(Mss(:,cols), 'all');
+        cntType(2,b) = cntType(2,b) + sum(Mcs(:,cols), 'all');
+        cntType(3,b) = cntType(3,b) + sum(Mbs(:,cols), 'all');
+    end
+    nDspTot = nDspTot + numel(dinR);
+end
+
+P_any  = countAny  / max(nDspTot,1);              % 1 x nB
+P_peak = countPeak / max(nDspTot,1);              % 1 x nB
+ratio  = cntType ./ sum(cntType,1);               % 3 x nB, columns sum to 1
+ratio(:, sum(cntType,1)==0) = 0;
+seg    = P_any .* ratio;                           % 3 x nB, stacks up to P_any
+fprintf('  %d dSpikes (blue-off, full window) from %d neurons\n', nDspTot, numel(foi));
+
+figure(320); clf; tiledlayout(1, 2, 'Padding','compact', 'TileSpacing','compact');
+% --- (1) P(any somatic spike) per bin, split by SS/CS/BS ratio ---
+nexttile;
+hb = bar(ctrs, seg', 'stacked', 'EdgeColor','none'); hold on;
+for e = 1:3; hb(e).FaceColor = cmapC(e,:); end
+xline(0,'k--'); xlim(STAwin); box off;
+xlabel('Time from dSpike (ms)'); ylabel('P(somatic spike in bin)');
+legend(hb, evNamesC, 'Location','best', 'box','off');
+title(sprintf('dSpike-triggered spikes (%d ms bins)', binw));
+% --- (2) dSpike-triggered dendritic-peak PETH ---
+nexttile;
+bar(ctrs, P_peak, 1, 'FaceColor',[0.3 0.6 0.3], 'EdgeColor','none'); hold on;
+xline(0,'k--'); xlim(STAwin); box off;
+xlabel('Time from dSpike (ms)'); ylabel('P(dendritic peak in bin)');
+title('dSpike-triggered dendritic peak PETH');
+sgtitle(sprintf('dSpike-triggered averages, blue OFF | %d dSpikes, %d neurons', nDspTot, numel(foi)));
+set_font('Arial'); set_fontsize(13);
+
+%% dSpike cases with a nearby somatic spike (labeling QC / consistency check)
+% dSpikes (dendrite-only spikes) are, by definition, NOT synchronized with any
+% somatic spike. The dSpikes section now enforces this (dSpikes within
+% +/- dSpikeSomaExclWin ms of any canonical somatic spike, PCresult{f}.SomaSpike,
+% are removed). This section uses the SAME canonical somatic train to VERIFY that:
+% with somWin <= dSpikeSomaExclWin it should flag ZERO cases. Raise somWin above
+% dSpikeSomaExclWin to inspect the nearest surviving dSpike-somatic pairs.
+fprintf('Section: dSpike labeling QC (somatic spike near dSpike)\n');
+
+if ~exist('dSpikeSomaExclWin','var'); dSpikeSomaExclWin=5; end % see dSpikes section
+somWin      = dSpikeSomaExclWin; % ms; somatic spike this close to a dSpike is flagged
+showWin     = [-30 30];   % ms; kymograph window around the dSpike
+maxShow     = 20;         % max # of cases to draw
+cax_qc      = [-0.02 0.2];
+somTypeName = {'SS','CS','BS','dSP'}; % class index -> name (0 -> 'som')
+
+flaggedCases = [];        % [neuron, dSpikeFrame, somFrame, signedDt(som-d), somType]
+nTotalDsp    = 0;         % total blue-off dSpikes examined
+for f = foi
+    blueOff = PCresult{f}.BlueStim(:)' == 0;
+    dSpikeFrames = FiringRate{f}.DendOnlySpFrame(:);
+    dSpikeFrames = dSpikeFrames(blueOff(dSpikeFrames));   % match the (blue-off) histogram
+    nTotalDsp = nTotalDsp + numel(dSpikeFrames);
+    if isempty(dSpikeFrames); continue; end
+
+    somFrames = PCresult{f}.SomaSpike(:);                 % canonical somatic spike train
+    if isempty(somFrames); continue; end
+    % class label per somatic frame (1 SS, 2 CS, 3 BS, 4 dSP; 0 if unlabeled)
+    somType = zeros(numel(somFrames), 1);
+    [cr, cc] = find(PCresult{f}.SpikeClassVecMat(:, somFrames) > 0);
+    somType(cc) = cr;
+
+    for d = dSpikeFrames'
+        [dt, idx] = min(abs(somFrames - d));
+        if dt <= somWin
+            flaggedCases = [flaggedCases; f d somFrames(idx) (somFrames(idx)-d) somType(idx)];
+        end
+    end
+end
+
+nFlag = size(flaggedCases, 1);
+fprintf('  %d of %d blue-off dSpikes have a somatic spike within +/-%d ms\n', nFlag, nTotalDsp, somWin);
+
+if nFlag > 0
+    [~, srt] = sort(abs(flaggedCases(:,4)), 'ascend');   % most suspicious first (smallest |dt|)
+    flaggedCases = flaggedCases(srt,:);
+
+    nShow = min(nFlag, maxShow);
+    nc = 5; nr = ceil(nShow/nc);
+    figure(321); clf;
+    tiledlayout(nr, nc, 'Padding','compact','TileSpacing','compact');
+    for k = 1:nShow
+        f      = flaggedCases(k,1);
+        dframe = flaggedCases(k,2);
+        sdt    = flaggedCases(k,4);
+        styp   = flaggedCases(k,5);
+        [nROI, nTime] = size(PCresult{f}.NormalizedTrace_dirt);
+        wIdx = dframe + (showWin(1):showWin(2));
+        if wIdx(1) < 1 || wIdx(end) > nTime; continue; end
+        kymo = PCresult{f}.NormalizedTrace_dirt(:, wIdx);
+        kymo = kymo - median(kymo(:,1:min(5,size(kymo,2))), 2, 'omitnan');
+        ax = nexttile;
+        imagesc(showWin(1):showWin(2), 1:nROI, kymo, cax_qc); hold on;
+        set_kymoYtick(PCresult{f}.dendaxis);
+        plot([0 0], [0.5 nROI+0.5], 'w--', 'linewidth', 1);       % dSpike time
+        plot([sdt sdt], [0.5 nROI+0.5], 'r--', 'linewidth', 1);   % nearest somatic spike time
+        colormap(ax, turbo);
+        if styp>=1 && styp<=numel(somTypeName); stypName=somTypeName{styp}; else; stypName='som'; end
+        title(sprintf('f%d fr%d | %s \\Deltat=%+d ms', f, dframe, stypName, sdt), 'fontsize', 9);
+        if mod(k-1, nc) == 0; ylabel('Dist (µm)'); end
+        xlabel('Time from dSpike (ms)');
+    end
+    sgtitle(sprintf(['dSpikes with a somatic spike within \\pm%d ms (labeling QC) | ' ...
+        'showing %d of %d flagged (white=dSpike, red=somatic)'], somWin, nShow, nFlag));
 end
 
 %% Show dAP neuron image (Figure S_dAP)
@@ -1810,7 +2152,7 @@ drawScaleBar(0.1,'vertical','color','k','position',[1310 0])
 xlim([0 1320])
 set_font('Arial'); set_fontsize(12);
 set_figsize(220,190);
-%%
+%
 figure(19); clf; %show footprint
 theta = 167.3;  % degrees
 Rmat = [cosd(theta) -sind(theta) 0;  sind(theta)  cosd(theta) 0; 0 0 1];
@@ -1834,7 +2176,7 @@ dclass2show=[3 4 5];
 nexttile([1 1]);
 SomAP2show = find(ismember(dSpikePropsMat{f}.Spike_frame,FiringRate{f}.SomaSpikeFrame) & dSpikePropsMat{f}.Branch_Index==1 & dSpikePropsMat{f}.SpikeOrder==1);
 dAP2show = find(ismember(dSpikePropsMat{f}.Spike_frame,FiringRate{f}.DendIntSpFrame) & ismember(dSpikePropsMat{f}.dClass,dclass2show));
-dSpike2show = find(ismember(dSpikePropsMat{f}.Spike_frame,FiringRate{f}.DendOnlySpFrame) & ismember(dSpikePropsMat{f}.dClass,dclass2show));
+dSpike2show = dspike_event_rows(dSpikePropsMat{f}, FiringRate{f}.DendOnlySpFrame, dclass2show);
 dSpike2show_B = find(ismember(dSpikePropsMat{f}.Spike_frame,FiringRate{f}.dSpikeBasal));
 dSpike2show_A = find(ismember(dSpikePropsMat{f}.Spike_frame,FiringRate{f}.dSpikeApical));
 
@@ -2039,7 +2381,7 @@ foi2analyze=foi;
 for i=1:length(foi2analyze)
     f=foi2analyze(i);
     nTime=size(PCresult{f}.NormalizedTrace_dirt,2);
-    somaAP=find(max(PCresult{f}.SpikeMat(PCresult{f}.BranchLabel==1,:),[],1)>0);
+    somaAP=PCresult{f}.SomaSpike; % canonical somatic spike train (consistent with dSpike exclusion)
     apicalROI=find(ismember(PCresult{f}.branch_dClass,[3 4 5]));
 
     % event trains (1 x nTime binary)
@@ -2132,39 +2474,1787 @@ xline(0,'k--'); xlabel('Time from dSpike (ms)'); ylabel('State occupancy (fracti
 legend(stateNames,'Location','best'); title('dSpike-triggered state occupancy'); axis tight;
 set_font('Arial'); set_fontsize(14);
 
-%% Somatic AUC histogram: dSpike vs simple spike (cf. AUC scatter above)
-fprintf('Section: Somatic AUC histogram (dSpike vs simple spike)\n');
-dclass2show=[3 4 5];
-AUCsoma_SS_all=[]; AUCsoma_dSp_all=[];
-nNeuron_SS=0; nNeuron_dSp=0;
-for f=foi
-    SSrows  = find(ismember(dSpikePropsMat{f}.Spike_frame,FiringRate{f}.SimpleSpikeFrame) & dSpikePropsMat{f}.Branch_Index==1 & dSpikePropsMat{f}.SpikeOrder==1);
-    dSprows = find(ismember(dSpikePropsMat{f}.Spike_frame,FiringRate{f}.DendOnlySpFrame) & ismember(dSpikePropsMat{f}.dClass,dclass2show));
-    AUCsoma_SS_all =[AUCsoma_SS_all;  dSpikePropsMat{f}.AUC_soma(SSrows)];
-    AUCsoma_dSp_all=[AUCsoma_dSp_all; dSpikePropsMat{f}.AUC_soma(dSprows)];
-    nNeuron_SS =nNeuron_SS +~isempty(SSrows);
-    nNeuron_dSp=nNeuron_dSp+~isempty(dSprows);
+%% dSpike <-> event coupling: correlogram + bidirectional probabilities (blue OFF)
+% One reorganized figure that asks, over a SHORT lag range, how dSpikes and somatic
+% events are related in time:
+%   (A) dSpike-triggered correlogram over +/-100 ms: P(event present per bin)
+%       versus lag from the dSpike. The middle bin spans -4..+4 ms (see the
+%       binning block below).
+%   (B) Bidirectional coupling, the two directions side by side for every event type:
+%         event -> dSpike : P(event within Pwin ms BEFORE the dSpike)
+%         dSpike -> event : P(event within Pwin ms AFTER  the dSpike)
+%       Both are normalized per dSpike (identical denominator), so the bars are
+%       directly comparable; each carries its own shuffle 95% CI and one-sided p.
+% Both panels use the SAME event set (all masked to BLUE-OFF):
+%   SS        - simple spikes
+%   BS spike  - EVERY somatic spike of a burst, not just the first
+%   CS        - the CS TRACE: any frame of a complex-spike interval, i.e. the whole CS
+%               including its tail, whether or not that frame carries a spike. A
+%               separate "CS spike" category is not shown: those spikes lie inside the
+%               CS trace by construction, so it carried no independent information.
+%   Any       - union of the three above
+% Panel B counts a category as "present" if AT LEAST ONE of its events falls in the
+% window, so counting all spikes of a CS/BS (rather than only the onset) makes the
+% window sensitive to any part of the event, not just its start.
+% The central bin is matched to the +/-dSpikeSomaExclWin ms dSpike definition window
+% (see the binning block below), so no somatic spike can fall in it and lag 0 is clean
+% WITHOUT discarding any dSpike. The census below asserts this: all zeros. A non-zero
+% entry means binwC and dSpikeSomaExclWin have drifted out of step.
+% Nulls circularly shift the dSpike times WITHIN the blue-off timeline; all windows
+% wrap around the recording, so observed and shuffled denominators are identical
+% (every blue-off dSpike contributes to every window).
+fprintf('Section: dSpike <-> event coupling (correlogram + bidirectional P, blue OFF)\n');
+
+% NON-UNIFORM bins: fine at the center, coarse in the tails.
+%   central bin = 2*dSpikeSomaExclWin ms, spanning exactly
+%   (-dSpikeSomaExclWin, +dSpikeSomaExclWin]. It lies wholly inside the window in which
+%   a dSpike is guaranteed to have NO somatic spike, so lag 0 is free of SS/BS by
+%   construction, with no dSpikes discarded. Widening it past the definition window
+%   would make it straddle the exclusion boundary and put somatic mass at lag 0.
+%   all other bins = binwOut ms, to average down the noise where resolution is cheap.
+% Because the bins are unequal, the plotted value is converted to a common binwOut-ms
+% reference by P_ref = 1-(1-P)^(binwOut/binWidth); otherwise the narrow central bin
+% would show an artificial dip. This is the correct transform for a PRESENCE
+% probability (which saturates with width); the naive P*binwOut/binWidth is only valid
+% in the sparse limit and puts a false spikelet on the central bin for dense
+% categories.
+if ~exist('dSpikeSomaExclWin','var'); dSpikeSomaExclWin=4; end % see the dSpikes section
+binwC    = 4*dSpikeSomaExclWin;                  % ms; central bin width (= 8 ms)
+binwOut  = 16;                                   % ms; bin width outside the central bin
+corrXlim = 500;                                  % ms; displayed lag range of panel A
+nOutC    = floor((corrXlim - binwC/2)/binwOut);  % coarse bins per side
+edgesC   = [-(binwC/2 + (nOutC:-1:1)*binwOut), -binwC/2, binwC/2, ...
+             (binwC/2 + (1:nOutC)*binwOut)];
+binWidths = diff(edgesC);                        % 1 x nBin, [16..16 8 16..16]
+ctrC     = edgesC(1:end-1)+binWidths/2; nBin = numel(ctrC);   % centers -92..0..92 ms
+Pwin     = 25;                                   % ms; before/after coupling window
+nShuf    = 1000;                                 % shuffles for the scalar probabilities
+nShufC   = 200;                                  % shuffles for the correlogram null
+evNames  = {'SS','BS spike','CS','Any'};          % 'CS' is the whole CS trace
+nEv      = numel(evNames);
+cmapEv   = [0 0 0; 0.2 0.5 1; 0.9 0.2 0.2; 0.45 0.45 0.45];  % SS / BS spike / CS / Any
+rng(0);
+
+corrObs    = zeros(nEv, nBin);   corrShuf   = zeros(nEv, nBin, nShufC);
+cntBefore  = zeros(nEv, 1);      shufBefore = zeros(nEv, nShuf);
+cntAfter   = zeros(nEv, 1);      shufAfter  = zeros(nEv, nShuf);
+nDsp_tot   = 0; nNrn = 0;
+nOutsideElig = 0;                % observed dSpikes that fail the eligibility mask (want 0)
+eligFrac   = [0 0];              % [eligible frames, total frames] across neurons
+lagList    = -binwC/2:binwC/2;      % per-ms census of the central bin (QC print)
+lagCensus  = zeros(1, numel(lagList));   % somatic APs of ANY class near the dSpike
+
+% #events in the half-open frame window (lo, hi] from cumulative counts, on a
+% CIRCULAR time axis: a window that wraps past the last frame gets the total added back.
+wrapcnt = @(hi, lo, tot) (hi - lo) + tot.*((hi - lo) < 0);
+
+for f = foi
+    nTime   = size(PCresult{f}.NormalizedTrace_dirt, 2);
+    blueOff = PCresult{f}.BlueStim(:)' == 0;      % 1 x nTime, blue light OFF
+    dsp     = FiringRate{f}.DendOnlySpFrame(:)';
+    dsp     = dsp(blueOff(dsp));                  % dSpikes: blue-off only (already are)
+    if isempty(dsp); continue; end
+    nNrn = nNrn + 1;
+
+    cstr = PCresult{f}.CStrace(:)'; cstr = cstr(1:nTime) > 0;   % CS trace (incl. the CS tail)
+    bstr = PCresult{f}.BStrace(:)';  bstr = bstr(1:nTime) > 0;
+    soma = PCresult{f}.SomaSpike(:)'; soma = soma(soma <= nTime);
+    bsSp = soma(bstr(soma));                                    % EVERY somatic spike of a burst
+
+    % --- event trains, shared by both panels (nEv x nTime, blue-off) ---
+    ev = false(nEv, nTime);
+    ev(1,:) = PCresult{f}.SpikeClassMat(1,1:nTime) > 0;         % SS
+    ev(2,bsSp) = true;                                          % all spikes of every burst
+    ev(3,:) = cstr;                                             % CS (the whole CS trace)
+    ev(4,:) = any(ev(1:3,:), 1);                                % any event: SS | BS sp | CS
+    ev      = ev & blueOff;
+    csE = cumsum(double(ev), 2); totE = csE(:,end);
+
+    % ---- the null must live on the SAME support as the data ----------------------
+    % A dSpike is DEFINED as a dendritic spike that is not inside a CS trace and not
+    % within +/-dSpikeSomaExclWin ms of a somatic spike (see the dSpikes section). A
+    % null that shifts dSpikes freely through the blue-off timeline can therefore put
+    % them where a real one could never be found, and every row of this figure then
+    % shows the definition rather than the data. The effect is small for SS and BS,
+    % whose exclusion is only +/-4 ms and is absorbed by the central bin, but it is
+    % large for CS: the exclusion there is the WHOLE CS trace, tens to hundreds of ms
+    % including the plateau tail, which no single central bin can cover. Restricting
+    % the shift to the eligible timeline makes the comparison ask the right question —
+    % given that a dSpike can only occur outside a CS, does it sit closer to CS edges
+    % than chance? — instead of rediscovering the exclusion.
+    % Set nullOnEligible=false to get the old blue-off-only null for comparison.
+    if ~exist('nullOnEligible','var'), nullOnEligible = true; end
+    if nullOnEligible
+        somaNear = false(1, nTime);  somaNear(soma) = true;
+        somaNear = imdilate(somaNear, ones(1, 2*dSpikeSomaExclWin+1));
+        eligible = blueOff & ~cstr & ~somaNear;
+        nAdd = sum(~eligible(dsp));      % must be 0: every observed dSpike is eligible
+        if nAdd > 0
+            nOutsideElig = nOutsideElig + nAdd;
+            eligible(dsp) = true;        % the data define the support; never drop one
+        end
+    else
+        eligible = blueOff;
+    end
+    offIdx  = find(eligible); nOff = numel(offIdx);
+    eligFrac = eligFrac + [nOff nTime];
+    [~, rankD] = ismember(dsp, offIdx);           % rank of each dSpike on that timeline
+    wrapIdx = @(x) mod(x - 1, nTime) + 1;
+
+    % ---- observed ----
+    idxC = wrapIdx(dsp(:) + edgesC);                          % nDsp x (nBin+1) bin edges
+    idxP = wrapIdx(dsp(:) + [-Pwin-1, -1, 0, Pwin]);          % before (1,2] / after (3,4]
+    for e = 1:nEv
+        C = csE(e,:); T = totE(e);
+        V = C(idxC);
+        corrObs(e,:) = corrObs(e,:) + sum(wrapcnt(V(:,2:end), V(:,1:end-1), T) > 0, 1);
+        P = C(idxP);
+        cntBefore(e) = cntBefore(e) + sum(wrapcnt(P(:,2), P(:,1), T) > 0);
+        cntAfter(e)  = cntAfter(e)  + sum(wrapcnt(P(:,4), P(:,3), T) > 0);
+    end
+    nDsp_tot = nDsp_tot + numel(dsp);
+    % QC: per-ms census of the central bin (must be all zeros for SS / CS sp / BS sp)
+    idxL = wrapIdx(dsp(:) + lagList);
+    % assert against every somatic AP, not just the plotted classes -- a stronger and
+    % simpler check than testing SS / BS / CS spikes separately
+    somaTr = false(1, nTime); somaTr(soma) = true; somaTr = somaTr & blueOff;
+    lagCensus = lagCensus + sum(somaTr(idxL), 1);
+
+    % ---- circular-shift null WITHIN the blue-off timeline ----
+    for sh = 1:nShuf
+        sft = randi(nOff);
+        dS  = offIdx(mod(rankD - 1 + sft, nOff) + 1);         % shifted blue-off dSpike frames
+        idxPs = wrapIdx(dS(:) + [-Pwin-1, -1, 0, Pwin]);
+        for e = 1:nEv
+            C = csE(e,:); T = totE(e);
+            P = C(idxPs);
+            shufBefore(e,sh) = shufBefore(e,sh) + sum(wrapcnt(P(:,2), P(:,1), T) > 0);
+            shufAfter(e,sh)  = shufAfter(e,sh)  + sum(wrapcnt(P(:,4), P(:,3), T) > 0);
+        end
+        if sh <= nShufC                                        % correlogram null (fewer shuffles)
+            idxCs = wrapIdx(dS(:) + edgesC);
+            for e = 1:nEv
+                C = csE(e,:); T = totE(e);
+                V = C(idxCs);
+                corrShuf(e,:,sh) = corrShuf(e,:,sh) + sum(wrapcnt(V(:,2:end), V(:,1:end-1), T) > 0, 1);
+            end
+        end
+    end
 end
-fprintf('AUC histogram: %d simple spikes (%d neurons), %d dSpikes (%d neurons), of %d neurons total\n', ...
-    sum(~isnan(AUCsoma_SS_all)),nNeuron_SS,sum(~isnan(AUCsoma_dSp_all)),nNeuron_dSp,numel(foi));
 
-fExample=18; % same example neuron as the AUC scatter above
-SSrows_e  = find(ismember(dSpikePropsMat{fExample}.Spike_frame,FiringRate{fExample}.SimpleSpikeFrame) & dSpikePropsMat{fExample}.Branch_Index==1 & dSpikePropsMat{fExample}.SpikeOrder==1);
-dSprows_e = find(ismember(dSpikePropsMat{fExample}.Spike_frame,FiringRate{fExample}.DendOnlySpFrame) & ismember(dSpikePropsMat{fExample}.dClass,dclass2show));
-AUCsoma_SS_e  = dSpikePropsMat{fExample}.AUC_soma(SSrows_e);
-AUCsoma_dSp_e = dSpikePropsMat{fExample}.AUC_soma(dSprows_e);
+nD = max(nDsp_tot, 1);
+% (A) correlogram: P(event in bin) per dSpike, rescaled to a common binwOut-ms bin so
+% the narrow central bin is comparable with the coarse tails
+% Presence probability is NOT linear in bin width -- P(w) = 1-(1-p)^w -- so simply
+% multiplying the narrow central bin by binwOut/binwC OVERSTATES it and plants a
+% spurious spikelet at lag 0. It shows up in the CHANCE trace especially, whose central
+% bin is populated (shuffling breaks the dSpike/spike exclusion), and it grows with the
+% event's base rate: negligible for SS, up to ~1.4x for a dense category like CS.
+% Convert properly instead: P_ref = 1-(1-P)^(binwOut/w). That is exact under within-bin
+% independence, is the identity for the binwOut-wide bins, and reduces to the linear
+% factor in the sparse limit.
+binScale = binwOut ./ binWidths;                  % 1 x nBin, [1..1 2 1..1]
+corrP    = 1 - (1 - corrObs / nD).^binScale;      % nEv x nBin
+corrPnul = 1 - (1 - mean(corrShuf, 3) / nD).^binScale;  % circular-shift chance level,
+                                                  % drawn dashed in each panel-A row
+% (B) bidirectional probabilities, per dSpike, vs circular-shift null
+probBefore = cntBefore'/nD;  probAfter = cntAfter'/nD;
+pShufB = shufBefore/nD;      pShufA = shufAfter/nD;
+% TWO-SIDED against the shuffle distribution. Coupling can be SUPPRESSED as well as
+% enriched -- e.g. the dSpike definition forbids a somatic spike within a few ms, which
+% pushes the short-window probabilities BELOW chance -- and a one-sided "obs >= chance"
+% test would report exactly that real effect as n.s. The sign of z gives the direction.
+pHiB = mean(pShufB >= probBefore', 2)';  pLoB = mean(pShufB <= probBefore', 2)';
+pHiA = mean(pShufA >= probAfter',  2)';  pLoA = mean(pShufA <= probAfter',  2)';
+pBefore = min(1, 2*min(pHiB, pLoB));  pAfter = min(1, 2*min(pHiA, pLoA));
+zBefore = (probBefore - mean(pShufB,2)')./std(pShufB,0,2)';
+zAfter  = (probAfter  - mean(pShufA,2)')./std(pShufA,0,2)';
 
-cmap_hist=[0 0.45 0.74; 0.85 0.33 0.10]; % SS / dSpike
-figure(281); clf; tiledlayout(1,1,'Padding','compact','TileSpacing','compact');
-% pooled across neurons
-edges_p=linspace(prctile([AUCsoma_SS_all; AUCsoma_dSp_all]/13,1),prctile([AUCsoma_SS_all; AUCsoma_dSp_all]/13,99),40);
-histogram(AUCsoma_SS_all/13 ,edges_p,'Normalization','probability','FaceColor',cmap_hist(1,:),'EdgeColor','none'); hold all;
-histogram(AUCsoma_dSp_all/13,edges_p,'Normalization','probability','FaceColor',cmap_hist(2,:),'EdgeColor','none');
-xlabel('Mean somatic voltage (∆F/F)'); ylabel('Probability'); box off;
-p_auc=ranksum(AUCsoma_SS_all(~isnan(AUCsoma_SS_all)),AUCsoma_dSp_all(~isnan(AUCsoma_dSp_all)));
-legend({'Simple spike','dSpike'}); title(sprintf('All neurons (ranksum p = %.2e)',p_auc));
+fprintf('  %d blue-off dSpikes from %d neurons | %d shuffles (%d for the correlogram null)\n', ...
+    nDsp_tot, nNrn, nShuf, nShufC);
+if nullOnEligible
+    fprintf(['  null drawn from the ELIGIBLE timeline (blue-off, outside every CS trace,\n' ...
+        '  >%d ms from any somatic spike): %.1f%% of all frames. The CS row is now a test of\n' ...
+        '  proximity to CS edges, not a restatement of the ~IsCS exclusion.\n'], ...
+        dSpikeSomaExclWin, 100*eligFrac(1)/max(eligFrac(2),1));
+    if nOutsideElig > 0
+        warning(['%d observed dSpike(s) fell outside the eligibility mask and were ' ...
+            'added back. The mask and the dSpike definition have drifted apart.'], nOutsideElig);
+    end
+else
+    fprintf(['  null drawn from the blue-off timeline WITHOUT the eligibility constraint:\n' ...
+        '  the CS row below is dominated by the ~IsCS exclusion and should not be read\n' ...
+        '  as coupling (set nullOnEligible = true).\n']);
+end
+fprintf('  central-bin census (somatic events per lag; must be 0 -- the %d ms central bin is\n', binwC);
+fprintf('  matched to the +/-%d ms dSpike definition window):\n', dSpikeSomaExclWin);
+fprintf('      %-7s', 'lag(ms)'); fprintf(' %4d', lagList); fprintf('\n');
+fprintf('      %-7s', 'soma AP'); fprintf(' %4d', lagCensus); fprintf('\n');
+if any(lagCensus(:) > 0)
+    warning('Central correlogram bin contains somatic spikes: binwC (%d) vs dSpikeSomaExclWin (%d).', ...
+        binwC, dSpikeSomaExclWin);
+end
+fprintf('  P(event within %d ms of a dSpike), observed vs circular-shift null:\n', Pwin);
+fprintf('      type        before(event->dSpike)              after(dSpike->event)\n');
+fprintf('                  obs    shuf     z   p(2sid)        obs    shuf     z   p(2sid)\n');
+for e = 1:nEv
+    fprintf('      %-10s %.3f  %.3f  %+.2f  %-8.3g    %.3f  %.3f  %+.2f  %-8.3g\n', evNames{e}, ...
+        probBefore(e), mean(pShufB(e,:)), zBefore(e), pBefore(e), ...
+        probAfter(e),  mean(pShufA(e,:)), zAfter(e),  pAfter(e));
+end
+
+figure(322); clf;
+tl322 = tiledlayout(nEv, 2, 'Padding','compact', 'TileSpacing','compact');
+% --- (A) dSpike-triggered correlogram, one event type per row (left column) ---
+% Bars are drawn from the true (unequal) bin edges; the dashed line is the
+% circular-shift chance level, which is what makes the bar heights interpretable.
+for e = 1:nEv
+    nexttile(2*e-1); hold on;
+    histogram('BinEdges', edgesC, 'BinCounts', corrP(e,:)*100, ...
+        'FaceColor', cmapEv(e,:), 'EdgeColor','none', 'FaceAlpha',0.75);
+    plot(ctrC, corrPnul(e,:)*100, '--', 'Color',[0.4 0.4 0.4], 'LineWidth',1);
+    xline(0,'k-','HandleVisibility','off');
+    box off; xlim([-corrXlim corrXlim]);
+    ylabel(sprintf('%s\nP (%%)', evNames{e}));
+    if e == 1
+        legend({'observed','chance'}, 'Location','northwest', 'box','off', 'FontSize',10);
+        title(sprintf('dSpike-triggered correlogram'), 'FontSize',10);
+    end
+    if e == nEv; xlabel('Time from dSpike (ms)'); else; set(gca,'xticklabel',[]); end
+end
+% --- (B) event -> dSpike vs dSpike -> event, with shuffle 95% CI ---
+nexttile(2, [nEv 1]); hold on;
+b = bar([probBefore; probAfter]'*100, 'EdgeColor','none');
+b(1).FaceColor = [0.35 0.55 0.75]; b(2).FaceColor = [0.85 0.33 0.10];
+mB = mean(pShufB,2)'*100; loB = prctile(pShufB,2.5,2)'*100; hiB = prctile(pShufB,97.5,2)'*100;
+mA = mean(pShufA,2)'*100; loA = prctile(pShufA,2.5,2)'*100; hiA = prctile(pShufA,97.5,2)'*100;
+errorbar(b(1).XEndPoints, mB, mB-loB, hiB-mB, 'LineStyle','none','Color','k','Marker','_','CapSize',5,'LineWidth',1,'HandleVisibility','off');
+eS = errorbar(b(2).XEndPoints, mA, mA-loA, hiA-mA, 'LineStyle','none','Color','k','Marker','_','CapSize',5,'LineWidth',1);
+yl = ylim; ylim([0 yl(2)*1.20]); dy = 0.025*diff(ylim);
+% the test is two-sided, so a star alone would not say WHICH way: an arrow marks
+% enrichment (up) vs suppression (down) relative to the shuffle mean
+for e = 1:nEv
+    for j = 1:2
+        if j == 1
+            pv=pBefore(e); ob=probBefore(e)*100; mu=mB(e); hi=hiB(e);
+            xx=b(1).XEndPoints(e); cc=b(1).FaceColor;
+        else
+            pv=pAfter(e);  ob=probAfter(e)*100;  mu=mA(e); hi=hiA(e);
+            xx=b(2).XEndPoints(e); cc=b(2).FaceColor;
+        end
+        s = sig_star(pv);
+        if pv < 0.05
+            if ob > mu; s = ['\uparrow' s]; else; s = ['\downarrow' s]; end
+        end
+        text(xx, max(ob, hi)+dy, s, 'HorizontalAlignment','center', 'FontSize',10, 'Color', cc);
+    end
+end
+set(gca,'xtick',1:nEv,'xticklabel',evNames); box off;
+ylabel(sprintf('P(event within %d ms) (%%)', Pwin));
+legend([b(1) b(2) eS], {'event \rightarrow dSpike','dSpike \rightarrow event','shuffle 95% CI'}, ...
+    'Location','northwest', 'box','off', 'FontSize',10);
+%title('Bidirectional coupling');
+%title(tl322, sprintf('dSpike \\leftrightarrow event coupling, blue OFF | %d dSpikes, %d neurons', nDsp_tot, nNrn));
 set_font('Arial'); set_fontsize(14);
-set_figsize(150,100);
+set_figsize(200,132);
+
+%% Spike-triggered dSpike histogram: do dSpikes PRECEDE somatic events? (blue OFF)
+% The reverse alignment of the previous section. There we aligned to the dSpike and
+% asked what follows; here we align to the SOMATIC EVENT and ask how often a dSpike
+% precedes it. The denominator changes accordingly: previously "per dSpike", here
+% "per trigger spike", which is what answers "how many SS/CS/BS are preceded by a
+% dSpike" rather than "how many dSpikes are followed by a spike".
+% Triggers (all blue-off), one row of the left column each:
+%   SS  - simple spikes                        (SpikeClassMat row 1)
+%   CS  - FIRST spike of each complex spike    (SpikeClassMat row 2)
+%   BS  - FIRST spike of each burst            (SpikeClassMat row 3)
+%   Any - union of the three
+% Only the first spike of a CS/BS is used as the trigger: later spikes of the same
+% event are not independent opportunities for a dSpike to "precede the event", and
+% counting them would inflate the denominator with within-event repeats.
+% LEFT: P(dSpike present in a bin) versus lag from the trigger, per trigger spike,
+% with the circular-shift chance level dashed. Binning follows figure 322 (see the
+% binning block below), so the central bin spans exactly the window in which a dSpike
+% can never occur -- it is empty BY CONSTRUCTION, and that gap is the dSpike
+% definition showing through rather than a result.
+% RIGHT: P(at least one dSpike in the [-w,-1] ms pre-spike window) for w = preWins,
+% with the shuffle 95% CI and a one-sided p. This is the number to quote for "a dSpike
+% precedes X% of complex spikes".
+% Null: the TRIGGER times are circularly shifted within the blue-off timeline while the
+% dSpike train is held fixed (the equivalent circular null, and the cheap direction here
+% since the dSpike cumulative count can then be built once per neuron).
+fprintf('Section: spike-triggered dSpike histogram (dSpike -> spike, blue OFF)\n');
+
+if ~exist('dSpikeSomaExclWin','var'); dSpikeSomaExclWin=4; end % see the dSpikes section
+% Same NON-UNIFORM binning as figure 322: a central bin matched to the dSpike
+% definition window, coarse bins outside it. Here the window is asymmetric (more lag
+% shown before the trigger than after), so the edges grow outward from +/-binwC/2 by
+% binwOut to each limit independently; the central bin stays centred on 0 either way.
+binwC    = 2*dSpikeSomaExclWin;      % ms; central bin (= 8 ms), matched to the definition
+binwOut  = 16;                       % ms; bin width outside the central bin
+preLim   = 100;                      % ms shown BEFORE the trigger spike
+postLim  = 50;                       % ms shown AFTER  the trigger spike
+preWins  = 25;                       % ms; pre-spike window(s) for the right panel(s)
+nShuf    = 1000;                     % shuffles for the scalar probabilities
+nShufH   = 100;                      % shuffles for the histogram chance level
+trigName = {'SS','CS','BS','Any'};
+nTrg     = numel(trigName);
+cmapT    = [0.4 0.4 0.4; 0.9 0.2 0.2; 0.2 0.5 1; 0.65 0.65 0.65];
+nOutL    = ceil((preLim  - binwC/2)/binwOut);    % coarse bins before the trigger
+nOutR    = ceil((postLim - binwC/2)/binwOut);    % coarse bins after it
+edgesH   = [-(binwC/2 + (nOutL:-1:1)*binwOut), -binwC/2, binwC/2, ...
+             (binwC/2 + (1:nOutR)*binwOut)];
+binWidths= diff(edgesH);
+ctrH     = edgesH(1:end-1)+binWidths/2; nBinH = numel(ctrH);
+% unequal bins -> convert to a common binwOut-ms reference, else the narrow central
+% bin would read artificially low (exactly as in figure 322)
+binScale = binwOut ./ binWidths;
+nPre     = numel(preWins);
+rng(0);
+
+histObs  = zeros(nTrg, nBinH);   histShuf = zeros(nTrg, nBinH, nShufH);
+cntPre   = zeros(nTrg, nPre);    shufPre  = zeros(nTrg, nPre, nShuf);
+nTrig    = zeros(1, nTrg);       nNrnP = 0;
+
+% #events in the half-open frame window (lo, hi] from cumulative counts, circular axis
+wrapcnt = @(hi, lo, tot) (hi - lo) + tot.*((hi - lo) < 0);
+
+for f = foi
+    nTime   = size(PCresult{f}.NormalizedTrace_dirt, 2);
+    blueOff = PCresult{f}.BlueStim(:)' == 0;
+    dsp     = FiringRate{f}.DendOnlySpFrame(:)';
+    dsp     = dsp(blueOff(dsp));
+    if isempty(dsp); continue; end
+
+    % dSpike occurrence train + cumulative count (built ONCE, reused by every shuffle)
+    dspTrain = false(1, nTime); dspTrain(dsp) = true;
+    csD = cumsum(double(dspTrain)); totD = csD(end);
+
+    % trigger frames: first spike of each event class, blue-off
+    trg = cell(1, nTrg);
+    trg{1} = find(PCresult{f}.SpikeClassMat(1,1:nTime) > 0 & blueOff);
+    trg{2} = find(PCresult{f}.SpikeClassMat(2,1:nTime) > 0 & blueOff);
+    trg{3} = find(PCresult{f}.SpikeClassMat(3,1:nTime) > 0 & blueOff);
+    trg{4} = unique([trg{1} trg{2} trg{3}]);
+
+    offIdx  = find(blueOff); nOff = numel(offIdx);
+    wrapIdx = @(x) mod(x - 1, nTime) + 1;
+    % pre-window edges: window w spans (t-w-1, t-1], i.e. lags -w .. -1
+    preEdge = [-preWins(:)-1, repmat(-1, nPre, 1)];
+
+    for e = 1:nTrg
+        T = trg{e}(:);
+        if isempty(T); continue; end
+        nTrig(e) = nTrig(e) + numel(T);
+
+        V = csD(wrapIdx(T + edgesH));                        % nTrig x (nBinH+1)
+        histObs(e,:) = histObs(e,:) + sum(wrapcnt(V(:,2:end), V(:,1:end-1), totD) > 0, 1);
+        for w = 1:nPre
+            P = csD(wrapIdx(T + preEdge(w,:)));
+            cntPre(e,w) = cntPre(e,w) + sum(wrapcnt(P(:,2), P(:,1), totD) > 0);
+        end
+
+        % --- circular-shift null: shift the TRIGGERS within the blue-off timeline ---
+        [~, rankT] = ismember(T', offIdx);
+        for sh = 1:nShuf
+            sft = randi(nOff);
+            Ts  = offIdx(mod(rankT - 1 + sft, nOff) + 1)';    % shifted blue-off triggers
+            for w = 1:nPre
+                P = csD(wrapIdx(Ts + preEdge(w,:)));
+                shufPre(e,w,sh) = shufPre(e,w,sh) + sum(wrapcnt(P(:,2), P(:,1), totD) > 0);
+            end
+            if sh <= nShufH                                  % histogram chance level
+                Vs = csD(wrapIdx(Ts + edgesH));
+                histShuf(e,:,sh) = histShuf(e,:,sh) + ...
+                    sum(wrapcnt(Vs(:,2:end), Vs(:,1:end-1), totD) > 0, 1);
+            end
+        end
+    end
+    nNrnP = nNrnP + 1;
+end
+
+nT = max(nTrig, 1);
+% same non-linear width conversion as figure 322 (see the note there): a presence
+% probability must be converted with 1-(1-P)^(w_ref/w), not scaled linearly, or the
+% narrow central bin acquires a spurious spikelet
+histP    = 1 - (1 - histObs ./ nT').^binScale;     % nTrg x nBinH, P(dSpike per binwOut ms)
+histPnul = 1 - (1 - mean(histShuf,3) ./ nT').^binScale;  % circular-shift chance level
+probPre  = cntPre ./ nT';                         % nTrg x nPre
+shufP    = shufPre ./ nT';                        % nTrg x nPre x nShuf
+% two-sided, for the same reason as figure 322: a dSpike can be SUPPRESSED before a
+% spike as well as enriched, and a one-sided test would miss it
+pPre = min(1, 2*min(mean(shufP >= probPre, 3), mean(shufP <= probPre, 3)));
+zPre = (probPre - mean(shufP,3)) ./ std(shufP,0,3);
+mPre = mean(shufP,3); loPre = prctile(shufP,2.5,3); hiPre = prctile(shufP,97.5,3);
+
+fprintf('  %d neurons | triggers: %s\n', nNrnP, ...
+    strjoin(arrayfun(@(k) sprintf('%s %d', trigName{k}, nTrig(k)), 1:nTrg, 'UniformOutput', false), ', '));
+fprintf('  P(>=1 dSpike in the pre-spike window), observed vs circular-shift null:\n');
+for w = 1:nPre
+    fprintf('    within %d ms before:\n', preWins(w));
+    fprintf('      type   obs      shuffle   z    p(2sid)\n');
+    for e = 1:nTrg
+        fprintf('      %-5s  %6.3f   %6.3f   %+5.2f   %.3g\n', trigName{e}, ...
+            probPre(e,w), mPre(e,w), zPre(e,w), pPre(e,w));
+    end
+end
+
+figure(326); clf;
+tl = tiledlayout(4, 2, 'Padding','compact', 'TileSpacing','compact');
+% --- LEFT COLUMN: one dSpike histogram per trigger type (tiles 1,3,5,7) ---
+for e = 1:nTrg
+    nexttile(2*e-1); hold on;
+    histogram('BinEdges', edgesH, 'BinCounts', histP(e,:)*100, ...
+        'FaceColor', cmapT(e,:), 'EdgeColor','none', 'FaceAlpha',0.75);
+    plot(ctrH, histPnul(e,:)*100, '--', 'Color',[0.4 0.4 0.4], 'LineWidth',1);
+    xline(0,'k-','HandleVisibility','off');
+    box off; xlim([edgesH(1) edgesH(end)]); ylabel(sprintf('%s\nP (%%)', trigName{e}));
+    if e == 1
+        legend({'observed','chance'}, 'Location','northwest', 'box','off', 'FontSize',10);
+        title(sprintf('dSpike timing before the trigger spike'), 'FontSize',10);
+    end
+    if e == nTrg; xlabel('Time from trigger spike (ms)'); else; set(gca,'xticklabel',[]); end
+end
+% --- RIGHT COLUMN: pre-window probabilities (tiles 2 and 6, each spanning 2 rows) ---
+% right column split evenly over the nTrg rows, so one window fills the whole column
+% and two would take half each
+rowsPer = floor(nTrg/nPre);
+for w = 1:nPre
+    nexttile(2 + 2*rowsPer*(w-1), [rowsPer 1]); hold on;
+    b = bar(1:nTrg, probPre(:,w)*100, 0.6, 'EdgeColor','none', 'FaceColor','flat');
+    b.CData = cmapT;
+    eS = errorbar(1:nTrg, mPre(:,w)*100, (mPre(:,w)-loPre(:,w))*100, (hiPre(:,w)-mPre(:,w))*100, ...
+        'LineStyle','none', 'Color','k', 'Marker','_', 'CapSize',6, 'LineWidth',1);
+    yl = ylim; ylim([0 yl(2)*1.25]); dy = 0.03*diff(ylim);
+    for e = 1:nTrg
+        s = sig_star(pPre(e,w));                 % two-sided -> mark the direction
+        if pPre(e,w) < 0.05
+            if probPre(e,w) > mPre(e,w); s = ['\uparrow' s]; else; s = ['\downarrow' s]; end
+        end
+        text(e, max(probPre(e,w)*100, hiPre(e,w)*100)+dy, s, ...
+            'HorizontalAlignment','center', 'FontSize',10);
+    end
+    set(gca,'xtick',1:nTrg,'xticklabel',trigName); box off;
+    ylabel(sprintf('P(dSpike within\n%d ms before) (%%)', preWins(w)));
+    if w == 1
+        legend([b eS], {'observed','shuffle 95% CI'}, 'Location','northwest', 'box','off', 'FontSize',10);
+    end
+    title(sprintf('%d ms pre-spike window', preWins(w)), 'FontSize',10);
+end
+%title(tl, sprintf('Is a somatic event preceded by a dSpike? blue OFF | %d neurons', nNrnP));
+set_font('Arial'); set_fontsize(14);
+set_figsize(200,132);
+
+%% Figure 327 - dSpikes around the END of a complex spike (blue OFF)
+% The question figure 322 cannot answer. A dSpike is defined as NOT being inside a CS
+% trace, so "dSpike rate during CS" is zero by construction and any correlogram
+% centred on a CS is reporting that exclusion. What is NOT fixed by the definition is
+% what happens once the CS trace ends: do dSpikes resume immediately, or is there a
+% refractory stretch, or an excess just after the plateau collapses?
+%
+% Alignment is the LAST frame of each CS interval (bwlabel of CStrace), so lag 0 is
+% the moment the plateau falls back below the CS criterion. Negative lags are inside
+% the CS and are structurally empty; they are shown anyway, because seeing the
+% exclusion end exactly at 0 is the check that the alignment is right.
+%
+% EXPOSURE CORRECTION. Each lag bin is divided by how much ELIGIBLE time actually
+% contributed to it, not by the number of triggers. Eligible = in recording, blue off,
+% outside every CS trace, and more than dSpikeSomaExclWin ms from a somatic spike —
+% i.e. exactly where a dSpike could have been detected. Without this the curve would
+% mix "no dSpike happened" with "no dSpike was allowed", which is the same confusion
+% the correlogram suffers from. The result is a RATE in Hz, comparable to the neuron's
+% overall dSpike rate over eligible time (dashed line).
+fprintf('Section: dSpikes around the END of a complex spike (blue OFF)\n');
+
+if ~exist('dSpikeSomaExclWin','var'); dSpikeSomaExclWin=4; end
+preCS_end  = 300;    % ms shown BEFORE the CS end (inside the CS: structurally empty)
+postCS_end = 700;    % ms shown AFTER  the CS end
+binCS_end  = 20;     % ms per bin
+latWins    = [25 50 100 200];   % ms windows for "a dSpike within X ms of CS end"
+nShowTr_CSend = 150;  % individual CS traces drawn in the voltage panels (0 = none).
+                      % The median and IQR always use EVERY event; this is only how
+                      % many faint lines are laid underneath them.
+edgesE = -preCS_end : binCS_end : postCS_end;
+ctrE   = edgesE(1:end-1) + binCS_end/2;  nBinE = numel(ctrE);
+
+cntE = zeros(1, nBinE);      % dSpikes per lag bin, pooled over CS ends
+expE = zeros(1, nBinE);      % eligible ms per lag bin, pooled (the denominator)
+latFirst = [];               % latency from CS end to the next dSpike (ms)
+csDur = [];  nCSend = 0;  nNrnE = 0;  totElig = 0;  totDsp = 0;
+% subthreshold voltage on the same lag axis, one row per CS end, in spike-height units
+lagV  = edgesE(1) : edgesE(end);          % 1 ms resolution for the voltage panels
+Vsoma = [];  Vdist = [];
+for f = foi
+    nTime = size(PCresult{f}.NormalizedTrace_dirt, 2);
+    blueOff = PCresult{f}.BlueStim(:)' == 0;
+    cstr = PCresult{f}.CStrace(:)';  cstr = cstr(1:nTime) > 0;
+    soma = PCresult{f}.SomaSpike(:)';  soma = soma(soma >= 1 & soma <= nTime);
+    dsp  = FiringRate{f}.DendOnlySpFrame(:)';
+    dsp  = dsp(dsp >= 1 & dsp <= nTime & blueOff(dsp));
+    if isempty(dsp), continue; end
+    nNrnE = nNrnE + 1;
+
+    somaNear = false(1, nTime);  somaNear(soma) = true;
+    somaNear = imdilate(somaNear, ones(1, 2*dSpikeSomaExclWin+1));
+    eligible = blueOff & ~cstr & ~somaNear;
+    eligible(dsp) = true;                    % never drop an observed dSpike
+    dTr = false(1, nTime);  dTr(dsp) = true;
+    totElig = totElig + sum(eligible);  totDsp = totDsp + numel(dsp);
+
+    % Subthreshold voltage, somatic and distal, in spike-height units so neurons can
+    % be pooled. The reference level is the median over ELIGIBLE frames — outside any
+    % CS, blue off, away from spikes — i.e. rest. Subtracting a window near the CS
+    % instead would force the plateau to zero somewhere and hide the decay that is
+    % the point of these panels.
+    sub = PCresult{f}.Subthreshold(:,1:nTime) ./ PCresult{f}.SpikeHeight;
+    subSoma = mean(sub(ismember(PCresult{f}.roi_dClass,2), :), 1, 'omitnan');
+    subDist = mean(sub(ismember(PCresult{f}.roi_dClass,5), :), 1, 'omitnan');
+    subSoma = subSoma - median(subSoma(eligible), 'omitnan');
+    subDist = subDist - median(subDist(eligible), 'omitnan');
+
+    % CS ends: last frame of each contiguous CS interval, blue-off only
+    L = bwlabel(cstr);
+    for c = 1:max(L)
+        idx = find(L == c);
+        if ~blueOff(idx(1)), continue; end
+        te = idx(end);                        % the CS end
+        nCSend = nCSend + 1;  csDur(end+1) = numel(idx); %#ok<SAGROW>
+        w = te + (edgesE(1) : edgesE(end)-1); % one frame per lag, half-open bins
+        inR = w >= 1 & w <= nTime;
+        lagBin = discretize(edgesE(1) : edgesE(end)-1, edgesE);
+        ok2 = inR & ~isnan(lagBin);
+        cntE = cntE + accumarray(lagBin(ok2)', double(dTr(w(ok2)))', [nBinE 1])';
+        expE = expE + accumarray(lagBin(ok2)', double(eligible(w(ok2)))', [nBinE 1])';
+        % latency to the first dSpike strictly after the CS end
+        nxt = dsp(dsp > te);
+        if ~isempty(nxt), latFirst(end+1) = nxt(1) - te; end %#ok<SAGROW>
+        % subthreshold around the same CS end, relative to the neuron's resting level
+        wv  = te + lagV;  okv = wv >= 1 & wv <= nTime;
+        vs = nan(1, numel(lagV));  vd = nan(1, numel(lagV));
+        vs(okv) = subSoma(wv(okv));  vd(okv) = subDist(wv(okv));
+        Vsoma(end+1,:) = vs;  Vdist(end+1,:) = vd; %#ok<SAGROW>
+    end
+end
+if nCSend == 0, error('No blue-off CS interval found.'); end
+
+rateE   = 1000 * cntE ./ max(expE, eps);          % Hz, exposure-corrected
+baseHz  = 1000 * totDsp / max(totElig, 1);        % overall dSpike rate on eligible time
+% Poisson 95% band on the observed counts, propagated through the same exposure
+lo = 1000 * max(cntE - 1.96*sqrt(cntE), 0) ./ max(expE, eps);
+hi = 1000 * (cntE + 1.96*sqrt(cntE)) ./ max(expE, eps);
+
+fprintf('  %d CS ends from %d neurons | CS duration median %.0f ms (IQR %.0f-%.0f)\n', ...
+    nCSend, nNrnE, median(csDur), prctile(csDur,25), prctile(csDur,75));
+fprintf('  %d blue-off dSpikes over %.1f s of eligible time -> baseline %.2f Hz\n', ...
+    totDsp, totElig/1000, baseHz);
+fprintf('  exposure at lag 0 to +%d ms: %.1f%% of the maximum (the rest is CS or peri-spike)\n', ...
+    postCS_end, 100*mean(expE(ctrE>0))/max(max(expE),eps));
+fprintf('  latency from CS end to the next dSpike: median %.0f ms (IQR %.0f-%.0f), n = %d\n', ...
+    median(latFirst), prctile(latFirst,25), prctile(latFirst,75), numel(latFirst));
+for w = latWins
+    fprintf('     a dSpike within %3d ms after the CS end: %5.1f%% of CS ends\n', ...
+        w, 100*mean(latFirst <= w));
+end
+post = ctrE > 0 & expE > 0;
+fprintf('  rate just after the CS end vs baseline: first %d ms %.2f Hz (%.2fx baseline)\n', ...
+    binCS_end, rateE(find(post,1)), rateE(find(post,1))/max(baseHz,eps));
+
+figure(327); clf; tiledlayout(2,2,'TileSpacing','compact');
+nexttile([1 1]); hold all;
+patch([ctrE fliplr(ctrE)], [lo fliplr(hi)], [0.85 0.2 0.2], 'FaceAlpha',0.20, ...
+    'EdgeColor','none', 'HandleVisibility','off');
+plot(ctrE, rateE, '-', 'Color',[0.85 0.2 0.2], 'LineWidth',1.8);
+yl = ylim;  yl(1) = 0;
+% Shade only back to the MEDIAN CS duration. CS lengths vary, so a lag further back
+% than a given event's own duration is BEFORE that CS, not inside it — shading the
+% whole negative axis would claim a structural zero that does not hold there. The
+% exposure curve is what actually says where the zero is, event by event.
+csShade = -median(csDur);
+patch([csShade 0 0 csShade], [yl(1) yl(1) yl(2) yl(2)], [0.6 0.6 0.6], ...
+    'FaceAlpha',0.12, 'EdgeColor','none', 'HandleVisibility','off');
+plot([0 0], yl, 'k--');
+hB = plot(ctrE([1 end]), baseHz*[1 1], ':', 'Color',[0.3 0.3 0.3], 'LineWidth',1.5);
+ylim(yl);  xlim(edgesE([1 end]));  box off;
+xlabel('Time from CS end (ms)');  ylabel('dSpike rate (Hz)');
+legend(hB, 'overall rate on eligible time', 'Box','off', 'Location','northeast', 'FontSize',8);
+title(sprintf('exposure-corrected, %d CS ends', nCSend), 'FontWeight','normal');
+text(csShade+10, yl(2)*0.95, sprintf('inside CS\n(median %.0f ms)', median(csDur)), ...
+    'Color',[0.4 0.4 0.4], 'FontSize',8, 'VerticalAlignment','top');
+
+nexttile([1 1]); hold all;
+histogram(latFirst, 0:binCS_end:postCS_end, 'Normalization','probability', ...
+    'FaceColor',[0.3 0.3 0.3], 'EdgeColor','none');
+plot(median(latFirst)*[1 1], ylim, 'r-', 'LineWidth',2);
+text(median(latFirst), max(ylim), sprintf(' median %.0f ms', median(latFirst)), ...
+    'Color','r', 'VerticalAlignment','top');
+xlabel('CS end to next dSpike (ms)');  ylabel('Fraction of CS ends');  box off;
+title('latency to the first dSpike', 'FontWeight','normal');
+
+% --- (C,D) subthreshold voltage on the same lag axis, with the dSpike rate over it ---
+% The plateau is what forbids a dSpike, so putting the two on one axis shows directly
+% whether dSpikes resume as the plateau decays or wait for it to finish. Median and
+% IQR use EVERY CS end; the faint lines are a random subsample, drawn only so the
+% spread of individual events is visible behind the summary.
+rng(0);
+panelV = {Vsoma, Vdist};
+panelN = {sprintf('somatic subthreshold (dClass 2)'), ...
+          sprintf('distal dendritic subthreshold (dClass 5)')};
+for pv = 1:2
+    V = panelV{pv};
+    nexttile([1 1]); hold all;
+    if isempty(V), axis off; title(panelN{pv}); continue; end
+    med = median(V, 1, 'omitnan');
+    q1  = prctile(V, 25, 1);  q3 = prctile(V, 75, 1);
+    yyaxis left
+    if nShowTr_CSend > 0
+        pick = randperm(size(V,1), min(nShowTr_CSend, size(V,1)));
+        plot(lagV, V(pick,:)', '-', 'Color',[0.6 0.6 0.6 0.12], 'LineWidth',0.5, ...
+            'HandleVisibility','off');
+    end
+    gd = ~isnan(q1) & ~isnan(q3);
+    patch([lagV(gd) fliplr(lagV(gd))], [q1(gd) fliplr(q3(gd))], [0 0.35 0.7], ...
+        'FaceAlpha',0.25, 'EdgeColor','none', 'HandleVisibility','off');
+    hM = plot(lagV, med, '-', 'Color',[0 0.35 0.7], 'LineWidth',2);
+    plot(lagV([1 end]), [0 0], 'k:', 'HandleVisibility','off');
+    ylabel('Subthreshold (spike height)');
+    set(gca,'YColor',[0 0.35 0.7]);
+    ylv = ylim;
+    yyaxis right
+    hR = stairs(edgesE(1:end-1), rateE, '-', 'Color',[0.85 0.2 0.2], 'LineWidth',1.4);
+    ylabel('dSpike rate (Hz)');  set(gca,'YColor',[0.85 0.2 0.2]);
+    ylr = ylim;  ylr(1) = 0;  ylim(ylr);
+    yyaxis left
+    % the CS side of lag 0, shaded: no dSpike can occur there by definition
+    patch([csShade 0 0 csShade], [ylv(1) ylv(1) ylv(2) ylv(2)], [0.6 0.6 0.6], ...
+        'FaceAlpha',0.12, 'EdgeColor','none', 'HandleVisibility','off');
+    plot([0 0], ylv, 'k--', 'HandleVisibility','off');
+    ylim(ylv);  xlim(lagV([1 end]));  box off;
+    xlabel('Time from CS end (ms)');
+    title(sprintf('%s, n = %d', panelN{pv}, size(V,1)), 'FontWeight','normal', 'FontSize',10);
+    if pv == 1
+        legend([hM hR], {'median (IQR shaded)','dSpike rate'}, 'Box','off', ...
+            'Location','northeast', 'FontSize',8);
+    end
+end
+
+% how far the plateau has decayed by the time dSpikes come back
+for pv = 1:2
+    V = panelV{pv};  if isempty(V), continue; end
+    med = median(V, 1, 'omitnan');
+    atEnd = med(lagV == 0);
+    pk    = max(med(lagV >= edgesE(1) & lagV <= 0));
+    medLat = median(latFirst);
+    atLat = med(find(lagV >= medLat, 1));
+    fprintf(['  %s: peak inside CS %.3f, at CS end %.3f, at the median dSpike latency ' ...
+        '(%.0f ms) %.3f spike height (%.0f%% decayed)\n'], panelN{pv}, pk, atEnd, ...
+        medLat, atLat, 100*(1 - atLat/max(atEnd,eps)));
+end
+
+sgtitle(sprintf('dSpikes after the end of a complex spike | %d neurons, blue OFF', nNrnE), ...
+    'FontSize',11);
+set_font('Arial'); set_fontsize(11);
+
+%% Kymograph: somatic events WITH vs WITHOUT a dSpike in the pre-spike window (blue OFF)
+% Spike-triggered average kymograph (distance x time) for the "Any" trigger set of the
+% previous section -- SS, first spike of each CS, first spike of each BS, blue-off --
+% split by whether a dSpike occurred in the kymPreWin ms BEFORE the spike.
+%   left   spikes PRECEDED by a dSpike
+%   middle spikes NOT preceded by a dSpike (the control: same trigger set, same
+%          normalization, so the two panels differ only in the pre-spike dSpike)
+%   right  difference, which is what isolates the dSpike's dendritic signature from the
+%          bAP that both groups share
+% Without the control panel the left kymograph is dominated by the bAP and the dSpike is
+% hard to see; the difference is the point of the figure.
+% Trace: NormalizedTrace_dirt (spikes INCLUDED -- the dSpike is the thing we want to
+% see), per-neuron normalized by that neuron's SpikeHeight so amplitudes pool, and
+% baseline-subtracted per ROI over kymBase ms (a window early enough to sit before the
+% dSpike itself).
+% Pooling across neurons: neurons have different ROI counts, so each neuron's ROIs are
+% binned onto a COMMON dendritic-distance axis (PCresult.dendaxis, signed: negative
+% basal, 0 soma, positive apical) and the per-neuron binned kymographs are averaged.
+% Bins a neuron does not cover stay NaN and simply do not contribute.
+fprintf('Section: kymograph of events with/without a preceding dSpike (blue OFF)\n');
+
+kymTau     = -50:50;                 % ms around the trigger spike
+kymPreWin  = 25;                     % ms; dSpike must fall in [-kymPreWin,-1] to count
+kymBase    = [-50 -20];              % ms; per-ROI baseline window (before the dSpike)
+nDbin      = 24;                     % dendritic-distance bins for the common axis
+minEvt     = 10;                      % min events per group before a neuron contributes
+
+% common distance axis, from the pooled ROI distances of the analysed neurons
+allDax   = cell2mat(cellfun(@(P) P.dendaxis(:), PCresult(foi)', 'UniformOutput', false));
+daxEdges = linspace(prctile(allDax,1), prctile(allDax,99), nDbin+1);
+daxCtr   = daxEdges(1:end-1) + diff(daxEdges)/2;
+baseSel  = kymTau >= kymBase(1) & kymTau <= kymBase(2);
+
+Kwith = nan(nDbin, numel(kymTau), numel(foi));
+Kwout = nan(nDbin, numel(kymTau), numel(foi));
+nWith = zeros(1,numel(foi)); nWout = zeros(1,numel(foi));
+
+for fi = 1:numel(foi)
+    f = foi(fi);
+    tr      = PCresult{f}.NormalizedTrace_dirt;          % nROI x nTime, sorted rows
+    [nROI_f, nTime] = size(tr);
+    blueOff = PCresult{f}.BlueStim(:)' == 0;
+    dsp     = FiringRate{f}.DendOnlySpFrame(:)';
+    dsp     = dsp(blueOff(dsp));
+    if isempty(dsp); continue; end
+
+    % "Any" triggers: SS + first spike of CS + first spike of BS, blue-off
+    T = unique([find(PCresult{f}.SpikeClassMat(1,1:nTime) > 0 & blueOff), ...
+                find(PCresult{f}.SpikeClassMat(2,1:nTime) > 0 & blueOff), ...
+                find(PCresult{f}.SpikeClassMat(3,1:nTime) > 0 & blueOff)]);
+    T = T(T + kymTau(1) >= 1 & T + kymTau(end) <= nTime);   % full window in range
+    if isempty(T); continue; end
+
+    dspTrain = false(1,nTime); dspTrain(dsp) = true;
+    hasD = any(dspTrain(T(:) + (-kymPreWin:-1)), 2);        % dSpike in the pre-window
+    nWith(fi) = nnz(hasD); nWout(fi) = nnz(~hasD);
+    if nWith(fi) < minEvt || nWout(fi) < minEvt; continue; end
+
+    % per-ROI spike-triggered average, normalized and baseline-subtracted
+    Ww = T(hasD)'  + kymTau;   Wo = T(~hasD)' + kymTau;     % nEvt x nTau
+    Kw = nan(nROI_f, numel(kymTau)); Ko = Kw;
+    for r = 1:nROI_f
+        v = tr(r,:);
+        Kw(r,:) = mean(v(Ww), 1, 'omitnan');
+        Ko(r,:) = mean(v(Wo), 1, 'omitnan');
+    end
+    Kw = (Kw - median(Kw(:,baseSel), 2, 'omitnan')) / PCresult{f}.SpikeHeight;
+    Ko = (Ko - median(Ko(:,baseSel), 2, 'omitnan')) / PCresult{f}.SpikeHeight;
+
+    % bin ROIs onto the common distance axis
+    dbin = discretize(PCresult{f}.dendaxis(:), daxEdges);
+    for b = 1:nDbin
+        rows = dbin == b;
+        if ~any(rows); continue; end
+        Kwith(b,:,fi) = mean(Kw(rows,:), 1, 'omitnan');
+        Kwout(b,:,fi) = mean(Ko(rows,:), 1, 'omitnan');
+    end
+end
+
+%useF  = find(nWith >= minEvt & nWout >= minEvt);
+useF = 2;
+Mwith = mean(Kwith(:,:,useF), 3, 'omitnan');
+Mwout = mean(Kwout(:,:,useF), 3, 'omitnan');
+Mdiff = Mwith - Mwout;
+fprintf('  %d neurons contribute | %d events with a dSpike within %d ms, %d without\n', ...
+    numel(useF), sum(nWith(useF)), kymPreWin, sum(nWout(useF)));
+fprintf('  fraction of somatic events preceded by a dSpike: %.3f\n', ...
+    sum(nWith(useF))/(sum(nWith(useF))+sum(nWout(useF))));
+
+caxAll  = [prctile([Mwith(:); Mwout(:)],1) prctile([Mwith(:); Mwout(:)],99)];
+caxDiff = [-1 1]*prctile(abs(Mdiff(:)),99);
+figure(327); clf; tiledlayout(1, 2, 'Padding','compact', 'TileSpacing','compact');
+ttl = {sprintf('dSpike within %d ms before (%d events)', kymPreWin, sum(nWith(useF))), ...
+       sprintf('no preceding dSpike (%d events)', sum(nWout(useF))), ...
+       'difference (with - without)'};
+ax1=[];
+for k = 1:2
+    ax1=[ax1 nexttile];
+    switch k
+        case 1; imagesc(kymTau, 1:nDbin, Mwith, caxAll);  colormap(gca, turbo);
+        case 2; imagesc(kymTau, 1:nDbin, Mwout, caxAll);  colormap(gca, turbo);
+        case 3; imagesc(kymTau, 1:nDbin, Mdiff, caxDiff); colormap(gca, gen_colormap([0 0.4 1;1 1 1;1 0 0]));
+    end
+    % y ticks set explicitly: set_kymoYtick finds the soma via an exact dendaxis==0,
+    % which never occurs on this linspace bin-centre axis (it would then mislabel the
+    % first tick as 0 instead of the most basal bin)
+    ytk = round(linspace(1, nDbin, 5));
+    set(gca, 'YTick', ytk, 'YTickLabel', cellstr(num2str(daxCtr(ytk)', '%.0f')));
+    hold on;
+    xline(0,'w--','LineWidth',1);
+    plot([-kymPreWin -kymPreWin], [0.5 nDbin+0.5], 'w:', 'LineWidth',1);  % pre-window edge
+    if daxCtr(1) < 0 && daxCtr(end) > 0                      % mark the soma (distance 0)
+        plot(kymTau([1 end]), interp1(daxCtr, 1:nDbin, 0)*[1 1], 'w-', 'LineWidth',0.5);
+    end
+    xlabel('Time from somatic spike (ms)'); ylabel('Distance from soma (µm)');
+    title(ttl{k}, 'FontSize',10);
+    cb = colorbar; cb.Label.String = 'V (norm. to spike height)';
+end
+%sgtitle(sprintf('Somatic events with vs without a dSpike in the %d ms before | %d neurons', ...
+%    kymPreWin, numel(useF)));
+linkaxes(ax1,'xy');
+set_font('Arial'); set_fontsize(14);
+ylim([9 20]);
+set_figsize(260,70);
+
+%% dSpike amplitude vs noise: where does the detection threshold sit? (blue OFF)
+% How far above the noise floor does a dSpike actually sit? ONE amplitude per dSpike
+% EVENT (not per ROI): the event's ROIs are the ones the dSpike list assigns to it --
+% the (frame, branch) rows of dSpikePropsMat passing the DendOnlySpikes predicate,
+% expanded to each branch's ROIs and unioned over branches when a dSpike appears on
+% more than one -- and the amplitude is the PEAK over those ROIs and a +/-jitWin ms
+% window. So n = number of dSpikes, and a dSpike on a large branch does not outweigh
+% one on a small branch. dSpikes are blue-off (DendOnlySpFrame is already built from a
+% blue-off spike vector, and it is re-filtered here).
+% The trace is the hpWin-ms high-pass, tr - movmedian(tr,hpWin,2): exactly the operator
+% find_spike_bh uses for its local-amplitude ("prominence") proxy
+% (volt_hi2 = volt_hi - movmedian(volt_hi,7,2)), applied to the dF/F trace so the
+% threshold comes out in dF/F. Shown in two unit systems:
+%   (1) dF/F.
+%   (2) PER-ROI Z-SCORED: each ROI scaled by the robust SD of ITS OWN HIGH-PASS NOISE
+%       (1.4826*MAD of trHP over that ROI's silent frames), so an amplitude reads as
+%       "how many noise SDs" and ROIs with different noise levels become comparable --
+%       the units find_spike_bh's threshold/prom_th are expressed in, since that
+%       threshold is applied to an already-high-passed trace. The peak is taken AFTER
+%       scaling, so a quiet ROI can win over a louder one.
+%       The denominator is deliberately the HIGH-PASS noise SD, not the raw-trace SD:
+%       dividing the high-pass signal by the raw SD (which also carries slow
+%       subthreshold power) would give the z-noise an SD below 1, and the kSig-SD line
+%       would then NOT land at z = kSig. With this definition the pooled point-wise
+%       z-noise is ~N(0,1) by construction and the two scales agree.
+% NOISE: a single point-wise sample (one ROI, one silent frame, no max) -- the plain
+% noise distribution, symmetric about zero, whose robust SD is the sigma behind the
+% kSig-SD threshold marks and the printed SNR. The matched "window peak" null (the same
+% max-over-ROIs-and-window statistic applied at a silent frame) is still computed and
+% PRINTED, because a peak-finder's false-alarm rate is governed by it, but it is not
+% plotted: being a max over many samples it never goes negative and it crowds the
+% figure.
+% Noise frames must be genuinely quiet: >=silGuardA ms from ANY somatic AP, CS trace,
+% BS trace, dSpike, classified event, or SUBTHRESHOLD PEAK (peakvec); blue-off; and,
+% per ROI, >=nanGuard ms from any motion-rejected or dirt frame (both are stored as NaN
+% in NormalizedTrace_dirt, so the guard keeps peak-search and high-pass windows off a
+% NaN edge). A silent frame is drawn per EVENT and must be valid for all of its ROIs.
+fprintf('Section: dSpike amplitude vs noise floor (threshold estimate, blue OFF)\n');
+
+hpWin    = 7;              % ms; high-pass kernel, matches find_spike_bh
+jitWin   = 2;              % ms; +/- window for the peak search
+silGuardA= 30;             % ms; exclusion around ANY event or subthreshold peak
+nanGuard = jitWin + hpWin; % ms; keep peak/high-pass windows clear of motion/dirt NaNs
+kSig     = 3;              % threshold level to report/mark, in robust noise SD
+minSil   = 100;            % min silent frames before the per-ROI SD falls back to all frames
+jit      = -jitWin:jitWin;
+rng(0);                                       % reproducible silent-frame draws
+
+% one row per dSpike event; columns are [high-pass dF/F, high-pass z]
+A_dSp=[]; A_sil=[]; A_raw=[];   % dSpike peak / matched silent peak / point-wise noise
+sdUsed=[]; nNrnA=0;
+A_nrn=[]; sdNrn=[];             % neuron index per event / per ROI SD (for the per-neuron threshold)
+for f = foi
+    tr      = PCresult{f}.NormalizedTrace_dirt;            % nROI x nTime, dF/F, sorted rows
+    [nROI_f, nTime_f] = size(tr);
+    blueOff = PCresult{f}.BlueStim(:)' == 0;
+    dsp     = FiringRate{f}.DendOnlySpFrame(:)';
+    dsp     = dsp(blueOff(dsp));                           % blue-off dSpikes (already are)
+    dsp     = dsp(dsp > jitWin & dsp <= nTime_f - jitWin);
+    if isempty(dsp); continue; end
+
+    trHP = tr - movmedian(tr, hpWin, 2, 'omitnan');        % high-pass (find_spike_bh)
+    branchIn = PCresult{f}.BranchLabel(PCresult{f}.sortDist);
+
+    % --- which ROIs carried each dSpike, read off the dSpike list itself ---
+    % dSpikePropsMat rows are (spike frame, branch) pairs, so the branches come straight
+    % from the predicate that DEFINED the dSpikes (see the dSpikes section); each branch
+    % expands to its ROIs, unioned per event.
+    props = dSpikePropsMat{f};
+    isDsp = ismember(props.Spike_frame, dsp) & props.Branch_Index ~= 1 & ...
+            props.dClass ~= 0 & ~props.IsbAP & ~props.IsCS & ...
+            props.dt_pre_somAP >= 4 & props.dt_post_somAP >= 2.5;
+    dspF_l = props.Spike_frame(isDsp);  dspB_l = props.Branch_Index(isDsp);
+    if isempty(dspF_l); continue; end
+    evFrames = unique(dspF_l); nEvt = numel(evFrames);
+    roiMask  = false(nEvt, nROI_f);
+    for b = unique(dspB_l)'
+        [~, pos] = ismember(dspF_l(dspB_l == b), evFrames);
+        roiMask(pos, :) = roiMask(pos, :) | (branchIn(:)' == b);
+    end
+    keepE = any(roiMask, 2);
+    roiMask = roiMask(keepE,:); evFrames = evFrames(keepE); nEvt = numel(evFrames);
+    if nEvt == 0; continue; end
+
+    % --- unusable frames per ROI: motion reject + dirt (NaN), with a guard ---
+    badROI = imdilate(isnan(tr), ones(1, 2*nanGuard+1));   % nROI x nTime
+    % --- globally non-silent frames: any event or subthreshold peak, +/-silGuardA ---
+    evVec = false(1, nTime_f);
+    evVec(PCresult{f}.SomaSpike)                 = true;   % somatic APs
+    evVec(PCresult{f}.CStrace(1:nTime_f)   > 0)  = true;   % complex spikes (whole trace)
+    evVec(PCresult{f}.BStrace(1:nTime_f)   > 0)  = true;   % bursts
+    evVec(FiringRate{f}.DendOnlySpFrame)         = true;   % dSpikes
+    evVec(max(PCresult{f}.SpikeClassMat,[],1)>0) = true;   % any classified event
+    evVec(max(PCresult{f}.peakvec,     [],1)>0)  = true;   % subthreshold peaks
+    evVec(PCresult{f}.BlueStim > 0)              = true;   % blue-on
+    silentVec = ~imdilate(evVec, ones(1,2*silGuardA+1));
+    silentVec([1:jitWin, end-jitWin+1:end]) = false;       % keep the peak window in range
+
+    % --- per-ROI robust SD (z-score denominator), over that ROI's usable frames ---
+    sdROI = nan(nROI_f, 1);
+    for r = find(any(roiMask,1))
+        v = trHP(r, silentVec & ~badROI(r,:));             % this ROI's HIGH-PASS noise
+        if numel(v) < minSil; v = trHP(r, ~badROI(r,:)); end  % too few silent frames: fall back
+        if ~isempty(v); sdROI(r) = 1.4826*median(abs(v - median(v))); end
+    end
+    % --- silent candidates per DISTINCT ROI set (few patterns, so cache them) ---
+    [uPat, ~, patIdx] = unique(roiMask, 'rows');
+    candList = cell(size(uPat,1), 1);
+    for u = 1:size(uPat,1)
+        candList{u} = find(silentVec & ~any(badROI(uPat(u,:),:), 1));
+    end
+
+    aD = nan(nEvt,2); aS = nan(nEvt,2); aR = nan(nEvt,2);
+    for i = 1:nEvt
+        rois = find(roiMask(i,:));
+        sd   = sdROI(rois);
+        if any(~isfinite(sd)) || any(sd <= 0); continue; end
+        cand = candList{patIdx(i)};
+        if isempty(cand); continue; end
+        c  = cand(randi(numel(cand)));                     % matched silent frame
+        Hd = trHP(rois, evFrames(i)+jit);  Hs = trHP(rois, c+jit);
+        aD(i,:) = [max(Hd(:)) max(max(Hd./sd))];           % dF/F, then per-ROI z
+        aS(i,:) = [max(Hs(:)) max(max(Hs./sd))];
+        % point-wise noise: one ROI, one frame, no max -> the symmetric noise floor
+        rp = rois(randi(numel(rois))); cp = cand(randi(numel(cand)));
+        aR(i,:) = [trHP(rp,cp) trHP(rp,cp)/sdROI(rp)];
+    end
+    A_dSp=[A_dSp; aD]; A_sil=[A_sil; aS]; A_raw=[A_raw; aR];
+    sdUsed=[sdUsed; sdROI(any(roiMask,1))];
+    A_nrn=[A_nrn; repmat(f,nEvt,1)]; sdNrn=[sdNrn; repmat(f,sum(any(roiMask,1)),1)];
+    nNrnA = nNrnA + 1;
+end
+
+ok = all(isfinite(A_dSp),2) & all(isfinite(A_sil),2) & all(isfinite(A_raw),2);
+A_dSp=A_dSp(ok,:); A_sil=A_sil(ok,:); A_raw=A_raw(ok,:); A_nrn=A_nrn(ok);
+measName = {sprintf('%d ms high-pass', hpWin), sprintf('%d ms high-pass, z', hpWin)};
+measUnit = {'\DeltaF/F','z (noise SD)'};
+measUnitTxt = {'dF/F','z'};
+nMeas = numel(measName);
+
+fprintf('  %d dSpike events from %d neurons (one amplitude per event, peak over its ROIs)\n', ...
+    sum(ok), nNrnA);
+fprintf('  silent = >=%d ms from any event or subthreshold peak, blue-off, >=%d ms from motion/dirt\n', ...
+    silGuardA, nanGuard);
+fprintf('  per-ROI high-pass noise SD (dF/F): median %.4f  range [%.4f %.4f]\n', ...
+    median(sdUsed,'omitnan'), min(sdUsed), max(sdUsed));
+thrVal = nan(1, nMeas);   % kSig-SD threshold in each measure's own units
+for m = 1:nMeas
+    d = A_dSp(:,m); s = A_sil(:,m); r = A_raw(:,m);
+    sdN = 1.4826*median(abs(r - median(r)));           % sigma from the point-wise noise
+    thr = median(r) + kSig*sdN; thrVal(m) = thr;
+    fprintf('  %s [%s]: n=%d\n', measName{m}, measUnitTxt{m}, numel(d));
+    fprintf('     noise sigma %.4f (point-wise, median %+.4f)\n', sdN, median(r));
+    fprintf('     dSpike median %.4f  IQR [%.4f %.4f]  -> SNR (median/sigma) = %.2f\n', ...
+        median(d), prctile(d,25), prctile(d,75), median(d)/sdN);
+    fprintf('     %d SD threshold = %.4f -> %.1f%% of dSpikes kept, %.2f%% of noise above\n', ...
+        kSig, thr, 100*mean(d>=thr), 100*mean(r>=thr));
+    fprintf('       (window-peak null, i.e. what a peak-finder would false-alarm on: %.2f%%)\n', ...
+        100*mean(s>=thr));
+end
+
+cDsp = [0.85 0.33 0.10]; cNz = [0.45 0.45 0.45];
+figure(323); clf; tiledlayout(2, 2, 'Padding','compact', 'TileSpacing','compact');
+for m = 1:nMeas
+    d = A_dSp(:,m); r = A_raw(:,m);
+    % --- amplitude histograms: noise vs dSpike ---
+    nexttile; hold on;
+    % shared bins; the top 0.5% of dSpikes falls off-scale, so the 'probability' bars
+    % sum to slightly under 1 for the dSpike distribution
+    ed = linspace(min([r;d]), prctile(d,99.5), 60);
+    histogram(r, ed, 'Normalization','probability', 'FaceColor',cNz,  'EdgeColor','none', 'FaceAlpha',0.55);
+    histogram(d, ed, 'Normalization','probability', 'FaceColor',cDsp, 'EdgeColor','none', 'FaceAlpha',0.55);
+    xline(thrVal(m), 'k:', sprintf('%dSD', kSig), 'LabelOrientation','horizontal', ...
+        'FontSize',9, 'HandleVisibility','off');
+    xlabel(['Amplitude (' measUnit{m} ')']); ylabel('Fraction'); box off;
+    legend({'noise','dSpike'}, 'Location','northeast', 'box','off', 'FontSize',9);
+    title(measName{m});
+    % --- threshold sweep ---
+    nexttile; hold on;
+    thrGrid = linspace(0, prctile(d,99), 200);
+    plot(thrGrid, arrayfun(@(t) mean(d>=t), thrGrid)*100, '-', 'Color',cDsp, 'LineWidth',1.5);
+    plot(thrGrid, arrayfun(@(t) mean(r>=t), thrGrid)*100, '-', 'Color',cNz,  'LineWidth',1.5);
+    xline(thrVal(m), 'k:', sprintf('%dSD', kSig), 'LabelOrientation','horizontal', ...
+        'FontSize',9, 'HandleVisibility','off');
+    xlabel(['Threshold (' measUnit{m} ')']); ylabel('Fraction above (%)');
+    box off; ylim([0 100]);
+    legend({'dSpikes kept','noise above'}, 'Location','northeast', 'box','off', 'FontSize',9);
+    title('Threshold sweep');
+end
+sgtitle(sprintf('dSpike amplitude vs noise floor, blue OFF | %d dSpikes, %d neurons', ...
+    sum(ok), nNrnA));
+set_font('Arial'); set_fontsize(13);
+set_figsize(185,200);
+
+%% Event waveform: amplitude and width of the average spike / dSpike (blue OFF)
+% "How big and how wide is an average dSpike?" -- and the same two numbers for every other
+% detected event class, so the dSpike can be read against them on one scale.
+% ONE measurement per EVENT, taken on the FAST trace
+%   NormalizedTrace_dirt - Subthreshold_larger
+% (the spike-only trace the dSpikes section already integrates for AUC; subtracting the slow
+% component is what makes a width well defined -- on the raw dF/F the spike sits on a slow
+% depolarization that never returns to half max). The trace is averaged over the ROIs that
+% belong to the event:
+%   SomAP / SS / CS : the peri-somatic ROIs (dClass 2)
+%   dAP             : the ROIs of the dendritic branch(es) that beat the conduction-speed
+%                     threshold for that somatic spike (classify_dAP_candidates)
+%   dSpike          : the ROIs of the branch(es) the dSpike list assigns to that event
+%                     (union over branches), also split into basal (dClass 1) and
+%                     apical (dClass 3/4/5)
+% Per event the ROI-mean segment is baseline-subtracted (median over wfBase), the AMPLITUDE
+% is its peak inside wfPk of the detected frame, and the WIDTH is the FULL WIDTH AT HALF
+% MAXIMUM of that peak (both half-max crossings linearly interpolated; NaN when the trace
+% does not fall back below half max inside the window, i.e. the width is not resolved).
+% Amplitude is reported in dF/F and in units of the somatic spike height
+% (PCresult.SpikeHeight), which is what makes amplitudes comparable across neurons.
+% Also printed: the SINGLE-ROI peak amplitude (max over the event's ROIs, high-pass-free),
+% the quantity the "dSpike amplitude vs noise" section above puts against the noise floor --
+% it is larger than the ROI-mean amplitude whenever a dSpike does not cover its whole branch.
+% Three summaries per class: the grand-average waveform (all events pooled, in spike-height
+% units), the median over EVENTS, and the mean +- s.e.m. over NEURONS (n = neurons, the unit
+% for statistics; each neuron measured on its own average waveform).
+fprintf('Section: event waveform amplitude & width (blue OFF)\n');
+
+wfPre = 20; wfPost = 30;                    % ms; waveform window around the detected frame
+wfT   = -wfPre:wfPost;
+wfBase = wfT <= -8;                         % baseline window (pre-event)
+wfPk   = wfT >= -2 & wfT <= 4;              % peak-search window (allows detection jitter)
+wfMinFrac = 0.8;                            % min fraction of finite samples in a segment
+
+wfName = {'SomAP','SS','CS','dAP','dSpike','dSpike basal','dSpike apical'};
+% dSpike keeps the orange of the noise-floor section (cDsp); CS is magenta rather than a
+% second orange, so the two are not confusable in the overlay.
+wfCol  = [0.10 0.10 0.10; 0.50 0.50 0.50; 0.80 0.15 0.45; 0.10 0.45 0.90; ...
+          0.85 0.33 0.10; 0.20 0.55 0.25; 0.50 0.20 0.70];
+nWf = numel(wfName);
+
+wfEvAmp = cell(1,nWf); wfEvAmpN = cell(1,nWf); wfEvW = cell(1,nWf);   % per event
+wfEvAmpROI = cell(1,nWf); wfEvNrn = cell(1,nWf);
+wfWave  = cell(1,nWf);                                               % per event waveform, dF/F
+wfWaveN = cell(1,nWf);                                               % per event waveform, spike-ht
+wfNrnAmp = nan(numel(foi),nWf); wfNrnAmpN = nan(numel(foi),nWf); wfNrnW = nan(numel(foi),nWf);
+
+for fi = 1:numel(foi)
+    f = foi(fi);
+    trFast = PCresult{f}.NormalizedTrace_dirt - PCresult{f}.Subthreshold_larger;  % spike-only trace
+    [nROI_f, nTime_f] = size(trFast);
+    blueOff  = PCresult{f}.BlueStim(:)' == 0;
+    branchIn = PCresult{f}.BranchLabel(PCresult{f}.sortDist);
+    somaROI  = find(PCresult{f}.branch_dClass == 2);
+    if isempty(somaROI); somaROI = find(branchIn(:)' == 1); end
+    props = dSpikePropsMat{f};
+
+    % --- event frames + the ROI set each event is measured on ---
+    wfFrames = cell(1,nWf); wfMask = cell(1,nWf);
+    somaSets = {FiringRate{f}.SomaSpikeFrame, FiringRate{f}.SimpleSpikeFrame, FiringRate{f}.ComplexSpikeFrame};
+    for c = 1:3                                            % somatic classes -> peri-somatic ROIs
+        fr = somaSets{c}(:)'; fr = fr(blueOff(fr));
+        wfFrames{c} = fr; wfMask{c} = repmat(ismember(1:nROI_f, somaROI), numel(fr), 1);
+    end
+    dapRows = classify_dAP_candidates(props);              % dendritically-initiated APs
+    dapRows = dapRows(blueOff(props.Spike_frame(dapRows)));
+    [wfFrames{4}, wfMask{4}] = wf_event_roi_mask(props, dapRows, branchIn);
+    dsp = FiringRate{f}.DendOnlySpFrame(:)'; dsp = dsp(blueOff(dsp));
+    dspRows = find(ismember(props.Spike_frame, dsp) & props.Branch_Index ~= 1 & ...   % rows that DEFINED the dSpikes
+        props.dClass ~= 0 & ~props.IsbAP & ~props.IsCS & ...
+        props.dt_pre_somAP >= 4 & props.dt_post_somAP >= 2.5);
+    [wfFrames{5}, wfMask{5}] = wf_event_roi_mask(props, dspRows, branchIn);
+    [wfFrames{6}, wfMask{6}] = wf_event_roi_mask(props, dspRows(props.dClass(dspRows) == 1), branchIn);
+    [wfFrames{7}, wfMask{7}] = wf_event_roi_mask(props, dspRows(ismember(props.dClass(dspRows), [3 4 5])), branchIn);
+
+    for c = 1:nWf
+        fr = wfFrames{c}(:)'; M = wfMask{c};
+        if isempty(fr); continue; end
+        keep = fr - wfPre >= 1 & fr + wfPost <= nTime_f & any(M, 2)';   % full window inside the recording
+        fr = fr(keep); M = M(keep,:);
+        if isempty(fr); continue; end
+        [aM, wE, Wev, aR] = wf_measure(trFast, fr, M, wfT, wfBase, wfPk, wfMinFrac);
+        sh = PCresult{f}.SpikeHeight;
+        wfEvAmp{c}   = [wfEvAmp{c};   aM];        wfEvAmpN{c} = [wfEvAmpN{c}; aM/sh];
+        wfEvW{c}     = [wfEvW{c};     wE];        wfEvAmpROI{c} = [wfEvAmpROI{c}; aR];
+        wfEvNrn{c}   = [wfEvNrn{c};   repmat(f, numel(aM), 1)];
+        wfWave{c}    = [wfWave{c};    Wev];       wfWaveN{c}  = [wfWaveN{c}; Wev/sh];
+        % neuron-level: measure this neuron's OWN average waveform (not the median of events)
+        if any(isfinite(Wev(:)))
+            [am, wm] = wf_amp_width(wfT, mean(Wev, 1, 'omitnan'), wfPk);
+            wfNrnAmp(fi,c) = am; wfNrnAmpN(fi,c) = am/sh; wfNrnW(fi,c) = wm;
+        end
+    end
+end
+
+% ---- grand-average waveform per class, in BOTH unit systems, + its amplitude / FWHM ----
+% wfGrand*  : spike-height units (neurons comparable -- what the stats use)
+% wfGrandF* : dF/F (the physical unit the Methods sentence quotes)
+wfGrand = nan(nWf, numel(wfT)); wfGrandSem = nan(nWf, numel(wfT));
+wfGrandF = nan(nWf, numel(wfT)); wfGrandFSem = nan(nWf, numel(wfT));
+wfGrandAmp = nan(nWf,1); wfGrandW = nan(nWf,1); wfGrandFAmp = nan(nWf,1); wfGrandFW = nan(nWf,1);
+for c = 1:nWf
+    if isempty(wfWaveN{c}); continue; end
+    good = any(isfinite(wfWaveN{c}), 2);
+    if ~any(good); continue; end
+    Wg = wfWaveN{c}(good,:);
+    wfGrand(c,:)    = mean(Wg, 1, 'omitnan');
+    wfGrandSem(c,:) = std(Wg, 0, 1, 'omitnan') ./ sqrt(sum(isfinite(Wg), 1));
+    [wfGrandAmp(c), wfGrandW(c)] = wf_amp_width(wfT, wfGrand(c,:), wfPk);
+    Wf = wfWave{c}(good,:);
+    wfGrandF(c,:)    = mean(Wf, 1, 'omitnan');
+    wfGrandFSem(c,:) = std(Wf, 0, 1, 'omitnan') ./ sqrt(sum(isfinite(Wf), 1));
+    [wfGrandFAmp(c), wfGrandFW(c)] = wf_amp_width(wfT, wfGrandF(c,:), wfPk);
+end
+
+% ---- report ----
+med3 = @(x) [median(x,'omitnan') prctile(x,25) prctile(x,75)];
+fprintf('  window %+d..%+d ms | baseline %+d..%+d ms | peak search %+d..%+d ms | fast trace = dF/F - slow subthreshold\n', ...
+    wfT(1), wfT(end), wfT(find(wfBase,1)), wfT(find(wfBase,1,'last')), wfT(find(wfPk,1)), wfT(find(wfPk,1,'last')));
+fprintf('  %-14s %6s %5s | %-24s %-22s | %-22s %-13s | %s\n', 'class','nEvt','nNrn', ...
+    'amp ROI-mean (dF/F)','amp (spike ht)','FWHM per event (ms)','FWHM avg wave','amp 1-ROI peak (dF/F)');
+wfSumm = table('Size',[nWf 12], 'VariableTypes',[{'string'} repmat({'double'},1,11)], ...
+    'VariableNames',{'Class','nEvents','nNeurons','Amp_dFF_med','Amp_spikeHt_med','FWHM_ms_med', ...
+    'FWHM_resolved_frac','Amp_peakROI_dFF_med','GrandAvg_Amp_spikeHt','GrandAvg_FWHM_ms', ...
+    'Neuron_Amp_spikeHt_mean','Neuron_FWHM_ms_mean'});
+for c = 1:nWf
+    a = wfEvAmp{c}; an = wfEvAmpN{c}; w = wfEvW{c}; ar = wfEvAmpROI{c};
+    nEvt = sum(isfinite(a)); nNrn = numel(unique(wfEvNrn{c}(isfinite(a))));
+    if nEvt == 0
+        fprintf('  %-14s %6d %5d | (no events)\n', wfName{c}, 0, 0);
+        wfSumm(c,:) = {string(wfName{c}), 0, 0, NaN, NaN, NaN, NaN, NaN, NaN, NaN, NaN, NaN};
+        continue;
+    end
+    qa = med3(a); qn = med3(an); qw = med3(w); qr = med3(ar);
+    nw = mean(isfinite(w(isfinite(a))));                       % fraction of events with a resolved width
+    mA = mean(wfNrnAmpN(:,c),'omitnan'); sA = std(wfNrnAmpN(:,c),'omitnan')/sqrt(sum(isfinite(wfNrnAmpN(:,c))));
+    mW = mean(wfNrnW(:,c),'omitnan');    sW = std(wfNrnW(:,c),'omitnan')/sqrt(sum(isfinite(wfNrnW(:,c))));
+    fprintf(['  %-14s %6d %5d | %6.4f [%6.4f %6.4f]   %5.3f [%5.3f %5.3f]  | ' ...
+             '%5.2f [%5.2f %5.2f] (%3.0f%%) %6.2f       | %6.4f\n'], ...
+        wfName{c}, nEvt, nNrn, qa(1), qa(2), qa(3), qn(1), qn(2), qn(3), ...
+        qw(1), qw(2), qw(3), 100*nw, wfGrandW(c), qr(1));
+    fprintf('  %-14s %12s   per NEURON (n=%d): amp %.3f +- %.3f spike ht | FWHM %.2f +- %.2f ms | grand-avg amp %.3f spike ht\n', ...
+        '', '', sum(isfinite(wfNrnAmpN(:,c))), mA, sA, mW, sW, wfGrandAmp(c));
+    wfSumm(c,:) = {string(wfName{c}), nEvt, nNrn, qa(1), qn(1), qw(1), nw, qr(1), ...
+        wfGrandAmp(c), wfGrandW(c), mA, mW};
+end
+disp(wfSumm);
+
+% ---- figure ----
+wfShow = find(cellfun(@(x) sum(isfinite(x))>0, wfEvAmp));
+figure(329); clf; tiledlayout(1, 4, 'Padding','compact', 'TileSpacing','compact');
+% (1) grand-average waveforms in dF/F (the unit the Methods sentence quotes)
+nexttile; hold on; box off;
+hWf = gobjects(1, numel(wfShow));
+for k = 1:numel(wfShow)
+    c = wfShow(k);
+    hWf(k) = errorbar_shade(wfT, wfGrandF(c,:), wfGrandFSem(c,:), wfCol(c,:));
+end
+set(hWf(isgraphics(hWf)), 'LineStyle','-'); xline(0,'k:'); yline(0,'k:');
+xlabel('Time from event (ms)'); ylabel('\DeltaF/F'); xlim([-10 25]);
+legend(hWf, arrayfun(@(c) sprintf('%s (n=%d)', wfName{c}, sum(isfinite(wfEvAmp{c}))), wfShow, ...
+    'UniformOutput',false), 'Box','off', 'Location','northeast', 'FontSize',8);
+title('Average waveform (\DeltaF/F)');
+% (2) peak-normalized, with the half-max level drawn in
+nexttile; hold on; box off;
+for k = 1:numel(wfShow)
+    c = wfShow(k);
+    plot(wfT, wfGrandF(c,:)/wfGrandFAmp(c), '-', 'Color',wfCol(c,:), 'LineWidth',1.4);
+end
+yline(0.5,'k--'); xline(0,'k:'); ylim([-0.3 1.15]); xlim([-10 25]);
+xlabel('Time from event (ms)'); ylabel('Normalized to peak');
+% The CS curve rises again after its first spike -- that is the rest of the complex spike,
+% not a wide first spike; the FWHM is measured on the first crossing pair around t = 0.
+title('Width comparison (half max)');
+% (3)-(4) per-neuron amplitude (dF/F) and width
+for q = 1:2
+    if q==1; Y = wfNrnAmp; ylb = 'Amplitude (\DeltaF/F)'; ttl = 'Amplitude per neuron';
+    else;    Y = wfNrnW;   ylb = 'FWHM (ms)';             ttl = 'Width per neuron'; end
+    nexttile; hold on; box off;
+    for k = 1:numel(wfShow)
+        c = wfShow(k); v = Y(:,c); v = v(isfinite(v));
+        if isempty(v); continue; end
+        scatter(k + 0.16*(rand(numel(v),1)-0.5), v, 16, wfCol(c,:), 'filled', 'MarkerFaceAlpha',0.6);
+        errorbar(k, mean(v), std(v)/sqrt(numel(v)), 'k', 'LineWidth',1.2, 'CapSize',8);
+        plot(k + [-0.22 0.22], mean(v)*[1 1], 'k-', 'LineWidth',1.6);
+    end
+    set(gca, 'xtick', 1:numel(wfShow), 'XTickLabel', wfName(wfShow), 'XTickLabelRotation',35);
+    xlim([0.4 numel(wfShow)+0.6]); ylabel(ylb); title(ttl);
+end
+sgtitle(sprintf('Event amplitude & width, blue OFF | mean %s s.e.m. over %d neurons', ...
+    char(177), numel(foi)));
+set_font('Arial'); set_fontsize(12);
+set_figsize(360,105);
+
+%% dSpike detection criteria in physical units (numbers for the Methods sentence)
+% Puts the dSpike criteria into the units a reader can check: ms, percent dF/F, mV. The DETECTION
+% rule itself is a z-score: a dendritic event must exceed kSig (=3) times the robust s.d. of
+% that ROI's OWN high-pass noise, so its dF/F equivalent is a DIFFERENT number for every ROI
+% and every neuron. What is quoted below is therefore the median of the per-neuron thresholds,
+% with the spread across neurons given so the variability is not hidden by a single number.
+%
+% dF/F -> mV uses the only calibration available in an all-optical recording: the somatic
+% action potential is taken to be mVperAP mV, so a neuron's mV-per-unit-dF/F is
+% mVperAP / PCresult{f}.SpikeHeight. This is an ASSUMPTION, not a measurement -- it sets the
+% absolute scale of every mV number below, and is the one quantity to state explicitly in the
+% Methods. Change mVperAP to see how the quoted mV moves.
+%
+% Needs the two sections above: "dSpike amplitude vs noise" (per-ROI noise s.d. -> threshold)
+% and "Event waveform" (FWHM and raw dF/F amplitude of the accepted events).
+fprintf('Section: dSpike detection criteria in physical units\n');
+
+if ~exist('sdUsed','var') || ~exist('wfEvW','var')
+    error('Run the "dSpike amplitude vs noise" and "Event waveform" sections first.');
+end
+mVperAP = 100;                  % mV; assumed somatic AP amplitude -- sets the absolute mV scale
+cDsp_i  = strcmp(wfName, 'dSpike');   % the dSpike column of the waveform section
+
+% --- per-neuron amplitude threshold: kSig x (median high-pass noise s.d. over that neuron's ROIs) ---
+thrNrn = nan(numel(foi), 3);    % [dF/F, mV, somatic spike heights]
+for fi = 1:numel(foi)
+    f = foi(fi);
+    sd_f = sdUsed(sdNrn == f);
+    if isempty(sd_f); continue; end
+    thrNrn(fi,1) = kSig * median(sd_f, 'omitnan');
+    thrNrn(fi,3) = thrNrn(fi,1) / PCresult{f}.SpikeHeight;
+    thrNrn(fi,2) = mVperAP * thrNrn(fi,3);
+end
+% --- accepted dSpikes: width, and amplitude on both the high-pass and the raw dF/F scale ---
+wDsp  = wfEvW{cDsp_i};    wDsp  = wDsp(isfinite(wDsp));            % FWHM, ms
+aDspF = wfEvAmp{cDsp_i};  aDspF = aDspF(isfinite(aDspF));          % ROI-mean peak, raw dF/F
+aDspN = wfEvAmpN{cDsp_i}; aDspN = aDspN(isfinite(aDspN));          % same, spike heights
+aHP   = A_dSp(:,1);                                                % single-ROI high-pass peak, dF/F
+
+wCut = ceil(prctile(wDsp, 95)*2)/2;                                % width bound, rounded up to 0.5 ms
+fprintf('  n = %d dSpikes (width) / %d dSpikes (high-pass amplitude), %d neurons | AP assumed = %d mV\n', ...
+    numel(wDsp), numel(aHP), numel(foi), mVperAP);
+fprintf('  FWHM (ms)                    : median %.2f  IQR [%.2f %.2f]  p90 %.2f  p95 %.2f  max %.2f\n', ...
+    median(wDsp), prctile(wDsp,25), prctile(wDsp,75), prctile(wDsp,90), prctile(wDsp,95), max(wDsp));
+fprintf('  threshold, %d x noise SD      : %.2f%% dF/F [IQR %.2f-%.2f]  = %.1f mV [%.1f-%.1f]  = %.2f spike ht\n', ...
+    kSig, 100*median(thrNrn(:,1),'omitnan'), 100*prctile(thrNrn(:,1),25), 100*prctile(thrNrn(:,1),75), ...
+    median(thrNrn(:,2),'omitnan'), prctile(thrNrn(:,2),25), prctile(thrNrn(:,2),75), median(thrNrn(:,3),'omitnan'));
+fprintf('  accepted dSpike amplitude    : raw %.2f%% dF/F [IQR %.2f-%.2f], p5 %.2f%%  = %.1f mV [%.1f-%.1f]\n', ...
+    100*median(aDspF), 100*prctile(aDspF,25), 100*prctile(aDspF,75), 100*prctile(aDspF,5), ...
+    mVperAP*median(aDspN), mVperAP*prctile(aDspN,25), mVperAP*prctile(aDspN,75));
+fprintf('  accepted dSpike amplitude    : high-pass %.2f%% dF/F [IQR %.2f-%.2f], p5 %.2f%%  (the scale the threshold lives on)\n', ...
+    100*median(aHP), 100*prctile(aHP,25), 100*prctile(aHP,75), 100*prctile(aHP,5));
+fprintf(['\n  --> "We identified fast and large-amplitude excitations (< %.1f ms full-width at half-maximum,\n' ...
+         '       > %.1f%% dF/F, corresponding to ~%.0f mV), and ascribed these to putative Na+ spikes (Methods)."\n\n'], ...
+    wCut, 100*median(thrNrn(:,1),'omitnan'), median(thrNrn(:,2),'omitnan'));
+
+figure(330); clf; tiledlayout(1, 3, 'Padding','compact', 'TileSpacing','compact');
+% (1) average dSpike waveform in dF/F, with the threshold and the half-max width drawn on it
+nexttile; hold on; box off;
+c = find(cDsp_i);
+hD = errorbar_shade(wfT, wfGrandF(c,:), wfGrandFSem(c,:), wfCol(c,:)); set(hD,'LineStyle','-');
+yline(median(thrNrn(:,1),'omitnan'), 'k:', sprintf('%dSD thr', kSig), 'LabelHorizontalAlignment','left');
+yline(wfGrandFAmp(c)/2, '--', 'Color',[0.5 0.5 0.5], 'Label','half max');
+xline(0,'k:'); xlabel('Time from dSpike (ms)'); ylabel('\DeltaF/F');
+title(sprintf('Average dSpike: %.1f%% \\DeltaF/F, FWHM %.2f ms', 100*wfGrandFAmp(c), wfGrandFW(c)));
+% (2) amplitude distribution in dF/F, raw and high-pass, with the threshold
+nexttile; hold on; box off;
+edA = linspace(0, prctile([aDspF; aHP],99), 50);
+histogram(aHP,   edA, 'Normalization','probability', 'FaceColor',[0.45 0.45 0.45], 'EdgeColor','none', 'FaceAlpha',0.55);
+histogram(aDspF, edA, 'Normalization','probability', 'FaceColor',wfCol(c,:),       'EdgeColor','none', 'FaceAlpha',0.55);
+xline(median(thrNrn(:,1),'omitnan'), 'k:', sprintf('%dSD thr', kSig), 'LabelOrientation','horizontal');
+xlabel('dSpike amplitude (\DeltaF/F)'); ylabel('Fraction');
+legend({'high-pass (threshold scale)','raw'}, 'Box','off', 'Location','northeast', 'FontSize',8);
+title('Amplitude');
+% (3) width distribution, with the bound quoted in the sentence
+nexttile; hold on; box off;
+histogram(wDsp, linspace(0, prctile(wDsp,99), 40), 'Normalization','probability', ...
+    'FaceColor',wfCol(c,:), 'EdgeColor','none', 'FaceAlpha',0.7);
+xline(wCut, 'k:', sprintf('%.1f ms (p95)', wCut), 'LabelOrientation','horizontal');
+xlabel('dSpike FWHM (ms)'); ylabel('Fraction'); title('Width');
+sgtitle(sprintf('dSpike criteria in physical units | n = %d dSpikes, %d neurons | AP = %d mV assumed', ...
+    numel(wDsp), numel(foi), mVperAP));
+set_font('Arial'); set_fontsize(12);
+set_figsize(280,100);
+
+%% Blue-stim triggered subthreshold average: dendritic time constant
+% Shape of the subthreshold depolarization driven by the blue stimulus, used to read out
+% a membrane time constant. Soma / basal / apical were indistinguishable, so ALL ROIs of
+% a neuron are averaged into one trace and the neuron is the unit of analysis.
+%   (A) BLUE ONSET triggered average. An epoch contributes only if NO spike occurs in
+%       the noSpkWin ms AFTER onset, so the trace is the passive charging curve and not
+%       a spike-contaminated one.
+%   (B) The whole blue epoch, ON -> OFF, for epochs of the modal duration (so traces of
+%       different stimulus lengths are never averaged together): rise, plateau, decay.
+%   (C) BLUE OFFSET triggered average. An epoch contributes only if NO spike occurs in
+%       the noSpkWin ms BEFORE offset, so the decay starts from a clean plateau.
+% Trace: PCresult.Subthreshold (spike-removed). Epochs are screened for spikes only
+% within noSpkWin of the alignment point, so a spike later in the same epoch could still
+% land in the averaging window; the spike-removed trace keeps that from distorting it.
+% Baseline: every epoch is referenced to the median of its OWN pre-onset baseWin ms, and
+% that single value is used for the onset-, full- and offset-aligned versions, so all
+% three panels share one "pre-blue = 0" scale and the plateau amplitude is comparable.
+% Spikes here = somatic APs AND dSpikes: a dendritic spike inside the window would
+% corrupt exactly the dendritic subthreshold shape this section is measuring.
+% The 63.2%/36.8% crossing times computed here are NOT the reported time constants --
+% they only seed t_guess for the interactive fits in the next section.
+fprintf('Section: blue-stim triggered subthreshold average (all ROIs pooled)\n');
+
+blueWinOn  = [-50 250];    % ms around blue ONSET
+blueWinOff = [-100 250];   % ms around blue OFFSET
+noSpkWin   = 50;           % ms; reject an epoch if a spike falls in this window
+baseWin    = 50;           % ms; pre-onset baseline (median)
+tailWin    = 250;          % ms shown after the offset in the full-epoch panel
+lagOn  = blueWinOn(1):blueWinOn(2);
+lagOff = blueWinOff(1):blueWinOff(2);
+
+nF = numel(foi);
+staOn  = nan(nF, numel(lagOn));
+staOff = nan(nF, numel(lagOff));
+staFull= cell(nF,1); durFull = nan(nF,1);
+nEpOn  = zeros(nF,1); nEpOff = zeros(nF,1); nEpTot = zeros(nF,1);
+plateauAmp = nan(nF,1); tauGuessRise = nan(nF,1); tauGuessDecay = nan(nF,1);
+
+for fi = 1:nF
+    f = foi(fi);
+    sub   = PCresult{f}.Subthreshold;                 % nROI x nTime, sorted rows, dF/F
+    nTime = size(sub,2);
+    blue  = PCresult{f}.BlueStim(:)' > 0;
+    if ~any(blue); continue; end
+    bb    = bwlabel(blue);
+    onFr  = arrayfun(@(k) find(bb==k,1,'first'), 1:max(bb));
+    offFr = arrayfun(@(k) find(bb==k,1,'last'),  1:max(bb));
+    nEpTot(fi) = numel(onFr);
+
+    % spike reference: somatic APs + dSpikes (see header)
+    spkVec = false(1,nTime);
+    spkVec(PCresult{f}.SomaSpike) = true;
+    spkVec(FiringRate{f}.DendOnlySpFrame) = true;
+
+    v = mean(sub, 1, 'omitnan');                      % ALL ROIs pooled -> 1 x nTime
+
+    % per-epoch pre-onset baseline (shared by all three alignments)
+    okBase = onFr > baseWin & offFr <= nTime;
+    base = nan(1, numel(onFr));
+    for k = find(okBase)
+        base(k) = median(v(onFr(k)-baseWin:onFr(k)-1), 'omitnan');
+    end
+
+    % --- (A) onset-aligned, epochs with no spike in [onset, onset+noSpkWin] ---
+    keepOn = okBase & onFr + blueWinOn(2) <= nTime & onFr + blueWinOn(1) >= 1 & ...
+             arrayfun(@(o) ~any(spkVec(o:min(o+noSpkWin,nTime))), onFr);
+    if any(keepOn)
+        W = onFr(keepOn)' + lagOn;
+        staOn(fi,:) = mean(v(W) - base(keepOn)', 1, 'omitnan');
+        nEpOn(fi) = sum(keepOn);
+    end
+
+    % --- (C) offset-aligned, epochs with no spike in [offset-noSpkWin, offset] ---
+    keepOff = okBase & offFr + blueWinOff(2) <= nTime & offFr + blueWinOff(1) >= 1 & ...
+              arrayfun(@(o) ~any(spkVec(max(o-noSpkWin,1):o)), offFr);
+    if any(keepOff)
+        W = offFr(keepOff)' + lagOff;
+        staOff(fi,:) = mean(v(W) - base(keepOff)', 1, 'omitnan');
+        nEpOff(fi) = sum(keepOff);
+    end
+
+    % --- (B) full epoch ON -> OFF, only epochs of the modal duration ---
+    durs   = offFr - onFr + 1;
+    dMode  = mode(durs);
+    selFul = keepOn & abs(durs - dMode) <= 2 & onFr + dMode + tailWin <= nTime;
+    if any(selFul)
+        lagF = blueWinOn(1):(dMode + tailWin);
+        W = onFr(selFul)' + lagF;
+        staFull{fi} = mean(v(W) - base(selFul)', 1, 'omitnan');
+        durFull(fi) = dMode;
+    end
+
+    % --- crossing-time estimates, used ONLY to seed the interactive fits ---
+    y = staOn(fi,:);
+    if ~all(isnan(y))
+        plHi = min(dMode, blueWinOn(2));                % plateau: last 50 ms of the
+        plLo = max(plHi-50, 20);                        % charging curve we actually see
+        pl   = mean(y(lagOn >= plLo & lagOn <= plHi), 'omitnan');
+        if isfinite(pl) && pl > 0
+            plateauAmp(fi) = pl;
+            idx = find(lagOn > 0 & y >= 0.632*pl, 1, 'first');
+            if ~isempty(idx); tauGuessRise(fi) = lagOn(idx); end
+        end
+    end
+    y = staOff(fi,:);
+    if ~all(isnan(y))
+        a0 = mean(y(lagOff >= -20 & lagOff < 0), 'omitnan');
+        if isfinite(a0) && a0 > 0
+            idx = find(lagOff > 0 & y <= 0.368*a0, 1, 'first');
+            if ~isempty(idx); tauGuessDecay(fi) = lagOff(idx); end
+        end
+    end
+end
+
+hasOn = find(any(isfinite(staOn),2)); hasOff = find(any(isfinite(staOff),2));
+fprintf('  %d/%d neurons with blue epochs | kept %d onset and %d offset epochs (no spike within %d ms)\n', ...
+    sum(nEpTot>0), nF, sum(nEpOn), sum(nEpOff), noSpkWin);
+fprintf('  modal blue duration %g ms | plateau %.3f +/- %.3f dF/F\n', ...
+    median(durFull,'omitnan'), mean(plateauAmp,'omitnan'), std(plateauAmp,'omitnan'));
+fprintf('  crossing-time seeds (NOT the reported taus): rise %.1f +/- %.1f ms, decay %.1f +/- %.1f ms\n', ...
+    mean(tauGuessRise,'omitnan'), std(tauGuessRise,'omitnan'), ...
+    mean(tauGuessDecay,'omitnan'), std(tauGuessDecay,'omitnan'));
+
+cMean = [0.85 0.33 0.10]; cInd = [0.6 0.6 0.6];
+semf  = @(X) std(X,0,1,'omitnan')./sqrt(sum(isfinite(X),1));
+figure(324); clf; tiledlayout(1, 3, 'Padding','compact', 'TileSpacing','compact');
+% --- (A) onset-triggered average ---
+nexttile; hold on;
+plot(lagOn, staOn(hasOn,:)', '-', 'Color', [cInd 0.5], 'LineWidth', 0.5, 'HandleVisibility','off');
+mu = mean(staOn,1,'omitnan'); se = semf(staOn);
+fill([lagOn fliplr(lagOn)], [mu-se fliplr(mu+se)], cMean, 'FaceAlpha',0.25, 'EdgeColor','none', 'HandleVisibility','off');
+plot(lagOn, mu, '-', 'Color', cMean, 'LineWidth', 2);
+xline(0,'b--','HandleVisibility','off'); yline(0,'k:','HandleVisibility','off');
+xlabel('Time from blue ONSET (ms)'); ylabel('Subthreshold (\DeltaF/F)'); box off; axis tight;
+title(sprintf('Blue onset (no spike <%d ms after)', noSpkWin));
+% --- (B) full epoch ON -> OFF ---
+nexttile; hold on;
+dM = median(durFull,'omitnan');
+ok = find(~cellfun(@isempty, staFull) & abs(durFull - dM) <= 2);
+if ~isempty(ok)
+    nL   = min(cellfun(@numel, staFull(ok)));
+    lagF = blueWinOn(1):(blueWinOn(1)+nL-1);
+    M    = cell2mat(cellfun(@(x) x(1:nL), staFull(ok), 'UniformOutput', false));
+    plot(lagF, M', '-', 'Color', [cInd 0.5], 'LineWidth', 0.5, 'HandleVisibility','off');
+    mu = mean(M,1,'omitnan'); se = semf(M);
+    fill([lagF fliplr(lagF)], [mu-se fliplr(mu+se)], cMean, 'FaceAlpha',0.25, 'EdgeColor','none', 'HandleVisibility','off');
+    plot(lagF, mu, '-', 'Color', cMean, 'LineWidth', 2);
+    yl = ylim; hPatch = patch([0 dM dM 0], [yl(1) yl(1) yl(2) yl(2)], [0.3 0.5 1], ...
+        'FaceAlpha',0.07, 'EdgeColor','none', 'HandleVisibility','off');
+    uistack(hPatch, 'bottom');                  % blue epoch shading behind the traces
+end
+xline(0,'b--','HandleVisibility','off'); xline(dM,'b--','HandleVisibility','off');
+yline(0,'k:','HandleVisibility','off');
+xlabel('Time from blue ONSET (ms)'); ylabel('Subthreshold (\DeltaF/F)'); box off; axis tight;
+title(sprintf('Blue ON \\rightarrow OFF (%g ms, n=%d)', dM, numel(ok)));
+% --- (C) offset-triggered average ---
+nexttile; hold on;
+plot(lagOff, staOff(hasOff,:)', '-', 'Color', [cInd 0.5], 'LineWidth', 0.5, 'HandleVisibility','off');
+mu = mean(staOff,1,'omitnan'); se = semf(staOff);
+fill([lagOff fliplr(lagOff)], [mu-se fliplr(mu+se)], cMean, 'FaceAlpha',0.25, 'EdgeColor','none', 'HandleVisibility','off');
+plot(lagOff, mu, '-', 'Color', cMean, 'LineWidth', 2);
+xline(0,'b--','HandleVisibility','off'); yline(0,'k:','HandleVisibility','off');
+xlabel('Time from blue OFFSET (ms)'); ylabel('Subthreshold (\DeltaF/F)'); box off; axis tight;
+title(sprintf('Blue offset (no spike <%d ms before)', noSpkWin));
+sgtitle(sprintf('Blue-stim triggered subthreshold, all ROIs pooled | %d onset, %d offset epochs, %d neurons', ...
+    sum(nEpOn), sum(nEpOff), sum(nEpTot>0)));
+set_font('Arial'); set_fontsize(13);
+set_figsize(275,115);
+
+%% Interactive exponential fit of the blue-evoked rise and decay, per neuron
+% One interactive_expfit GUI per neuron per phase. Same fitter as the ISI section, so
+% the fits stay consistent across the paper. interactive_expfit models
+% Y = sum c_i*exp(-X/tau_i) with NO offset, so:
+%   RISE  y(t) = P*(1-exp(-t/tau)) is fitted as its complement, Y = P - y(t), which IS
+%         a decay to zero. tau comes out directly; P is the plateau from the previous
+%         section.
+%   DECAY y(t) after blue offset is already referenced to pre-blue = 0, so it is fitted
+%         as-is.
+% In the GUI: "Automatic" fits all points in the window, "Manual" lassos a subset (use
+% it to drop the artifact right at the transition, or a contaminated tail). Finish
+% stores the fit; Abort stops the whole loop and saves nothing.
+% Set tGuessN = [fast slow] instead of a scalar to fit a DOUBLE exponential.
+% Results are cached: once the .mat exists the GUIs are skipped and the saved fits are
+% reloaded, so re-running the script does not re-prompt. Delete the file to redo them.
+fprintf('Section: interactive exponential fit of blue-evoked rise/decay\n');
+
+blueTauFile = fullfile(save_figto, 'Figure3_BlueTauFit.mat');
+haveBlueFit = isfile(blueTauFile);
+if haveBlueFit
+    Sload = load(blueTauFile, 'blueTauFit'); blueTauFit = Sload.blueTauFit;
+    fprintf('  Loaded cached fits: %s\n', blueTauFile);
+else
+    blueTauFit = cell(1, max(foi));
+end
+
+fitPhase  = {'rise','decay'};       % set to {'decay'} to fit only the decay
+riseFitMax= 150;                    % ms after onset included in the rise fit window
+useOffset = true;                   % fit a*exp(-t/b)+c instead of a*exp(-t/b).
+                                    % For the DECAY, c absorbs incomplete recovery to
+                                    % baseline; for the RISE complement it absorbs an
+                                    % error in the plateau estimate, so tau stops being
+                                    % biased by it. Set false for the strict decay-to-0
+                                    % model (what the ISI fits at line ~1432 use).
+abortAll  = false;
+for fi = 1:nF
+    f = foi(fi);
+    if haveBlueFit || abortAll; break; end          % cached: leave loaded fits untouched
+    if ~isfinite(plateauAmp(fi)) && ~any(isfinite(staOff(fi,:))); continue; end
+    if ~isfield(blueTauFit{f}, 'neuron'); blueTauFit{f} = struct('neuron', f); end
+    for ph = 1:numel(fitPhase)
+        switch fitPhase{ph}
+            case 'rise'
+                if ~isfinite(plateauAmp(fi)); continue; end
+                sel = lagOn > 0 & lagOn <= riseFitMax;
+                Xf  = lagOn(sel)';  Yf = plateauAmp(fi) - staOn(fi,sel)';
+                tG  = tauGuessRise(fi);
+            case 'decay'
+                sel = lagOff > 0;
+                Xf  = lagOff(sel)'; Yf = staOff(fi,sel)';
+                tG  = tauGuessDecay(fi);
+        end
+        good = isfinite(Xf) & isfinite(Yf);
+        if nnz(good) < 5; continue; end
+        if ~isfinite(tG) || tG <= 0; tG = 20; end
+        optFit = struct('t_guess', tG, 'tau_lb', 0, 'tau_ub', Inf, 'use_offset', useOffset);
+        if strcmp(fitPhase{ph},'rise')
+            fprintf(['  Interactive RISE fit, neuron %d (seed tau = %.0f ms).\n' ...
+                     '    NOTE: the GUI plots the COMPLEMENT, plateau(%.3f) - trace, so it DECAYS to 0.\n' ...
+                     '    That is expected: the fitter has no offset term (c0=0) and can only fit decays,\n' ...
+                     '    and the complement of a rise has the SAME tau. Figure 325 flips it back.\n' ...
+                     '    If the trace overshoots the plateau the complement goes negative; lasso those\n' ...
+                     '    points out in Manual mode, an exponential cannot follow them.\n'], ...
+                    f, tG, plateauAmp(fi));
+        else
+            fprintf('  Interactive DECAY fit, neuron %d (seed tau = %.0f ms) ...\n', f, tG);
+        end
+        R = interactive_expfit(Xf(good), Yf(good), optFit);
+        if R.aborted; abortAll = true; break; end     % Abort: stop the loop, save nothing
+        if R.skipped; fprintf('    -> marked NaN (not fitted)\n'); end
+        blueTauFit{f}.(fitPhase{ph}) = R;             % NaN button stores an all-NaN fit
+        blueTauFit{f}.plateau = plateauAmp(fi);
+    end
+end
+if ~haveBlueFit && ~abortAll
+    save(blueTauFile, 'blueTauFit');
+    fprintf('  Saved blue-evoked tau fits for %d neurons: %s\n', numel(foi), blueTauFile);
+elseif abortAll
+    fprintf('  Aborted - nothing saved.\n');
+end
+
+% --- collect and report ---
+tauRise = nan(nF,1); tauDecay = nan(nF,1); rsqRise = nan(nF,1); rsqDecay = nan(nF,1);
+for fi = 1:nF
+    f = foi(fi);
+    if isempty(blueTauFit{f}); continue; end
+    if isfield(blueTauFit{f},'rise')  && ~isempty(blueTauFit{f}.rise)
+        tauRise(fi)  = max(blueTauFit{f}.rise.tau);   rsqRise(fi)  = blueTauFit{f}.rise.Rsq;
+    end
+    if isfield(blueTauFit{f},'decay') && ~isempty(blueTauFit{f}.decay)
+        tauDecay(fi) = max(blueTauFit{f}.decay.tau);  rsqDecay(fi) = blueTauFit{f}.decay.Rsq;
+    end
+end
+nSkipR = sum(cellfun(@(s) ~isempty(s) && isfield(s,'rise')  && ~isempty(s.rise)  && s.rise.skipped,  blueTauFit));
+nSkipD = sum(cellfun(@(s) ~isempty(s) && isfield(s,'decay') && ~isempty(s.decay) && s.decay.skipped, blueTauFit));
+fprintf('  marked NaN (not worth fitting): %d rise, %d decay\n', nSkipR, nSkipD);
+if useOffset
+    cR_ = cellfun(@(s) ~isempty(s) && isfield(s,'rise')  && ~isempty(s.rise),  blueTauFit);
+    cD_ = cellfun(@(s) ~isempty(s) && isfield(s,'decay') && ~isempty(s.decay), blueTauFit);
+    offR = cellfun(@(s) s.rise.offset,  blueTauFit(cR_));
+    offD = cellfun(@(s) s.decay.offset, blueTauFit(cD_));
+    fprintf('  fitted with a*exp(-t/b)+c | c: rise %+.4f +/- %.4f, decay %+.4f +/- %.4f dF/F\n', ...
+        mean(offR,'omitnan'), std(offR,'omitnan'), mean(offD,'omitnan'), std(offD,'omitnan'));
+end
+fprintf('  tau rise  %6.1f +/- %5.1f ms (n=%d, median R^2 %.3f)\n', ...
+    mean(tauRise,'omitnan'), std(tauRise,'omitnan'), sum(isfinite(tauRise)), median(rsqRise,'omitnan'));
+fprintf('  tau decay %6.1f +/- %5.1f ms (n=%d, median R^2 %.3f)\n', ...
+    mean(tauDecay,'omitnan'), std(tauDecay,'omitnan'), sum(isfinite(tauDecay)), median(rsqDecay,'omitnan'));
+
+figure(325); clf; tiledlayout(1, 3, 'Padding','compact', 'TileSpacing','compact');
+cR = [0.20 0.50 0.90]; cD = [0.85 0.33 0.10];
+% --- fitted rise curves, back in the original (depolarizing) orientation ---
+nexttile; hold on;
+for fi = 1:nF
+    f = foi(fi);
+    if isempty(blueTauFit{f}) || ~isfield(blueTauFit{f},'rise') || isempty(blueTauFit{f}.rise); continue; end
+    R = blueTauFit{f}.rise;
+    plot(lagOn, staOn(fi,:), '-', 'Color', [0.7 0.7 0.7 0.6], 'LineWidth', 0.5);
+    if ~isempty(R.xFit); plot(R.xFit, plateauAmp(fi) - R.yFit, '-', 'Color', cR, 'LineWidth', 1); end
+end
+xline(0,'b--'); yline(0,'k:'); box off; axis tight;
+xlabel('Time from blue ONSET (ms)'); ylabel('Subthreshold (\DeltaF/F)'); title('Rise fits');
+% --- fitted decay curves ---
+nexttile; hold on;
+for fi = 1:nF
+    f = foi(fi);
+    if isempty(blueTauFit{f}) || ~isfield(blueTauFit{f},'decay') || isempty(blueTauFit{f}.decay); continue; end
+    R = blueTauFit{f}.decay;
+    plot(lagOff, staOff(fi,:), '-', 'Color', [0.7 0.7 0.7 0.6], 'LineWidth', 0.5);
+    if ~isempty(R.xFit); plot(R.xFit, R.yFit, '-', 'Color', cD, 'LineWidth', 1); end
+end
+xline(0,'b--'); yline(0,'k:'); box off; axis tight;
+xlabel('Time from blue OFFSET (ms)'); ylabel('Subthreshold (\DeltaF/F)'); title('Decay fits');
+% --- tau comparison, paired per neuron ---
+nexttile; hold on;
+pairOK = isfinite(tauRise) & isfinite(tauDecay);
+plot([ones(sum(pairOK),1) 2*ones(sum(pairOK),1)]', [tauRise(pairOK) tauDecay(pairOK)]', ...
+    '-', 'Color', [0.7 0.7 0.7], 'LineWidth', 0.5);
+scatter(ones(sum(isfinite(tauRise)),1),  tauRise(isfinite(tauRise)),  28, cR, 'filled');
+scatter(2*ones(sum(isfinite(tauDecay)),1), tauDecay(isfinite(tauDecay)), 28, cD, 'filled');
+errorbar([1 2], [mean(tauRise,'omitnan') mean(tauDecay,'omitnan')], ...
+    [std(tauRise,'omitnan')/sqrt(sum(isfinite(tauRise))) std(tauDecay,'omitnan')/sqrt(sum(isfinite(tauDecay)))], ...
+    'k', 'LineStyle','none', 'Marker','_', 'MarkerSize',18, 'LineWidth',1.5);
+set(gca,'xtick',[1 2],'xticklabel',{'rise','decay'}); xlim([0.5 2.5]); box off;
+ylabel('\tau (ms)');
+if nnz(pairOK) >= 3
+    title(sprintf('\\tau (paired, n=%d, p=%.3g)', nnz(pairOK), signrank(tauRise(pairOK), tauDecay(pairOK))));
+else
+    title('\tau');
+end
+sgtitle('Blue-evoked subthreshold time constants (interactive_expfit)', 'Interpreter','none');
+set_font('Arial'); set_fontsize(13);
+set_figsize(275,115);
+
+%% dSpike AUC by dendritic distance, vs a silent-period null (blue OFF)
+% In one line: take every dSpike frame, measure the AUC of the spike component in each
+% dendritic distance bin, and ask whether it differs from the same measurement made at
+% random SILENT frames.
+%   LEFT  one row per distance bin: pooled histograms, silent (grey) vs dSpike (orange).
+%   RIGHT per-neuron dSpike - silent difference across bins, so the distance profile of
+%         the effect is visible in one panel.
+% Distance bins are on PCresult.dendaxis (signed: negative basal, 0 soma, positive
+% apical), so the middle bin is the perisomatic one and the outer bins are basal and
+% apical dendrite.
+% Signal: the SPIKE COMPONENT, NormalizedTrace_dirt - Subthreshold_larger. Removing the
+% slow subthreshold puts the baseline at ~0, which is what makes a bare windowed sum
+% meaningful without any further baseline subtraction; whatever residual offset survives
+% is measured by the silent null itself, so the comparison stays fair.
+% Units: every neuron's trace is divided by its own SpikeHeight before integrating, so
+% the AUC is in SPIKE-HEIGHT x ms. A value of 1 means "one full spike height sustained
+% for 1 ms"; the console also prints the per-ms mean, i.e. AUC/(2*aucHalf+1), which reads
+% directly as a fraction of a spike height.
+% Window: +/-aucHalf ms about the frame, matching the raw window get_AUC integrates
+% (end_pre = centre-3 .. start_post = centre+3, i.e. 7 frames).
+% NULL: one silent window per dSpike (silMult = 1), drawn from that same neuron, so the
+% two distributions carry the SAME n and the histograms are directly comparable without
+% any renormalization. Raising silMult would smooth the grey histogram but would also
+% make the event-level p-value a function of that choice, so it is left matched.
+fprintf('Section: dSpike AUC by dendritic distance vs silent null (blue OFF)\n');
+
+daxEdgesA = [-300 -50];   % um along the dendritic axis
+aucHalf   = 3;                            % ms; +/- window summed (7 frames, cf. get_AUC)
+silMult   = 1;                            % silent windows per dSpike (1 = matched n)
+silGuardA2= 30;                           % ms; exclusion around ANY event / peak
+nBinD     = numel(daxEdgesA)-1;
+binLabel  = arrayfun(@(k) sprintf('%g to %g', daxEdgesA(k), daxEdgesA(k+1)), ...
+                     1:nBinD, 'UniformOutput', false);
+aucOff    = -aucHalf:aucHalf;
+rng(0);
+
+nF = numel(foi);
+aucD_all = cell(1,nBinD); aucS_all = cell(1,nBinD);   % pooled per-event AUC
+aucD_by  = cell(nBinD,nF); aucS_by  = cell(nBinD,nF);  % per-neuron, for the event-level test
+aucD_mu  = nan(nF,nBinD); aucS_mu  = nan(nF,nBinD);   % per-neuron means (for the test)
+nDspA = 0; nSilA = 0;
+
+for fi = 1:nF
+    f = foi(fi);
+    nTime   = size(PCresult{f}.NormalizedTrace_dirt, 2);
+    blueOff = PCresult{f}.BlueStim(:)' == 0;
+    dsp     = FiringRate{f}.DendOnlySpFrame(:)';
+    dsp     = dsp(blueOff(dsp));
+    dsp     = dsp(dsp > aucHalf & dsp <= nTime - aucHalf);
+    if isempty(dsp); continue; end
+
+    % spike component in spike-height units
+    SpikeComp = (PCresult{f}.NormalizedTrace_dirt - PCresult{f}.Subthreshold_larger) ...
+                / PCresult{f}.SpikeHeight;
+    dax = PCresult{f}.dendaxis(:);
+
+    % --- silent frames: >=silGuardA2 ms from ANY event or subthreshold peak, blue-off ---
+    evVec = false(1, nTime);
+    evVec(PCresult{f}.SomaSpike)                 = true;
+    evVec(PCresult{f}.CStrace(1:nTime)   > 0)    = true;
+    evVec(PCresult{f}.BStrace(1:nTime)   > 0)    = true;
+    evVec(FiringRate{f}.DendOnlySpFrame)         = true;
+    evVec(max(PCresult{f}.SpikeClassMat,[],1)>0) = true;
+    evVec(max(PCresult{f}.peakvec,     [],1)>0)  = true;
+    evVec(PCresult{f}.BlueStim > 0)              = true;
+    cand = find(~imdilate(evVec, ones(1,2*silGuardA2+1)));
+    cand = cand(cand > aucHalf & cand <= nTime - aucHalf);
+    if isempty(cand); continue; end
+    nSil = silMult*numel(dsp);
+    if numel(cand) >= nSil
+        sel = cand(randperm(numel(cand), nSil));      % without replacement when possible
+    else
+        sel = cand(randi(numel(cand), 1, nSil));
+    end
+
+    Wd = dsp(:) + aucOff;   Ws = sel(:) + aucOff;     % nEvt x (2*aucHalf+1)
+    for b = 1:nBinD
+        rows = dax >= daxEdgesA(b) & dax < daxEdgesA(b+1);
+        if ~any(rows); continue; end
+        v  = mean(SpikeComp(rows,:), 1, 'omitnan');   % bin-average trace, 1 x nTime
+        aD = sum(v(Wd), 2);                           % NaN if the window hits motion/dirt
+        aS = sum(v(Ws), 2);
+        aD = aD(isfinite(aD)); aS = aS(isfinite(aS));
+        if isempty(aD) || isempty(aS); continue; end
+        aucD_all{b} = [aucD_all{b}; aD];  aucS_all{b} = [aucS_all{b}; aS];
+        aucD_by{b,fi} = aD;               aucS_by{b,fi} = aS;
+        aucD_mu(fi,b) = mean(aD);         aucS_mu(fi,b) = mean(aS);
+    end
+    nDspA = nDspA + numel(dsp); nSilA = nSilA + numel(sel);
+end
+
+% paired across NEURONS (see header): silMult cannot inflate this
+pBin = nan(1,nBinD); nNrnBin = zeros(1,nBinD);
+for b = 1:nBinD
+    ok = isfinite(aucD_mu(:,b)) & isfinite(aucS_mu(:,b));
+    nNrnBin(b) = nnz(ok);
+    if nNrnBin(b) >= 3; pBin(b) = signrank(aucD_mu(ok,b), aucS_mu(ok,b)); end
+end
+dMu = aucD_mu - aucS_mu;
+
+% EVENT-LEVEL test: rank-sum on dSpike vs silent AUC, pooled over neurons.
+% Silent is already sampled 1:1 per neuron; the trim below only re-matches the counts
+% after non-finite windows (motion / dirt) have been dropped from one side or the other.
+% Keeping n equal is what stops the p-value from being a function of the sampling rate.
+% Read it for what it is -- a test over EVENTS, pooled across cells. It does not ask
+% whether the effect reproduces from neuron to neuron, because events within a neuron
+% share that cell's baseline, noise and morphology and are not independent. The two
+% companion numbers answer that separately:
+%   pBin              paired signrank on per-neuron means (neuron is the unit)
+%   nSameSign / pSign how many neurons share the majority direction, and whether that
+%                     beats a coin flip (sign test)
+% A tiny pRS with pSign near 1 means "lower on average across events, but not
+% consistently so across cells" -- report both, not just the small number.
+pRS = nan(1,nBinD); pSign = nan(1,nBinD); nSameSign = zeros(1,nBinD);
+for b = 1:nBinD
+    D = []; S = [];
+    for fi = 1:nF
+        d = aucD_by{b,fi}; s = aucS_by{b,fi};
+        if isempty(d) || isempty(s); continue; end
+        if numel(s) > numel(d); s = s(randperm(numel(s), numel(d))); end   % 1:1 match
+        D = [D; d(:)]; S = [S; s(:)];
+    end
+    if isempty(D); continue; end
+    pRS(b)       = ranksum(D, S);
+    nSameSign(b) = max(nnz(dMu(:,b) < 0), nnz(dMu(:,b) > 0));
+    pSign(b)     = min(1, 2*(1 - binocdf(nSameSign(b)-1, nNrnBin(b), 0.5)));
+end
+
+fprintf('  %d dSpikes, %d silent windows (%d per dSpike, matched) from %d neurons\n', ...
+    nDspA, nSilA, silMult, sum(any(isfinite(aucD_mu),2)));
+fprintf('  AUC in spike-height x ms over a %d ms window (per-ms mean in brackets)\n', ...
+    numel(aucOff));
+fprintf('  distance(um)     dSpike            silent            diff     p(event)   p(neuron)  same sign\n');
+fprintf('                   AUC   [per ms]    AUC   [per ms]            ranksum    paired     (sign test)\n');
+for b = 1:nBinD
+    fprintf('  %-13s  %6.3f [%6.3f]  %6.3f [%6.3f]  %+7.3f  %-9.3g  %-9.3g  %d/%d (p=%.2f)\n', binLabel{b}, ...
+        mean(aucD_mu(:,b),'omitnan'), mean(aucD_mu(:,b),'omitnan')/numel(aucOff), ...
+        mean(aucS_mu(:,b),'omitnan'), mean(aucS_mu(:,b),'omitnan')/numel(aucOff), ...
+        mean(dMu(:,b),'omitnan'), pRS(b), pBin(b), nSameSign(b), nNrnBin(b), pSign(b));
+end
+fprintf(['  p(event) : ranksum over events, silent matched 1:1 (NOT the 20x set)\n' ...
+         '  p(neuron): paired signrank on per-neuron means\n' ...
+         '  same sign: neurons sharing the majority direction; p is a sign test vs 50%%.\n' ...
+         '             A small p(event) with a large sign-test p = lower on average\n' ...
+         '             across events, but not reproducible cell to cell.\n']);
+
+cSil = [0.45 0.45 0.45]; cDsp = [0.85 0.33 0.10];
+figure(328); clf;
+tl328 = tiledlayout(nBinD, 1, 'Padding','compact', 'TileSpacing','compact');
+for b = 1:nBinD
+    nexttile; hold on;
+    if ~isempty(aucD_all{b})
+        allv = [aucS_all{b}; aucD_all{b}];
+        ed   = linspace(prctile(allv,0.5), prctile(allv,99.5), 50);
+        histogram(aucS_all{b}, ed, 'Normalization','probability', ...
+            'FaceColor',cSil, 'EdgeColor','none', 'FaceAlpha',0.6);
+        histogram(aucD_all{b}, ed, 'Normalization','probability', ...
+            'FaceColor',cDsp, 'EdgeColor','none', 'FaceAlpha',0.6);
+        % medians make the shift between two overlapping filled histograms readable
+        plot(median(aucS_all{b})*[1 1], ylim, '--', 'Color',cSil, 'LineWidth',1, 'HandleVisibility','off');
+        plot(median(aucD_all{b})*[1 1], ylim, '--', 'Color',cDsp, 'LineWidth',1, 'HandleVisibility','off');
+        % event-level ranksum on the count-matched samples; the per-neuron signrank
+        % and the direction-consistency count stay in the console table
+        text(0.98, 0.90, sprintf('ranksum p = %.2g %s', pRS(b), sig_star(pRS(b))), ...
+            'Units','normalized', 'HorizontalAlignment','right', 'FontSize',12);
+    end
+    xline(0,'k--','HandleVisibility','off'); box off;
+    ylabel('Probability');
+    % distance range lives in the x label, so each panel is self-contained and keeps
+    % its own tick labels
+    xlabel(sprintf('AUC at %s µm', binLabel{b}));
+    if b == 1
+        legend({sprintf('silent (n=%d)',nSilA), sprintf('dSpike (n=%d)',nDspA)}, ...
+            'Location','northwest', 'box','off', 'FontSize',12);
+    end
+end
+%title(tl328, sprintf('dSpike AUC vs silent null by dendritic distance, blue OFF | %d dSpikes', nDspA));
+set_font('Arial'); set_fontsize(14);
+set_figsize(136,70);
 
 %% Spike types in place field & during running vs resting
 fprintf('Section: spike types place field and locomotion state\n');
@@ -2185,7 +4275,7 @@ occRun =NaN(length(foi),1);        % running occupancy fraction (chance level fo
 occPF  =NaN(length(foi),1);        % PF occupancy fraction (chance level for P(in PF))
 for i=1:length(foi)
     f=foi(i);
-    somaAP=find(max(PCresult{f}.SpikeMat(PCresult{f}.BranchLabel==1,:),[],1)>0);
+    somaAP=PCresult{f}.SomaSpike; % canonical somatic spike train (consistent with dSpike exclusion)
     frames={ FiringRate{f}.SimpleSpikeFrame(:)', ...                  % SS
              somaAP(PCresult{f}.BStrace(somaAP)>0), ...               % BS (somatic AP in burst)
              FiringRate{f}.ComplexSpikeFrame(:)', ...                 % CS
@@ -2427,6 +4517,97 @@ xlabel('Neuron'); ylabel('Spatial info (bits/spike)'); box off;
 title(sprintf('%d/%d position-tuned (p<0.05)',sum(sigMask),numel(foi)));
 set_font('Arial'); set_fontsize(12);
 
+%% plateau example
+place_bin=150; vel_thresh=0.002; lap_dist=115;
+%20 50 120 60 15 120 140
+Plateau2show=[4 86509 20 650; 6 344804 50 300; 17 42161 120 1000; 10 15952 60 200;...
+    26 77075 15 200; 18 24983 120 2200; 23 46892 140 700];
+FieldName={'File','PlateauFrame','PF_location','Framewidth2show'};
+Plateau2show=array2table(Plateau2show,'VariableNames',FieldName);
+Plateau2show.omitROI(1)={[6 16 19 21]}; Plateau2show.omitROI(4)={[1 6 17 16]};
+Plateau2show.omitROI(5)={[3 8 7 17 33 28 32 35]}; Plateau2show.omitROI(6)={[3 10]};
+
+% Legacy per-neuron cell variables (NormalizedTrace_dirt{f}, dendaxis{f},
+% MatSTA{f,..}, Subthreshold{f}, SWC{f}, Ftprnts{f}, VRtrack{f}, LapFR{f}) are
+% now all fields of PCresult{f}. Note PCresult traces/dendaxis/MatbAP are
+% already distance-sorted (so the sort() below is idempotent), while Ftprnts is
+% kept in raw ROI order and must be re-indexed with Dist_order(noi_dist).
+ax1=[];
+figure(20); clf; tiledlayout(4,4,'padding','compact');
+ROI2rmv={[4 21 19 16],[10 1 6 16],[26 3 33 ]};
+for p=setdiff([1:size(Plateau2show,1)],[2 3 7])
+    f=Plateau2show.File(p);
+    tax=[-Plateau2show.Framewidth2show(p)*0.2:Plateau2show.Framewidth2show(p)];
+    frame2show=Plateau2show.PlateauFrame(p)+tax;
+    StartLap=PCresult{f}.VR(8,Plateau2show.PlateauFrame(p));
+    tr2show=PCresult{f}.NormalizedTrace_dirt(:,frame2show);
+    %tr2show=pcafilterTrace(tr2show,[1:17]);
+    % somatic-spike firing-rate map (lap x position), replaces LapFR{f}
+    LapFR_f=PlaceTrigger_average(double(PCresult{f}.SpikeMat(1,:)==1),place_bin,PCresult{f}.VR,vel_thresh,lap_dist);
+    Lap2show=repmat(ringmovGaussian(LapFR_f,3),1,3);
+
+    noi=setdiff([1:size(PCresult{f}.NormalizedTrace_dirt,1)],Plateau2show.omitROI{p});
+    tr2show=tr2show(noi,:);
+    [dax, dsorted]=sort(PCresult{f}.dendaxis(noi));
+    nROI=length(noi);
+
+    [VbAp]=get_eigvector(mean(PCresult{f}.MatbAP(noi,win_pre+[-3:5],:),3,'omitnan'),10);
+    [Vsub]=get_eigvector(PCresult{f}.Subthreshold(noi,:),10);
+    templates=[VbAp(:,1:3) Vsub(:,1:5)];
+    filteredData = pcafilterTrace_template(tr2show, templates);
+    filteredData = tr2show;
+    cax=[prctile(filteredData(:),3) prctile(filteredData(:),98)];
+    filteredData=filteredData(dsorted,:);
+  
+    SWC2show=PCresult{f}.swc;
+    SWC2show(:,4)=3; SWC2show(1,4)=20;
+    Ftprnts2show=PCresult{f}.Ftprnts(:,:,PCresult{f}.Dist_order(PCresult{f}.noi_dist));
+    Vswc=get_eigvector(SWC2show(:,[1 2])');
+
+    if f==18
+        frame2match=-tax(1)+468;
+        filteredData(:,frame2match:end)=filteredData(:,frame2match:end)+mean(filteredData(:,frame2match+[-4:-1]),2);
+        figure(21); clf;
+        imagesc(tax,[1:nROI],filteredData,cax); colormap(turbo);
+        set_kymoYtick(dax); xlim([500 800]);
+        cb=colorbar; cb.Label.String='∆F/F';
+        set(gca,'xtick',[]);
+        ylabel('Distance (µm)');
+        figure(20);
+    end
+
+    try
+        Lap2show=Lap2show(StartLap-2:StartLap+5,Plateau2show.PF_location(p)+150+[-100:50]);
+        lmark=3;
+    catch
+        Lap2show=Lap2show(StartLap:StartLap+5,Plateau2show.PF_location(p)+150+[-100:50]);
+        lmark=1;
+    end
+
+    ax1=[ax1 nexttile([1 1])];
+    imagesc(Lap2show*1000); cb=colorbar; cb.Label.String='Firing rate (Hz)';
+    set(gca,'XTick',[]);
+    hold all; scatter(95,lmark,20,'r>','filled');
+    nexttile([1 1]);
+    showScaleScatter(noi,SWC2show,Ftprnts2show(:,:,noi),gen_colormap(Plasma,256));
+    if f>=20
+        view([rad2deg(atan2(Vswc(1,2),Vswc(1,1)))+270 90]);
+    else
+        view([rad2deg(atan2(Vswc(1,2),Vswc(1,1)))+90 90]);
+    end
+    drawScaleBar(100/Pixelsize(f),'vertical','color',[0 0 0],'Linewidth',3);
+    nexttile([1 2]);
+    imagesc(tax,[1:nROI],filteredData,cax); colormap(turbo);
+    cb=colorbar; cb.Label.String='∆F/F';
+    set_kymoYtick(dax);
+    %set(gca,'ytick',[1:nROI],'yticklabel',[dsorted]);
+end
+arrayfun(@(x) colormap(x,'gray'),ax1)
+
+figure(20);
+set_font('Arial'); set_fontsize(10); set_figsize(300, 200);
+figure(21);
+set_font('Arial'); set_fontsize(14); set_figsize(300, 50);
 %% bAP amplitude in place fields
 fprintf('Section: bAP amplitude in place fields\n');
 nTau_short=[1 3];
@@ -2765,12 +4946,27 @@ figure(300); clf;
 stype_str={'SS','CS','BS'};
 OrthAxis=[1 0 0 0 0; 0 0 1 0 1; 0 0 0 0 1; 0 1 0 0 0]; %rows: basal, apical(trunk+distal), distal, soma
 cmaps=gen_colormap(Plasma,size(OrthAxis,1));
-ax1=[]; Prespike_t=5; nTau2show=[150 50];
-foi2show=[18 23 25 26];
-cax=[-0.02 0.1]; cax_scatter=[-0.3 0.5]; presubtime2ave=[10 3];
+ax1=[]; Prespike_t=5; nTau2show=[50 50];
+nthreshold=10; %add to statistics spike number larger than nthreshold
+foi2show=[8 11 20 23 25]; %8 11 15 20 23 25 26
+cax=[-0.02 0.08]; cax_scatter=[-0.07 0.13]; presubtime2ave=[10 3];
 branch_str={'Basal','Apical','Distal','Soma'};   % rows of OrthAxis
-branchPlotOrder=[1 4 2 3];                        % trace display order: Basal, Soma, Apical, Distal
+branchPlotOrder=[1 2 3 4];                        % trace display order: Basal, Soma, Apical, Distal
 cmap_SSCS=[1 0 1; 0 0.7 0.7];                     % SS (magenta), CS (teal)
+% ---- one figure per column (SS/CS kymo + each branch STA trace); one neuron per row ----
+nNeuron=numel(foi2show);
+tl_kymoCol=gobjects(1,2);                          % SS, CS kymograph columns
+for stype=1:2
+    figure(3030+stype); clf;
+    tl_kymoCol(stype)=tiledlayout(nNeuron,1,'TileSpacing','tight','Padding','tight');
+    %title(tl_kymoCol(stype),[stype_str{stype} ' STA kymograph (one neuron per row)']);
+end
+tl_branchCol=gobjects(1,numel(branchPlotOrder));  % Basal, Soma, Apical, Distal trace columns
+for bi=1:numel(branchPlotOrder)
+    figure(3040+bi); clf;
+    tl_branchCol(bi)=tiledlayout(nNeuron,1,'TileSpacing','tight','Padding','tight');
+    %title(tl_branchCol(bi),[branch_str{branchPlotOrder(bi)} ' STA trace (one neuron per row)']);
+end
 for f=foi2show
     % --- source everything from robust-dF/F PCresult{f} (adapter for legacy names) ---
     Sub_f         = PCresult{f}.Subthreshold;          % robust dF/F subthreshold
@@ -2830,39 +5026,54 @@ for f=foi2show
     % ---- figure 300: basal-vs-apical density with the isolated SS / CS points ----
     figure(300);
     nexttile([1 1])
-    try
+    %try
         [hist_subV_A_B]=scatter_heatmap(SubBasalApical(1,Blue_off_frame),SubBasalApical(2,Blue_off_frame),50,50);
+        cb=colorbar; cb.Label.String='Frame counts';
         hold all
-        hSS=scatter(scatterStore{1}(1,:),scatterStore{1}(2,:),10,cmap_SSCS(1,:),'filled');
-        hCS=scatter(scatterStore{2}(1,:),scatterStore{2}(2,:),10,cmap_SSCS(2,:),'filled');
+        hSS=scatter(scatterStore{1}(1,:),scatterStore{1}(2,:),8,cmap_SSCS(1,:),'filled');
+        hCS=scatter(scatterStore{2}(1,:),scatterStore{2}(2,:),8,cmap_SSCS(2,:),'filled');
         xlabel('Basal'); ylabel('Apical');
-        colormap('bone'); title(['ID# ' num2str(f) '  (SS ' num2str(nSPstore(1)) ', CS ' num2str(nSPstore(2)) ')']);
-        %xlim(cax_scatter); ylim(cax_scatter);
-        axis tight;
+        colormap('bone'); title(sprintf('ID# %d  (%d SSs, %d CSs)',f,nSPstore(1),nSPstore(2)));
+        xlim(cax_scatter); ylim(cax_scatter);
+        %axis tight;
         if f==foi2show(1), legend([hSS hCS],{'SS','CS'},'Box','on'); end
-    end
+    %end
+    set_fontsize(12); set_font('Arial'); set_figsize(80,200);
 
-    % ---- one figure per neuron: kymographs (top) + branch traces (bottom, incl. soma) ----
-    figure(3030+f); clf; tiledlayout(2,4,'TileSpacing','compact','Padding','compact');
-    sgtitle(['Neuron ID# ' num2str(f)]);
+    % ---- per-column figures: this neuron = one row in each kymo / branch-trace figure ----
     t_axis=[-nTau2show(1):nTau2show(2)];
     for stype=1:2
-        nexttile([1 2]);
-        imagesc(kymoStore{stype},cax)
-        title([stype_str{stype} ', N=' num2str(nSPstore(stype))])
-        if stype==1, set_kymoYtick(dax_f); else, set(gca,'ytick',[]); end
+        nexttile(tl_kymoCol(stype));
+        k2show=kymoStore{stype};
+        [dax_f dsort]=sort(dax_f);
+        imagesc(k2show(dsort,:),cax)
+        cb=colorbar; cb.Label.String='∆F/F';
+        title(['ID# ' num2str(f) ', N=' num2str(nSPstore(stype))])
+        set_kymoYtick(dax_f); ylabel('Distance (µm)');
         set(gca,'XTick',[1 nTau2show(1)+1 sum(nTau2show)+1],'XTickLabel',num2str([-nTau2show(1) 0 nTau2show(end)]',3))
+        if f==foi2show(end), xlabel('Time (ms)'); end
     end
-    for v=branchPlotOrder
-        nexttile([1 1]); hold on; box off;
+    for bi=1:numel(branchPlotOrder)
+        v=branchPlotOrder(bi);
+        nexttile(tl_branchCol(bi)); hold on; box off;
         plot(t_axis,kymoVecStore{1}(v,:),'color',cmap_SSCS(1,:),'linewidth',1.5);
         plot(t_axis,kymoVecStore{2}(v,:),'color',cmap_SSCS(2,:),'linewidth',1.5);
-        ylim([-0.2 1.5]*PCresult{f}.SpikeHeight); xlim([-150 50]);
-        title(branch_str{v}); xlabel('Time (ms)');
-        if v==branchPlotOrder(1), ylabel('\DeltaF/F'); legend({'SS','CS'},'Box','off','location','northwest'); end
+        ylim([-0.2 1.5]*PCresult{f}.SpikeHeight); xlim([-nTau2show(1) nTau2show(2)]);
+        %title(['ID# ' num2str(f)]);
+        ylabel('Voltage (∆F/F)');
+        if f==foi2show(end)
+            xlabel('Time (ms)');
+        end
+        if f==foi2show(1)
+          title(branch_str{bi});
+        end
     end
-    set_fontsize(12); colormap(turbo(256));
 end
+for stype=1:2
+    figure(3030+stype); colormap(turbo(256)); set_fontsize(12); set_font('Arial'); 
+    set_figsize(120,200);
+end
+for bi=1:numel(branchPlotOrder), figure(3040+bi); set_fontsize(12); set_font('Arial'); set_figsize(50,200); end
 figure(300); set_fontsize(12);
 
 MeanPrespikeSubthreshold=[];
@@ -2922,13 +5133,14 @@ for f=foi
 end
 
 figure(302); clf; cmap_stype=[1 0 1; 0 0.7 0.7];
+tiledlayout(1,3,'tilespacing','tight')
 title_str={'Basal','Apical','Distal'}; g=1;
-ylim_302={[-0.03 0.05],[-0.03 0.05],[-0.01 0.1]};   % per-panel y-limits (Basal, Apical, Distal)
+ylim_302={[-0.03 0.07],[-0.03 0.07],[-0.03 0.07]};   % per-panel y-limits (Basal, Apical, Distal)
 SpikeHeight_foi=arrayfun(@(ff) PCresult{ff}.SpikeHeight, foi)'; % robust dF/F spike height per neuron
 for dclass=[1 3 2]
     nexttile([1 1]);
     MeanPrespikeSubthreshold_Sp=permute(MeanPrespikeSubthreshold(foi,dclass,[1 2]),[1 3 2]);
-    MeanPrespikeSubthreshold_Sp(nIsolatedSp(foi,2)<10,:)=NaN;   % drop neurons with <10 isolated CS
+    MeanPrespikeSubthreshold_Sp(nIsolatedSp(foi,2)<nthreshold,:)=NaN;   % drop neurons with <10 isolated CS
     p=Boxplot_wPoints2(MeanPrespikeSubthreshold_Sp,cmap_stype);
     drawPValueLines(p,0);
     box off;
@@ -2941,6 +5153,8 @@ for dclass=[1 3 2]
     ylim(ylim_302{g});
     title(title_str{g}); g=g+1;
 end
+sgtitle('Mean voltage from 10 to 3 ms before spike onset','fontsize',16)
+set_font('Arial'); set_fontsize(13);
 set_figsize(200,90)
 
 %% [3-setup] Compute pre-spike theta phase / amplitude / dV/dt / PLV / STA / ETA  (feeds 3a-3e)
@@ -3715,92 +5929,387 @@ else
         '[3f++] Click a CS: kymo + soma/distal slow traces.  features green=rise red=dV/dt blue=V.  spikes SS=magenta CS=teal BS=purple dSpike=orange');
 end
 
-%% [3h] Figures 313 (pooled) & 314 (per neuron) - CS first-spike STA + spike-order timing
-% Somatic (black) and distal-dendrite (red) STA (soma/distal-class ROIs of NormalizedTrace_dirt,
-% /spike ht, pre-onset baseline-subtracted) aligned via get_STA to the FIRST spike of each complex
-% spike (SpikeOrder==1 within a CS), EXCLUDING CS onsets during blue. Overlaid (right y-axis) are the timing histograms
+%% [3h] Figs 313/314 (RAW STA) & 315/316 (SLOW STA) - CS first-spike STA + spike-order timing
+% Somatic (black) and distal-dendrite (red) STA -- soma/distal-class ROIs of NormalizedTrace_dirt,
+% /spike ht, pre-onset baseline-subtracted, aligned via get_STA to the FIRST spike of each complex
+% spike (SpikeOrder==1 within a CS), EXCLUDING CS onsets during blue. The RAW STA (figs 313 pooled /
+% 314 per neuron) and the SLOW subthreshold STA (figs 315 / 316) are shown in SEPARATE figures.
+% The slow trace is built by blanking +-2 ms around each somatic bAP (the DISTAL blank is shifted by
+% the measured distal bAP delay), interpolating, then movmean(7 ms).
+% Overlaid (right y-axis) are the timing histograms
 % of the 1st, 2nd, 3rd ... somatic spikes within the CS relative to the first spike -- obtained by
 % aligning each per-order spike train with the same get_STA call -- each order a different colour.
 tWinSTA=-50:250; tauPre=50; tauPost=250; maxOrd=6; cmapOrd=turbo(maxOrd); binE=tWinSTA(1):1:tWinSTA(end);
-cSoma=[0 0 0]; cDist=[0.85 0.3 0.1];                                                 % soma / distal STA colours
-somaEvN=cell(1,numel(foi)); distEvN=cell(1,numel(foi)); ordCntN=cell(1,numel(foi)); nEvN=zeros(1,numel(foi));
-somaEvAll=[]; distEvAll=[]; ordCntAll=zeros(maxOrd,numel(tWinSTA)); nEvAll=0;         % pooled
+cSoma=[0.5 0.26 0.65]; cDist=[0.92 0.36 0.08];                        % STA colours: soma black, distal red
+subSm=7; omitPM=2; dPre=5; dPost=15; maxDelay=10;           % slow build: movmean window, +-omit (ms), bAP-delay STA window/cap
+somaEvN=cell(1,numel(foi)); distEvN=cell(1,numel(foi)); somaSubN=cell(1,numel(foi)); distSubN=cell(1,numel(foi));
+ordCntN=cell(1,numel(foi)); nEvN=zeros(1,numel(foi)); delayDN=nan(1,numel(foi));
+somaEvAll=[]; distEvAll=[]; somaSubAll=[]; distSubAll=[]; ordCntAll=zeros(maxOrd,numel(tWinSTA)); nEvAll=0;   % pooled
 for i=1:numel(foi)
-    f=foi(i);
+    f=foi(i); sh=PCresult{f}.SpikeHeight; T=size(PCresult{f}.NormalizedTrace_dirt,2);
     somaROI=ismember(PCresult{f}.roi_dClass,2);
     distROI=ismember(PCresult{f}.roi_dClass,5);                                 % distal dendrite class
-    somaTr = mean(PCresult{f}.NormalizedTrace_dirt(somaROI,:),1,'omitnan') / PCresult{f}.SpikeHeight;
-    distTr = mean(PCresult{f}.NormalizedTrace_dirt(distROI,:),1,'omitnan') / PCresult{f}.SpikeHeight;
-    csSpk  = (PCresult{f}.SpikeMat(1,:)>0) & (PCresult{f}.CStrace>0);            % somatic spikes in a CS
-    trig   = csSpk & (PCresult{f}.SpikeOrder==1) & ~(PCresult{f}.BlueStim>0);    % CS first spikes, no blue
+    % RAW compartment traces (NaN-interpolated so the STA line has no gaps)
+    somaRaw = interpolateNaN(mean(PCresult{f}.NormalizedTrace_dirt(somaROI,:),1,'omitnan'));
+    distRaw = interpolateNaN(mean(PCresult{f}.NormalizedTrace_dirt(distROI,:),1,'omitnan'));
+    somaTr  = somaRaw/sh; distTr = distRaw/sh;                                  % RAW STA traces (/spike ht)
+    % distal bAP delay = peak time of the distal bAP STA (aligned to every somatic spike) after t=0
+    delayD=0;
+    if any(distROI)
+        sD=get_STA(distRaw, PCresult{f}.SpikeMat(1,:)>0, dPre, dPost);
+        if ~isempty(sD), sD=sD(:)'; tauAx=-dPre:dPost; sD=sD-mean(sD(tauAx<0),'omitnan');
+            cand=find(tauAx>=0 & tauAx<=maxDelay); [~,im]=max(sD(cand)); delayD=tauAx(cand(im)); end
+    end
+    delayDN(i)=delayD;
+    % SLOW subthreshold: blank +-omitPM ms around each somatic bAP (distal shifted by its delay),
+    % interpolate the gaps, then movmean(subSm) -- shorter window than PCresult.Subthreshold
+    allFr=find(PCresult{f}.SpikeMat(1,:)>0); offs=-omitPM:omitPM;
+    bS=false(1,T); idx=allFr(:)+offs;          idx=idx(idx>=1&idx<=T); bS(idx)=true;   % soma: at the spike
+    bD=false(1,T); idx=(allFr(:)+delayD)+offs; idx=idx(idx>=1&idx<=T); bD(idx)=true;   % distal: at spike+delay
+    s2=somaRaw; s2(bS)=NaN; somaSubTr=movmean(interpolateNaN(s2),subSm,'omitnan')/sh;
+    d2=distRaw; d2(bD)=NaN; distSubTr=movmean(interpolateNaN(d2),subSm,'omitnan')/sh;
+    csSpk = (PCresult{f}.SpikeMat(1,:)>0) & (PCresult{f}.CStrace>0);             % somatic spikes in a CS
+    trig  = csSpk & (PCresult{f}.SpikeOrder==1) & ~(PCresult{f}.BlueStim>0);     % CS first spikes, no blue
     ordCntN{i}=zeros(maxOrd,numel(tWinSTA));
     if ~any(somaROI) || ~any(trig), continue; end
-    [~, evSoma] = get_STA(somaTr, trig, tauPre, tauPost);        % 1 x nEv x W soma windows
-    evSoma = squeeze(evSoma); if size(evSoma,2)~=numel(tWinSTA), evSoma=evSoma(:)'; end   % nEv x W
-    evSoma = evSoma - mean(evSoma(:, tWinSTA<-5), 2, 'omitnan');  % per-event pre-onset baseline
-    somaEvN{i}=evSoma; nEvN(i)=size(evSoma,1);
-    if any(distROI)                                              % distal dendrite STA (same triggers)
-        [~, evDist] = get_STA(distTr, trig, tauPre, tauPost);
-        evDist = squeeze(evDist); if size(evDist,2)~=numel(tWinSTA), evDist=evDist(:)'; end
-        evDist = evDist - mean(evDist(:, tWinSTA<-5), 2, 'omitnan');
-        distEvN{i}=evDist; distEvAll=[distEvAll; evDist];        %#ok<AGROW>
+    % align each trace to the CS first spikes (get_STA), squeeze to nEv x W, per-event baseline-subtract
+    [~,e]=get_STA(somaTr,   trig,tauPre,tauPost); e=squeeze(e); if size(e,2)~=numel(tWinSTA),e=e(:)'; end
+    somaEvN{i}=e-mean(e(:,tWinSTA<-5),2,'omitnan'); nEvN(i)=size(somaEvN{i},1); somaEvAll=[somaEvAll; somaEvN{i}]; %#ok<AGROW>
+    [~,e]=get_STA(somaSubTr,trig,tauPre,tauPost); e=squeeze(e); if size(e,2)~=numel(tWinSTA),e=e(:)'; end
+    somaSubN{i}=e-mean(e(:,tWinSTA<-5),2,'omitnan'); somaSubAll=[somaSubAll; somaSubN{i}]; %#ok<AGROW>
+    if any(distROI)
+        [~,e]=get_STA(distTr,   trig,tauPre,tauPost); e=squeeze(e); if size(e,2)~=numel(tWinSTA),e=e(:)'; end
+        distEvN{i}=e-mean(e(:,tWinSTA<-5),2,'omitnan'); distEvAll=[distEvAll; distEvN{i}]; %#ok<AGROW>
+        [~,e]=get_STA(distSubTr,trig,tauPre,tauPost); e=squeeze(e); if size(e,2)~=numel(tWinSTA),e=e(:)'; end
+        distSubN{i}=e-mean(e(:,tWinSTA<-5),2,'omitnan'); distSubAll=[distSubAll; distSubN{i}]; %#ok<AGROW>
     end
     for o=1:maxOrd                                                % per-order spike-train alignment
         [~, evO] = get_STA(double(csSpk & (PCresult{f}.SpikeOrder==o)), trig, tauPre, tauPost);
         if ~isempty(evO), ordCntN{i}(o,:)=reshape(sum(evO,2),1,[]); end   % spike counts per ms offset
     end
-    somaEvAll=[somaEvAll; evSoma]; ordCntAll=ordCntAll+ordCntN{i}; nEvAll=nEvAll+nEvN(i);   %#ok<AGROW>
+    ordCntAll=ordCntAll+ordCntN{i}; nEvAll=nEvAll+nEvN(i);
 end
-% ---- pooled across neurons (fig 313) ----
-figure(313); clf;
-yyaxis left; hold on; set(gca,'YColor','k'); hSTA=gobjects(1,2);
-if ~isempty(somaEvAll)
-    hSTA(1)=errorbar_shade(tWinSTA, mean(somaEvAll,1,'omitnan'), std(somaEvAll,0,1,'omitnan')./sqrt(max(1,size(somaEvAll,1))), cSoma);
-end
-if ~isempty(distEvAll)
-    hSTA(2)=errorbar_shade(tWinSTA, mean(distEvAll,1,'omitnan'), std(distEvAll,0,1,'omitnan')./sqrt(max(1,size(distEvAll,1))), cDist);
-end
-ylabel('STA (/spike ht)'); xline(0,'k:');
-yyaxis right; hold on; set(gca,'YColor',[0.3 0.3 0.3]); hh=gobjects(1,maxOrd);
-for o=1:maxOrd
-    ts=repelem(tWinSTA, ordCntAll(o,:)); if isempty(ts), continue; end   % reconstruct spike-offset times
-    hh(o)=histogram(ts, binE, 'DisplayStyle','stairs', 'EdgeColor',cmapOrd(o,:), 'LineWidth',1.3);
-end
-ylabel('# spikes'); xlim([tWinSTA(1) tWinSTA(end)]);
-hLeg=[hSTA hh]; lblLeg=[{'soma STA','distal STA'}, arrayfun(@(o)sprintf('spike %d',o),1:maxOrd,'UniformOutput',false)];
-vv=isgraphics(hLeg); legend(hLeg(vv), lblLeg(vv), 'Box','off','Location','northeast');
-xlabel('Time from first CS spike (ms)'); box off;
-title(sprintf('CS first-spike STA (soma & distal) + spike-order timing (pooled: %d CS, %d neurons, no blue)', nEvAll, numel(foi)));
-set_fontsize(11);
-
-% ---- per neuron (fig 314) ----
-figure(314); clf; nN=numel(foi); nc=ceil(sqrt(nN)); nr=ceil(nN/nc);
-tiledlayout(nr,nc,'TileSpacing','compact','Padding','compact');
-for i=1:nN
-    nexttile; yyaxis left; hold on; set(gca,'YColor','k'); hSTA=gobjects(1,2);
-    if ~isempty(somaEvN{i})
-        hSTA(1)=errorbar_shade(tWinSTA, mean(somaEvN{i},1,'omitnan'), std(somaEvN{i},0,1,'omitnan')./sqrt(max(1,size(somaEvN{i},1))), cSoma);
-    end
-    if ~isempty(distEvN{i})
-        hSTA(2)=errorbar_shade(tWinSTA, mean(distEvN{i},1,'omitnan'), std(distEvN{i},0,1,'omitnan')./sqrt(max(1,size(distEvN{i},1))), cDist);
-    end
-    if mod(i-1,nc)==0, ylabel('STA'); end
-    xline(0,'k:');
+semR=@(M) std(M,0,1,'omitnan')./sqrt(max(1,size(M,1)));      % s.e.m. across events
+% raw STA -> figs 313 (pooled) / 314 (per neuron);  slow subthreshold STA -> figs 315 / 316
+poolSoma={somaEvAll, somaSubAll}; poolDist={distEvAll, distSubAll};
+perSoma ={somaEvN,   somaSubN};   perDist ={distEvN,   distSubN};
+figPool=[313 315]; figPer=[314 316]; modeName={'RAW','SLOW subthreshold'};
+for md=1:2
+    % ---- pooled across neurons ----
+    figure(figPool(md)); clf;
+    yyaxis left; hold on; set(gca,'YColor','k'); hSTA=gobjects(1,2);
+    if ~isempty(poolSoma{md}), hSTA(1)=errorbar_shade(tWinSTA, mean(poolSoma{md},1,'omitnan'), semR(poolSoma{md}), cSoma); end
+    if ~isempty(poolDist{md}), hSTA(2)=errorbar_shade(tWinSTA, mean(poolDist{md},1,'omitnan'), semR(poolDist{md}), cDist); end
+    set(hSTA(isgraphics(hSTA)),'LineStyle','-');             % force solid
+    ylabel('Voltage (spike height)'); xline(0,'k:');
     yyaxis right; hold on; set(gca,'YColor',[0.3 0.3 0.3]); hh=gobjects(1,maxOrd);
     for o=1:maxOrd
-        ts=repelem(tWinSTA, ordCntN{i}(o,:)); if isempty(ts), continue; end
-        hh(o)=histogram(ts, binE, 'DisplayStyle','stairs', 'EdgeColor',cmapOrd(o,:), 'LineWidth',1);
+        ts=repelem(tWinSTA, ordCntAll(o,:)); if isempty(ts), continue; end   % reconstruct spike-offset times
+        hh(o)=histogram(ts, binE, 'DisplayStyle','stairs', 'EdgeColor',cmapOrd(o,:), 'LineWidth',1.3);
     end
-    xlim([tWinSTA(1) tWinSTA(end)]); box off;
-    title(sprintf('f%d (n=%d CS)',foi(i),nEvN(i)),'FontSize',8);
-    if i>nN-nc, xlabel('t from 1st CS spike (ms)'); end
-    if i==1
-        hLeg=[hSTA hh]; lblLeg=[{'soma','distal'}, arrayfun(@(o)sprintf('spk %d',o),1:maxOrd,'UniformOutput',false)];
-        vv=isgraphics(hLeg); if any(vv), legend(hLeg(vv), lblLeg(vv), 'Box','off','FontSize',6,'Location','northeast'); end
+    ylabel('# spikes'); xlim([tWinSTA(1) tWinSTA(end)]);
+    hLeg=[hSTA hh]; lblLeg=[{'soma','distal'}, arrayfun(@(o)sprintf('spike %d',o),1:maxOrd,'UniformOutput',false)];
+    vv=isgraphics(hLeg); legend(hLeg(vv), lblLeg(vv), 'Box','off','Location','northeast');
+    xlabel('Time from first CS spike (ms)'); box off;
+    %title(sprintf('CS first-spike %s STA (soma & distal) + spike-order timing (pooled: %d CS, %d neurons, no blue)', modeName{md}, nEvAll, numel(foi)));
+    set_fontsize(11); set_font('Arial');
+    xlim([-50 120]);
+
+    % ---- per neuron ----
+    figure(figPer(md)); clf; nN=numel(foi); nc=ceil(sqrt(nN)); nr=ceil(nN/nc);
+    tiledlayout(nr,nc,'TileSpacing','compact','Padding','compact');
+    for i=1:nN
+        nexttile; yyaxis left; hold on; set(gca,'YColor','k'); hSTA=gobjects(1,2);
+        if ~isempty(perSoma{md}{i}), hSTA(1)=errorbar_shade(tWinSTA, mean(perSoma{md}{i},1,'omitnan'), semR(perSoma{md}{i}), cSoma); end
+        if ~isempty(perDist{md}{i}), hSTA(2)=errorbar_shade(tWinSTA, mean(perDist{md}{i},1,'omitnan'), semR(perDist{md}{i}), cDist); end
+        set(hSTA(isgraphics(hSTA)),'LineStyle','-');
+        if mod(i-1,nc)==0, ylabel('STA'); end
+        xline(0,'k:');
+        yyaxis right; hold on; set(gca,'YColor',[0.3 0.3 0.3]); hh=gobjects(1,maxOrd);
+        for o=1:maxOrd
+            ts=repelem(tWinSTA, ordCntN{i}(o,:)); if isempty(ts), continue; end
+            hh(o)=histogram(ts, binE, 'DisplayStyle','stairs', 'EdgeColor',cmapOrd(o,:), 'LineWidth',1);
+        end
+        xlim([tWinSTA(1) tWinSTA(end)]); box off;
+        title(sprintf('f%d (n=%d CS, dly %dms)',foi(i),nEvN(i),delayDN(i)),'FontSize',8);
+        if i>nN-nc, xlabel('t from 1st CS spike (ms)'); end
+        if i==1
+            hLeg=[hSTA hh]; lblLeg=[{'soma','distal'}, arrayfun(@(o)sprintf('spk %d',o),1:maxOrd,'UniformOutput',false)];
+            vv=isgraphics(hLeg); if any(vv), legend(hLeg(vv), lblLeg(vv), 'Box','off','FontSize',6,'Location','northeast'); end
+        end
     end
+    sgtitle(sprintf('[3h] CS first-spike %s STA (soma black, distal red) + spike-order timing, per neuron', modeName{md}));
+    set_fontsize(8); set_font('Arial');
 end
-sgtitle('[3h] CS first-spike STA (soma black, distal red) + spike-order timing, per neuron (no blue)');
-set_fontsize(8);
+
+%% [4] Figure 401 - SS STA stability over the recording (front / middle / end), non-blue
+% Somatic single-spike (SS) STA built from the FIRST N, MIDDLE N and LAST N SS spikes (excluding
+% blue) to check whether the SS waveform drifts across the recording (e.g. bleaching / baseline
+% changes). N = Nsec4 (default 50) when the neuron has at least that many SS spikes; a neuron
+% with FEWER than Nsec4 SS spikes in total is instead split into equal thirds (N = floor(nSS/3)),
+% so its three segments stay disjoint rather than collapsing onto the same spikes.
+%   tile 1    : the STA overlay of ONE example neuron (sec4Show), front / middle / end in
+%               blue / green / red (mean +- s.e.m., soma trace / spike ht).
+%   tiles 2-3 : the two waveform numbers, measured PER SS SPIKE and per segment for EVERY neuron
+%               in sec4Neurons -- spike HEIGHT (peak, in spike-height units) and spike WIDTH
+%               (FWHM, ms). Thin grey line = one neuron (mean +- s.e.m. over its spikes),
+%               bold black = mean +- s.e.m. over NEURONS (the unit for statistics);
+%               brackets = paired t-test on each segment pair, Holm-Bonferroni corrected.
+% Height and width are measured on the FAST (spike-only) trace NormalizedTrace_dirt -
+% Subthreshold_larger, the same trace the "Event waveform" section uses: on the raw dF/F the
+% spike sits on a slow depolarization that never returns to half max, so the FWHM would not be
+% resolved. The STA drawn in tile 1 stays on the raw trace, as before.
+sec4Show=23; sec4Neurons=foi; Nsec4=50;    % neuron shown in tile 1; neurons quantified; # SS spikes/segment
+tauPre4=50; tauPost4=150; tWin4=-tauPre4:tauPost4;          % STA window (ms rel. to the SS spike)
+base4=tWin4<-5; pk4=tWin4>=-3 & tWin4<=5;                   % baseline / peak-search windows
+cSeg=[0.1 0.4 0.9; 0.1 0.7 0.2; 0.9 0.2 0.1]; segName={'front','middle','end'};
+nN4=numel(sec4Neurons); Nshow=Nsec4;
+segAmp=nan(nN4,3); segAmpSE=nan(nN4,3); segW=nan(nN4,3); segWSE=nan(nN4,3); segNspk=zeros(nN4,3);
+segAmpAll=nan(nN4,1); segWAll=nan(nN4,1); segNall=zeros(nN4,1);   % same two numbers over ALL SS spikes
+figure(401); clf; tiledlayout(1,4,'TileSpacing','compact','Padding','compact');
+axEx=nexttile([1 2]); hold(axEx,'on'); box(axEx,'off'); hs=gobjects(1,3);
+for i=1:nN4
+    f=sec4Neurons(i); show=(f==sec4Show);
+    somaROI=ismember(PCresult{f}.roi_dClass,2);
+    if ~any(somaROI), if show, title(axEx,sprintf('f%d: no soma ROI',f)); end, continue; end
+    sh=PCresult{f}.SpikeHeight;
+    somaTr=interpolateNaN(mean(PCresult{f}.NormalizedTrace_dirt(somaROI,:),1,'omitnan'))/sh;          % raw (displayed)
+    fastTr=interpolateNaN(mean(PCresult{f}.NormalizedTrace_dirt(somaROI,:) ...
+                              -PCresult{f}.Subthreshold_larger(somaROI,:),1,'omitnan'))/sh;          % spike-only (measured)
+    ssFr=find((PCresult{f}.SpikeClassVecMat(1,:)>0) & ~(PCresult{f}.BlueStim>0));   % SS spikes, non-blue
+    nSS=numel(ssFr);
+    if nSS<3, if show, title(axEx,sprintf('f%d: only %d SS',f,nSS)); end, continue; end
+    if nSS>=Nsec4                                           % enough spikes: Nsec4 per segment
+        N=Nsec4; ms=max(1,round(nSS/2)-floor(N/2)); segMode='N';
+    else                                                    % fewer than Nsec4 SS spikes in total:
+        N=floor(nSS/3); ms=floor((nSS-N)/2)+1; segMode='nSS/3';   % split what there is into thirds
+    end
+    segFr={ssFr(1:N), ssFr(ms:min(nSS,ms+N-1)), ssFr(max(1,nSS-N+1):nSS)};          % front / middle / end
+    fprintf('f%d SS STA (N=%d of %d, %s): mean spike time  front %.1f s | middle %.1f s | end %.1f s  (fs=1kHz)\n', ...
+        f, N, nSS, segMode, mean(segFr{1})/1000, mean(segFr{2})/1000, mean(segFr{3})/1000);
+    if show, Nshow=N; end
+    for s=1:3
+        if show                                                                      % example STA overlay
+            [~,ev]=get_STA(somaTr, segFr{s}, tauPre4, tauPost4); ev=squeeze(ev);
+            if size(ev,2)~=numel(tWin4), ev=ev(:)'; end
+            ev=ev-mean(ev(:,base4),2,'omitnan');                                     % pre-spike baseline
+            hs(s)=errorbar_shade(tWin4, mean(ev,1,'omitnan'), std(ev,0,1,'omitnan')./sqrt(max(1,size(ev,1))), cSeg(s,:));
+        end
+        [~,evF]=get_STA(fastTr, segFr{s}, tauPre4, tauPost4); evF=squeeze(evF);      % spike-only, for the numbers
+        if isempty(evF), continue; end
+        if size(evF,2)~=numel(tWin4), evF=evF(:)'; end
+        evF=evF-mean(evF(:,base4),2,'omitnan');
+        a=nan(size(evF,1),1); w=a;
+        for e=1:size(evF,1), [a(e),w(e)]=wf_amp_width(tWin4, evF(e,:), pk4); end     % one measurement per SS spike
+        segNspk(i,s)=size(evF,1);
+        segAmp(i,s)=mean(a,'omitnan'); segAmpSE(i,s)=std(a,'omitnan')/sqrt(max(1,sum(isfinite(a))));
+        segW(i,s)  =mean(w,'omitnan'); segWSE(i,s)  =std(w,'omitnan')/sqrt(max(1,sum(isfinite(w))));
+    end
+    % the same measurement over ALL non-blue SS spikes of this neuron -- the reference the
+    % per-segment heights are normalized to (a whole-recording average, so it does not hand
+    % any one segment the fixed value 1)
+    [~,evA]=get_STA(fastTr, ssFr, tauPre4, tauPost4); evA=squeeze(evA);
+    if isempty(evA), continue; end
+    if size(evA,2)~=numel(tWin4), evA=evA(:)'; end
+    evA=evA-mean(evA(:,base4),2,'omitnan');
+    aA=nan(size(evA,1),1); wA=aA;
+    for e=1:size(evA,1), [aA(e),wA(e)]=wf_amp_width(tWin4, evA(e,:), pk4); end
+    segNall(i)=size(evA,1); segAmpAll(i)=mean(aA,'omitnan'); segWAll(i)=mean(wA,'omitnan');
+end
+set(hs(isgraphics(hs)),'LineStyle','-'); xline(axEx,0,'k:');
+xlabel(axEx,'Time from SS spike (ms)'); ylabel(axEx,'Voltage (spike height)');
+vv=isgraphics(hs);
+if any(vv)
+    legend(axEx, hs(vv), arrayfun(@(s)sprintf('%s (n = %d)',segName{s},Nshow),find(vv),'UniformOutput',false), ...
+        'Box','off','Location','northeast');
+    title(axEx,sprintf('Neuron #%d ',sec4Show));
+elseif ~ismember(sec4Show,sec4Neurons)
+    title(axEx,sprintf('f%d not in sec4Neurons',sec4Show));
+end
+xlim(axEx,[-20 30]); ylim(axEx,[-0.1 1.1]);
+
+% ---- tiles 2-3: spike height and width across the recording, one line per neuron ----
+% The height is plotted NORMALIZED to each neuron's ALL-SPIKE height (segAmpAll, the mean over
+% every non-blue SS spike of that neuron), so the tile shows the drift across the recording
+% rather than the between-neuron spread of the absolute height, and no segment is pinned to 1
+% by construction; the s.e.m. over spikes is scaled by the same divisor. Raw heights: segAmp.
+segW(segW>4)=NaN;
+segAmpN =segAmp ./segAmpAll;                                % height / that neuron's all-spike height
+segAmpNSE=segAmpSE./segAmpAll;
+Q={segAmpN,segW}; QE={segAmpNSE,segWSE};
+qLab={'Spike height (norm. to all spikes)','Spike width, FWHM (ms)'}; qTtl={'Spike height','Spike width'};
+% STATISTICS (the NEURON is the unit: one value per neuron per segment, only neurons with all
+% three segments finite). PAIRED t-test on each of the three segment PAIRS (front-middle,
+% middle-end, front-end), Holm-Bonferroni corrected across those three comparisons. The
+% brackets on the tiles show the corrected p; the printed block below gives t, df, the raw p
+% and the corrected p side by side.
+pairIdx=[1 2; 2 3; 1 3]; nPair4=size(pairIdx,1);
+pPair=nan(2,nPair4); pPairH=nan(2,nPair4); tPair=nan(2,nPair4); dfPair=nan(2,nPair4); nOK4=zeros(1,2);
+for q=1:2
+    nexttile; hold on; box off;
+    ok=all(isfinite(Q{q}),2); nOK4(q)=nnz(ok); Y=Q{q}(ok,:);
+    for i=find(ok)'
+        %errorbar(1:3, Q{q}(i,:), QE{q}(i,:), '-', 'Color',[0.75 0.75 0.75], 'LineWidth',0.5, 'CapSize',0);
+        plot(1:3, Q{q}(i,:), 'Color',[0.75 0.75 0.75], 'LineWidth',0.5);
+    end
+    m=mean(Y,1); se=std(Y,0,1)./sqrt(max(1,nOK4(q)));                                % across neurons
+    errorbar(1:3, m, se, 'k-', 'LineWidth',2, 'CapSize',6);
+    scatter(1:3, m, 45, cSeg, 'filled', 'MarkerEdgeColor','k');                      % segment colours of tile 1
+    if nOK4(q)>=3
+        for k=1:nPair4                                                               % paired t-test per segment pair
+            [~,pPair(q,k),~,st]=ttest(Y(:,pairIdx(k,2)), Y(:,pairIdx(k,1)));         % later - earlier, so t
+            tPair(q,k)=st.tstat; dfPair(q,k)=st.df;                                   % signs with the mean change
+        end
+        [ps,ord]=sort(pPair(q,:)); running=0;                                        % Holm-Bonferroni over the 3 pairs
+        for k=1:nPair4, running=max(running,(nPair4-k+1)*ps(k)); pPairH(q,ord(k))=min(1,running); end
+    end
+    if q==1, ylim([0 1.5]); else, ylim([0 6]); end                                                      % the all-spike height
+    set(gca,'XTick',1:3,'XTickLabel',segName); xlim([0.7 3.3]);
+    ylabel(qLab{q});
+    yl=ylim; yTop=yl(2); step=0.07*diff(yl);                                         % significance brackets
+    for k=1:nPair4
+        if ~isfinite(pPairH(q,k)), continue; end
+        x1=pairIdx(k,1); x2=pairIdx(k,2); yb=yTop+step*k;
+        plot([x1 x1 x2 x2],[yb-0.2*step yb yb yb-0.2*step],'k-','LineWidth',0.8);
+        text(mean([x1 x2]), yb, sig_star(pPairH(q,k)), 'HorizontalAlignment','center', ...
+            'VerticalAlignment','bottom', 'FontSize',9);
+    end
+    ylim([yl(1) yTop+step*(nPair4+1.2)]);
+    title(sprintf('%s (n = %d neurons, paired t-test, Holm)', qTtl{q}, nOK4(q)));
+end
+set_fontsize(15); set_font('Arial');
+set_figsize(210,108);
+
+% ---- printed summary: per-neuron height / width per segment ----
+fprintf('\n[4] SS waveform stability across the recording (up to %d SS spikes per segment, blue OFF)\n', Nsec4);
+fprintf('    measured per spike on (NormalizedTrace_dirt - Subthreshold_larger), soma ROIs, / SpikeHeight\n');
+fprintf('    heights normalized to each neuron''s ALL-SS-spike height (allAmp, n = allN spikes)\n');
+fprintf('    %-7s %-26s %-26s %-26s %8s %7s %s\n','neuron','height (spike ht)','height / all spikes', ...
+    'FWHM (ms)','allAmp','allN','n spikes');
+fprintf('    %-7s %8s %8s %8s %8s %8s %8s %8s %8s %8s %8s %7s  %s\n','',segName{:},segName{:},segName{:},'','','f/m/e');
+for i=1:nN4
+    if ~any(isfinite(segAmp(i,:))), continue; end
+    fprintf('    f%-6d %8.3f %8.3f %8.3f %8.3f %8.3f %8.3f %8.2f %8.2f %8.2f %8.3f %7d  %d/%d/%d\n', ...
+        sec4Neurons(i), segAmp(i,:), segAmpN(i,:), segW(i,:), segAmpAll(i), segNall(i), segNspk(i,:));
+end
+okA=all(isfinite(segAmpN),2); okW=all(isfinite(segW),2);
+fprintf('    mean +- s.e.m. over %d neurons: height/all %.3f+-%.3f / %.3f+-%.3f / %.3f+-%.3f\n', ...
+    nnz(okA), [mean(segAmpN(okA,:),1); std(segAmpN(okA,:),0,1)./sqrt(max(1,nnz(okA)))]);
+fprintf('    mean +- s.e.m. over %d neurons: FWHM       %.2f+-%.2f / %.2f+-%.2f / %.2f+-%.2f ms\n', ...
+    nnz(okW), [mean(segW(okW,:),1); std(segW(okW,:),0,1)./sqrt(max(1,nnz(okW)))]);
+
+% ---- statistics: pairwise paired t-tests, neuron = unit ----
+% One paired t-test per segment pair, Holm-Bonferroni corrected across the three. Also the mean
+% per-neuron CHANGE and its 95% CI for each pair, so the direction and the size of an effect can
+% be read next to its p -- and, when nothing is significant, so the CI shows how large a change
+% the data would still have been compatible with (a non-significant p is not evidence of
+% equality on its own).
+fprintf('\n    Statistics (neuron = unit, paired t-test; only neurons with all 3 segments)\n');
+for q=1:2
+    Y=Q{q}(all(isfinite(Q{q}),2),:);
+    fprintf('      %-13s n = %2d neurons\n', qTtl{q}, nOK4(q));
+    if nOK4(q)<3, fprintf('        (too few neurons for the pairwise tests)\n'); continue; end
+    for k=1:nPair4
+        d=Y(:,pairIdx(k,2))-Y(:,pairIdx(k,1));
+        [~,~,ci]=ttest(d);
+        fprintf('        %-6s vs %-6s : mean %s %+.4f [95%% CI %+.4f %+.4f] | t(%d) = %+.3f | p = %.4g | Holm p = %.4g %s\n', ...
+            segName{pairIdx(k,1)}, segName{pairIdx(k,2)}, char(916), mean(d,'omitnan'), ci(1), ci(2), ...
+            dfPair(q,k), tPair(q,k), pPair(q,k), pPairH(q,k), sig_star(pPairH(q,k)));
+    end
+    if all(pPairH(q,:)>0.05), fprintf('        -> no pair differs significantly (all Holm p > 0.05)\n'); end
+end
+fprintf('      stars on the tiles are the Holm-corrected p (* <0.05, ** <0.01, *** <0.001, else n.s.)\n');
+
+%% ===== Mean of the first two ISIs of each complex spike (stats for the text) =====
+% Fills in: "Of the CS events, XX% had mean ISI < YY ms."
+%
+% WHAT IS MEASURED. For each CS event, the mean of its first nISI_CS inter-spike
+% intervals. With nISI_CS = 2 that is the average of the first two ISIs, i.e.
+% (t3 - t1)/2 from the first three spikes. The leading intervals are used rather than
+% all of them because a complex spike's defining high-frequency burst is at its start;
+% later spikes in the event window drift apart and would pull the mean up without
+% describing the burst. SpikeTable.PosInEvent already ranks spikes within an event, so
+% taking the first nISI_CS+1 spikes is just a selection on that column. Frames are
+% 1 kHz, so a frame difference is in ms.
+%
+% NOT EventTable.ISI. That column is ISIEV = min(event onset - preceding spike
+% frames), i.e. the time from the PREVIOUS spike to the event onset — an interval
+% before the event, not inside it.
+%
+% An event with one spike has no interval at all and is excluded. An event with two
+% spikes contributes only one interval; those are counted separately so the
+% denominator is never silently different from what the sentence claims, and
+% strictN_CS restricts to events that supply the full nISI_CS if you prefer.
+nISI_CS    = 2;                   % how many leading ISIs to average
+isiThr_CS  = [5 10 15 20 25 30];  % ms — the YY values to report
+onlyValid_CS = true;              % exclude blue-stimulated and NaN-masked events
+strictN_CS = false;               % true = only events that supply all nISI_CS intervals
+if ~exist('SpikeTable','var') || ~exist('EventTable','var')
+    error('Run the table-building cell (build_spike_event_tables) first.');
+end
+
+nSpk_CS = nISI_CS + 1;            % n intervals need n+1 spikes
+sel = ~isnan(SpikeTable.EventUID) & SpikeTable.EventClass == "CS" ...
+    & SpikeTable.PosInEvent <= nSpk_CS;
+if onlyValid_CS
+    okUID = EventTable.EventUID(EventTable.EventClass == "CS" & EventTable.IsValid);
+    sel = sel & ismember(SpikeTable.EventUID, okUID);
+end
+[gIdx, uidCS] = findgroups(SpikeTable.EventUID(sel));
+frmCS   = SpikeTable.Frame(sel);
+meanISI = splitapply(@(x) mean(diff(sort(x))), frmCS, gIdx);   % NaN when one spike
+nISIgot = splitapply(@numel, frmCS, gIdx) - 1;                 % intervals available
+hasISI  = nISIgot >= 1 & ~isnan(meanISI);
+if strictN_CS, hasISI = hasISI & nISIgot >= nISI_CS; end
+
+vldTxt_CS = ' (all)';
+if onlyValid_CS, vldTxt_CS = ' (valid only: not blue, not NaN-masked)'; end
+fprintf('\n===== Mean of the first %d ISI(s), CS events%s =====\n', nISI_CS, vldTxt_CS);
+fprintf('  CS events: %d total\n', numel(uidCS));
+for k = 0:nISI_CS
+    extra = '';
+    if k == 0, extra = '   <- single spike, no interval, excluded'; end
+    if k > 0 && k < nISI_CS, extra = '   <- averaged over fewer intervals'; end
+    fprintf('     %d interval(s) available: %5d events%s\n', k, sum(nISIgot==k), extra);
+end
+m = meanISI(hasISI);
+if isempty(m), error('No CS event supplies an interval under these settings.'); end
+strictTxt = '';
+if strictN_CS, strictTxt = sprintf(' (restricted to those supplying all %d)', nISI_CS); end
+fprintf('  measured on %d events%s\n', numel(m), strictTxt);
+fprintf('  mean ISI: median %.1f ms (IQR %.1f-%.1f, range %.1f-%.1f)\n', ...
+    median(m), prctile(m,25), prctile(m,75), min(m), max(m));
+fprintf('           = %.0f Hz instantaneous rate at the median\n', 1000/median(m));
+fprintf('  fraction below each threshold:\n');
+for yy = isiThr_CS(:)'
+    fprintf('     < %2g ms : %5d of %d  (%.1f%%)\n', yy, sum(m < yy), numel(m), ...
+        100*mean(m < yy));
+end
+[~, jBest] = min(abs(arrayfun(@(y) mean(m < y), isiThr_CS) - 0.90));
+yyBest = isiThr_CS(jBest);
+fprintf(['\n  >> "Of the CS events, %.1f%% had mean ISI < %g ms."\n' ...
+    '     (mean of the first %d ISIs; n = %d CS events, %d neurons)\n'], ...
+    100*mean(m < yyBest), yyBest, nISI_CS, numel(m), ...
+    numel(unique(SpikeTable.Neuron(sel))));
+
+% How much the choice matters: the same statistic over the first 1, 2, ... intervals
+% and over ALL intervals in the event. A median that climbs steadily with the number
+% of intervals means the later spikes are not part of the same burst, which is the
+% justification for quoting the leading-interval measure.
+fprintf('  sensitivity to how many leading ISIs are averaged:\n');
+selAll = ~isnan(SpikeTable.EventUID) & SpikeTable.EventClass == "CS";
+if onlyValid_CS, selAll = selAll & ismember(SpikeTable.EventUID, okUID); end
+for nn = [1:max(nISI_CS,3) Inf]
+    s2 = selAll & SpikeTable.PosInEvent <= nn+1;
+    g2 = findgroups(SpikeTable.EventUID(s2));
+    mi = splitapply(@(x) mean(diff(sort(x))), SpikeTable.Frame(s2), g2);
+    mi = mi(~isnan(mi));
+    if isempty(mi), continue; end
+    lbl = sprintf('first %d ISI', nn);
+    if isinf(nn), lbl = 'all ISIs'; end
+    fprintf('     %-12s : n = %5d, median %5.1f ms, %.1f%% < %g ms\n', lbl, numel(mi), ...
+        median(mi), 100*mean(mi < yyBest), yyBest);
+end
 
 %% ===== Local helper functions (shared by the cells above) =====
 
@@ -4341,4 +6850,115 @@ catCandidates  = [bAPsCandidates; dAPCandidates];
 dt2show  = [props.dt_pre_somAP_int(bAPsCandidates); -props.dt_post_somAP_int(dAPCandidates)];
 dst2show = [props.Distance_from_soma([bAPsCandidates; dAPCandidates])];
 dAPCandidates_threshold = catCandidates(find((dst2show-bAPthreshold(dt2show))>0));
+end
+
+
+function v = prespike_ramp(volt, centers, sigOff, preTau)
+% Pre-onset voltage ramp for figure 284. For each center frame c:
+%   v = mean(volt(c+sigOff)) - median(volt(c-preTau:c-1))
+% i.e. the mean over the signal window (e.g. -10..-3 ms) relative to the median of the
+% preceding preTau ms. Centers whose windows fall outside the trace return NaN.
+% volt is 1 x nTime (a compartment-mean voltage trace); sigOff is a vector of ms offsets.
+nT=numel(volt); centers=centers(:);
+v=nan(numel(centers),1);
+for k=1:numel(centers)
+    c=centers(k);
+    if c-preTau<1 || c+max(sigOff)>nT || c+min(sigOff)<1, continue; end
+    v(k)=mean(volt(c+sigOff),'omitnan') - median(volt(c-preTau:c-1),'omitnan');
+end
+end
+
+function [evFrames, roiMask] = wf_event_roi_mask(props, rows, branchIn)
+% ROI set of each dendritic EVENT, for the waveform amplitude/width section.
+% dSpikePropsMat is one row per (spike frame, branch), so a dSpike touching three branches
+% has three rows: collapse to unique frames and take the UNION of those branches' ROIs, so
+% the event is measured on every ROI it was detected on and counted once.
+% branchIn = branch label per sorted ROI. Returns evFrames (1 x nEvt) and roiMask (nEvt x nROI).
+branchIn = branchIn(:)';
+evFrames = []; roiMask = false(0, numel(branchIn));
+if isempty(rows); return; end
+fr = props.Spike_frame(rows); br = props.Branch_Index(rows);
+evFrames = unique(fr)';
+roiMask  = false(numel(evFrames), numel(branchIn));
+for b = unique(br)'
+    [~, pos] = ismember(fr(br == b), evFrames);
+    roiMask(pos,:) = roiMask(pos,:) | (branchIn == b);
+end
+end
+
+function [amp, fwhm, W, ampROI] = wf_measure(tr, frames, roiMask, tWin, baseSel, pkSel, minFrac)
+% Per-event waveform, amplitude and width on a fast (spike-only) trace.
+%   W      : nEvt x numel(tWin) ROI-MEAN waveform, baseline-subtracted (median over baseSel)
+%   amp    : peak of W inside pkSel                  (the "average dSpike" amplitude)
+%   fwhm   : full width at half maximum of that peak (NaN when not resolved in the window)
+%   ampROI : peak over the event's INDIVIDUAL ROIs (each baselined on its own), i.e. the
+%            single-ROI amplitude the noise-floor section compares against the noise SD.
+% Events whose segment is more than 1-minFrac NaN (motion reject / dirt) are left NaN.
+nE = numel(frames);
+W = nan(nE, numel(tWin)); amp = nan(nE,1); fwhm = nan(nE,1); ampROI = nan(nE,1);
+for i = 1:nE
+    rois = find(roiMask(i,:));
+    if isempty(rois); continue; end
+    segAll = tr(rois, frames(i) + tWin);                       % nROI x nT
+    seg = mean(segAll, 1, 'omitnan');
+    if mean(isfinite(seg)) < minFrac || ~any(isfinite(seg(baseSel))); continue; end
+    W(i,:) = seg - median(seg(baseSel), 'omitnan');
+    [amp(i), fwhm(i)] = wf_amp_width(tWin, W(i,:), pkSel);
+    segAll = segAll - median(segAll(:,baseSel), 2, 'omitnan');  % per-ROI baseline
+    v = segAll(:, pkSel);
+    if any(isfinite(v(:))); ampROI(i) = max(v(isfinite(v))); end
+end
+end
+
+function [amp, fwhm, tpk] = wf_amp_width(t, y, pkSel)
+% Peak amplitude of y within the window pkSel, and the full width at half maximum around
+% that peak. Both half-max crossings are linearly interpolated between samples; fwhm is NaN
+% when y does not fall below half max on BOTH sides inside t (width not resolved), which is
+% why the caller also reports the fraction of events with a resolved width.
+amp = NaN; fwhm = NaN; tpk = NaN;
+t = t(:)'; y = y(:)';
+if ~any(isfinite(y)); return; end
+yy = y; yy(~pkSel | ~isfinite(y)) = -inf;
+[amp, ip] = max(yy);
+if ~isfinite(amp) || amp <= 0; amp = NaN; return; end
+tpk = t(ip); half = amp/2;
+il = find(y(1:ip)   <= half & isfinite(y(1:ip)),   1, 'last');
+ir = find(y(ip:end) <= half & isfinite(y(ip:end)), 1, 'first');
+if isempty(il) || isempty(ir); return; end
+ir = ir + ip - 1;
+tl = wf_cross(t(il),   y(il),   t(il+1), y(il+1), half);
+tr = wf_cross(t(ir-1), y(ir-1), t(ir),   y(ir),   half);
+fwhm = tr - tl;
+end
+
+function x = wf_cross(x1, y1, x2, y2, yv)
+% Linear interpolation of the time at which a segment crosses the level yv.
+if ~isfinite(y1) || ~isfinite(y2) || y2 == y1; x = x2; else; x = x1 + (yv - y1)*(x2 - x1)/(y2 - y1); end
+end
+
+function rows = dspike_event_rows(props, dspFrames, dclassKeep)
+% dspike_event_rows  One dSpikePropsMat row per dSpike EVENT (not per branch).
+%
+% dSpikePropsMat holds one row per (spike frame, branch), so selecting on Spike_frame
+% alone returns a row for EVERY branch the dSpike touched: a dSpike on three branches is
+% counted three times. That matters because AUC_soma / AUC_apical / AUC_basal are each
+% computed over a FIXED ROI set (nROI_Soma / nROI_apical / nROI_basal) and depend only on
+% the spike index, so the duplicate rows carry byte-identical values -- they add no
+% information and simply re-weight the pooled distributions toward multi-branch dSpikes.
+% They also inflate n relative to the SS selectors, which use Branch_Index==1 and are
+% therefore already one row per frame.
+%
+% This also re-applies the per-branch predicate that DEFINED the dSpikes (see the dSpikes
+% section); matching on frame alone would otherwise pull in branches that spiked at that
+% frame but failed the dSpike criteria.
+%
+% dclassKeep restricts the dendrite class (e.g. [3 4 5] for apical); pass [] for any
+% dendritic class. AUC_branch is the only branch-specific column and no caller uses it,
+% so which of an event's branch rows survives the dedup is immaterial.
+if nargin < 3 || isempty(dclassKeep); dclassKeep = 1:5; end
+rows = find(ismember(props.Spike_frame, dspFrames) & ismember(props.dClass, dclassKeep) & ...
+            props.Branch_Index ~= 1 & ~props.IsbAP & ~props.IsCS & ...
+            props.dt_pre_somAP >= 4 & props.dt_post_somAP >= 2.5);
+[~, iu] = unique(props.Spike_frame(rows), 'stable');
+rows = rows(iu);                                   % one row per dSpike event
 end

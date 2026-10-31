@@ -480,6 +480,25 @@ end
 
 %% Plot low bound ∆F/F heatmap
 
+% Single-pixel, single-frame noise variance (M = 1, K = 1).
+% shotVar_vec is in camera counts^2 per pixel per frame.
+% Dividing by F0^2 converts it to variance of dF/F for one pixel, one frame.
+noiseVar_counts2 = shotVar_vec;                       % counts^2 / pixel / frame
+noiseVar_dFF = shotVar_vec ./ F0_vec.^2;              % fractional (dF/F)^2
+
+fprintf('\n--- Single-pixel, single-frame noise (n = %d ROI pixels) ---\n', nPixAvailable);
+fprintf('Shot-noise variance [counts^2]: median %.4g | mean %.4g | IQR %.4g - %.4g\n', ...
+    median(noiseVar_counts2), mean(noiseVar_counts2), ...
+    prctile(noiseVar_counts2, 25), prctile(noiseVar_counts2, 75));
+fprintf('Shot-noise std      [counts]  : median %.4g\n', median(sqrt(noiseVar_counts2)));
+fprintf('F0                  [counts]  : median %.4g\n', median(F0_vec));
+fprintf('Noise variance of dF/F        : median %.4g  (std = %.3g %%dF/F)\n', ...
+    median(noiseVar_dFF), 100*median(sqrt(noiseVar_dFF)));
+fprintf('Best-ranked pixel: var %.4g counts^2, F0 %.4g counts, %.3g %%dF/F std\n', ...
+    shotVar_sorted(1), F0_sorted(1), 100*sqrt(shotVar_sorted(1))/F0_sorted(1));
+fprintf('Minimum detectable dF/F at M=1, K=1 (d'' = %g): %.3g %%\n\n', ...
+    dcrit, 100*alphaMin(1,1));
+
 figure(336); clf;
 % alphaMin is fractional dF/F.
 % For display, convert to percent.
@@ -510,11 +529,11 @@ clabel(C, h, ...
     'FontSize', 11, ...
     'LabelSpacing', 500);
 set(gca, 'FontSize', 16,'xscale','log','xtick',[1 10 100 1000]);
-scatter(squeeze(sum(Result.ftprnt>0,[1 2])),20,'rd','filled')
+%scatter(squeeze(sum(Result.ftprnt>100000,[1 2])),20,'rd','filled')
 hold off;
 
 L_um = 110;       % length constant, um
-tau_ms = 23;      % membrane time constant, ms
+tau_ms = 15;      % membrane time constant, ms
 dt_ms = 1;        % frame interval, ms. Change this to your actual imaging dt.
 pix_um = 1.17;       % pixel size, um/pixel. Change this to your actual pixel size.
 dendWidth_um=5;
@@ -536,17 +555,141 @@ M_dend_spread = area_dend_um2 ./ pix_um^2;
 hold on;
 plot(M_dend_spread, K_overlay, 'r--', 'LineWidth', 2);
 
+% Label the overlay with the diffusive-spread formula and the value of D
+% used here (D = \lambda^2/\tau_m from the cable equation).
 text(1500, K_overlay(round(end*0.6)), ...
-    sprintf(' dendritic \n cable spread'), ...
+    sprintf([' dendritic cable spread\n' ...
+             ' d = (2Dt)^{1/2}\n' ...
+             ' D = \\lambda^2/\\tau_m = %.0f \\mum^2/ms'], D_um2_per_ms), ...
     'Color', 'r', ...
     'FontSize', 14, ...
-    'HorizontalAlignment','right');
+    'Interpreter', 'tex', ...
+    'HorizontalAlignment','right', ...
+    'VerticalAlignment','middle');
 
-xlim([10 max(M_list)])
+%xlim([10 max(M_list)])
 
 set_font('Arial');
 set_fontsize(18);
-set_figsize(154,117);
+set_figsize(200,115);
+hold off;
+
+%% Histogram of per-pixel shot-noise variance inside roiMask
+% Sanity check for the uniform-variance approximation below: how wide is the
+% spread of shotVar across ROI pixels, and is the median representative?
+maxShotVar = prctile(shotVar_vec,99);       
+medShotVar = median(shotVar_vec, 'omitnan');          % counts^2 / pixel / frame
+medNoiseVar_dFF = median(noiseVar_dFF, 'omitnan');    % (dF/F)^2 / pixel / frame
+
+figure(337); clf;
+
+subplot(1,3,1);
+histogram(shotVar_vec, 50);
+hold on; xline(medShotVar, 'r-', 'LineWidth', 2);
+xlabel('Shot-noise variance (counts^2)');
+ylabel('# pixels');
+title(sprintf('median = %.4g', medShotVar));
+axis square; hold off;
+
+subplot(1,3,2);
+histogram(log10(shotVar_vec), 50);
+hold on; xline(log10(medShotVar), 'r-', 'LineWidth', 2);
+xlabel('log_{10} variance (counts^2)');
+ylabel('# pixels');
+title(sprintf('IQR = %.3g - %.3g', ...
+    prctile(shotVar_vec,25), prctile(shotVar_vec,75)));
+axis square; hold off;
+
+subplot(1,3,3);
+histogram(100*sqrt(noiseVar_dFF), 50);
+hold on; xline(100*sqrt(medNoiseVar_dFF), 'r-', 'LineWidth', 2);
+xlabel('Single-pixel noise (% \DeltaF/F)');
+ylabel('# pixels');
+title(sprintf('median = %.3g %%', 100*sqrt(medNoiseVar_dFF)));
+axis square; hold off;
+
+set_font('Arial');
+set_fontsize(14);
+
+fprintf('\n--- Uniform-variance approximation (n = %d ROI pixels) ---\n', nPixAvailable);
+fprintf('Median shot variance [counts^2]: %.4g (mean %.4g, ratio mean/median %.3g)\n', ...
+    medShotVar, mean(shotVar_vec), mean(shotVar_vec)/medShotVar);
+fprintf('Spread: 10th %%ile %.4g | 90th %%ile %.4g (90/10 = %.3g)\n', ...
+    prctile(shotVar_vec,10), prctile(shotVar_vec,90), ...
+    prctile(shotVar_vec,90)/prctile(shotVar_vec,10));
+
+%% Calculate low bound threshold ∆F/F  --  single (median) variance version
+% Same d' calculation as above, but every ROI pixel is assigned the SAME
+% noise variance, medShotVar, instead of its own empirical shotVar.
+% With uniform variance the optimal pixel ordering is simply brightest-F0-first.
+
+[F0_sorted_u, sortIdx_u] = sort(F0_vec, 'descend');
+
+cumF0_u = cumsum(F0_sorted_u);
+cumF0_u = cumF0_u(M_list);
+cumF0_u = cumF0_u(:);
+
+% sum of variances over M pixels = M * medShotVar
+cumShotVar_u = maxShotVar .* M_list(:);   % column, same shape as cumF0_u
+
+alphaMin_u = NaN(numel(K_list), numel(M_list));
+
+for kk = 1:numel(K_list)
+    K = K_list(kk);
+    % signal = alpha * K * sum(F0_i); noise std = sqrt(K * M * medShotVar)
+    alphaMin_u(kk,:) = dcrit .* sqrt(K .* cumShotVar_u) ./ (K .* cumF0_u);
+end
+
+fprintf('Minimum detectable dF/F at M=1, K=1, uniform variance (d'' = %g): %.3g %%\n', ...
+    dcrit, 100*alphaMin_u(1,1));
+fprintf('Per-pixel-variance version gave %.3g %% (ratio uniform/per-pixel = %.3g)\n\n', ...
+    100*alphaMin(1,1), alphaMin_u(1,1)/alphaMin(1,1));
+
+%% Plot low bound ∆F/F heatmap -- single (median) variance version
+
+figure(338); clf;
+alphaPct_u = 100 * alphaMin_u;
+
+pcolor(M_list, K_list, log10(alphaPct_u));
+clim([-2 1])
+shading interp
+axis xy;
+xlabel('Spatial averaging area (µm^2)');
+ylabel('Temporal averaging window (ms)');
+title(sprintf('Uniform variance = %.4g counts^2/pixel/frame', medShotVar));
+
+colormap(turbo);
+cb = colorbar;
+cb.Ticks=[-2:1:1];
+cb.TickLabels=10.^[-2:1:1];
+ylabel(cb, 'Minimum detectable \DeltaF/F (%)');
+hold on; axis tight;
+
+[C_u, h_u] = contour(M_list, K_list, alphaPct_u, contourLevels, ...
+    'LineColor', 'k', ...
+    'LineWidth', 1.5);
+
+clabel(C_u, h_u, ...
+    'Color', 'k', ...
+    'FontSize', 11, ...
+    'LabelSpacing', 500);
+set(gca, 'FontSize', 16,'xscale','log','xtick',[1 10 100 1000]);
+
+% Same dendritic cable-spread overlay as figure 336
+plot(M_dend_spread, K_overlay, 'r--', 'LineWidth', 2);
+text(1500, K_overlay(round(end*0.6)), ...
+    sprintf([' dendritic cable spread\n' ...
+             ' d = (2Dt)^{1/2}\n' ...
+             ' D = \\lambda^2/\\tau_m = %.0f \\mum^2/ms'], D_um2_per_ms), ...
+    'Color', 'r', ...
+    'FontSize', 14, ...
+    'Interpreter', 'tex', ...
+    'HorizontalAlignment','right', ...
+    'VerticalAlignment','middle');
+
+set_font('Arial');
+set_fontsize(18);
+set_figsize(200,115);
 hold off;
 
 %% Impose artificial signal.
@@ -890,7 +1033,208 @@ end
 set_font('Arial'); set_fontsize(14);
 set_figsize(148,130);
 
-%% Plot 2c: Detection probability at cable-spread length
+%% Plot 2c: Detection of ANY event (peak OR spike), one heatmap per alpha
+% Same (sigma_L x tau) axes as figure 17, but collapsing the two detectors
+% into either_detect_prob = P(peak OR spike at the injected ROI) per rep.
+
+hasEither = ismember('either_detect_prob', injectionResult.Properties.VariableNames);
+if ~hasEither
+    warning(['either_detect_prob not found — plotting min(peak+spike,1) as an ' ...
+        'upper bound. Re-run the injection loop for exact values.']);
+end
+
+figure(22); clf;
+tiledlayout(1, numel(alphas2show), 'TileSpacing', 'compact', 'Padding', 'compact');
+
+for iA = alphas2show
+    nexttile; hold on;
+    prob_map_either = nan(numel(taus), numel(lengths));
+    for iTau = 1:numel(taus)
+        for iL = 1:numel(lengths)
+            idx = injectionResult.ell_um == lengths(iL) & ...
+                injectionResult.tau    == taus(iTau)  & ...
+                injectionResult.alpha  == alphas(iA);
+            if ~any(idx), continue; end
+            if hasEither
+                prob_map_either(iTau, iL) = mean(injectionResult.either_detect_prob(idx), 'omitnan');
+            else
+                prob_map_either(iTau, iL) = min(mean(injectionResult.peak_detect_prob(idx), 'omitnan') + ...
+                    mean(injectionResult.spike_detect_prob_injROI(idx), 'omitnan'), 1);
+            end
+        end
+    end
+    imagesc(lengths/2, taus, prob_map_either, [0 1]);
+    colormap(turbo); axis xy; axis tight;
+    plot(ell_cable, taus, 'w--', 'LineWidth', 2);
+    title(sprintf('%2.1f%% ∆F/F', alphas(iA)*100));
+    xlabel('\sigma_L (µm)');
+    if iA == alphas2show(1)
+        ylabel('\tau (ms)');
+    else
+        set(gca,'Ytick',[]);
+    end
+    if iA == alphas2show(end)
+        cb = colorbar; cb.Label.String = sprintf('Peak or spike \n detection probability');
+    end
+    xlim([0 max(lengths)/2]);
+    hold off;
+end
+set_font('Arial'); set_fontsize(16);
+set_figsize(230,75);
+
+%% Plot 2e: Minimum detectable amplitude (mV) at a fixed detection probability
+% Figure 22 fixes the amplitude and shows P(detect) over (sigma_L, tau). This
+% inverts it: fix the detection probability and show, for every (sigma_L, tau),
+% the SMALLEST injected amplitude that reaches it, in mV.
+%
+% For each (sigma_L, tau) the tested amplitudes give a curve P(alpha). P must
+% rise with alpha, but finite reps make it jitter, so it is forced
+% non-decreasing (cummax) before the crossing is located. The threshold is then
+% interpolated in log(alpha) -- the alpha grid is roughly geometric (0.5 1 2 4
+% 8 14 %) -- which gives a continuous map instead of one quantised to the six
+% simulated amplitudes.
+%
+% Two edge cases are kept distinct rather than both collapsing to NaN:
+%   * already detected at the SMALLEST alpha: the true threshold lies below the
+%     simulated range. The pixel is censored at alpha(1) and dotted white, so a
+%     floor of 4.2 mV is not mistaken for a measurement.
+%   * still undetected at the LARGEST alpha: left NaN (grey) = not reachable
+%     with the amplitudes simulated.
+pTargets     = [0.75];      % detection probabilities to map
+contourMV    = [40 56 67];          % contour levels drawn on every tile, mV
+pSmooth      = 1.5;                 % Gaussian sigma, in GRID CELLS, applied to P over
+                                    % (sigma_L, tau) BEFORE the threshold is read off. 0 = off.
+                                    % Each P is a binomial estimate from nReps, so one lucky
+                                    % rep at the smallest amplitude flips a pixel to "already
+                                    % detected" and it is drawn at the floor -- those are the
+                                    % isolated dark squares. The true detection surface is
+                                    % smooth in both sigma_L and tau, so averaging neighbours
+                                    % removes that sampling noise at its source; smoothing the
+                                    % THRESHOLD map instead would blur real structure and
+                                    % leave the censored outliers behind. sigma = 1 cell pools
+                                    % ~9 neighbours, i.e. ~3x lower binomial SE (~9x the reps).
+mvper1perdFF = 100/12;              % 12% dF/F per 100 mV, Pojeong's paper
+detVar       = 'either_detect_prob';% peak OR spike at the injected ROI
+assert(ismember(detVar, injectionResult.Properties.VariableNames), ...
+       '%s not found in injectionResult -- re-run the injection loop', detVar);
+
+tolA = 1e-12; tolT = 1e-12; tolL = 1e-9;
+nL = numel(lengths); nT = numel(taus); nA = numel(alphas);
+alpha_mV = alphas(:) * 100 * mvper1perdFF;      % tested amplitudes, mV
+logA     = log(alpha_mV);
+
+Pgrid = nan(nT, nL, nA);                        % P(tau, sigma_L, alpha)
+for iTau = 1:nT
+    for iL = 1:nL
+        for iA = 1:nA
+            idx = abs(injectionResult.ell_um - lengths(iL)) < tolL & ...
+                  abs(injectionResult.tau    - taus(iTau))  < tolT & ...
+                  abs(injectionResult.alpha  - alphas(iA))  < tolA;
+            if any(idx)
+                Pgrid(iTau,iL,iA) = mean(injectionResult.(detVar)(idx), 'omitnan');
+            end
+        end
+    end
+end
+
+% Which (tau, sigma_L) cells were simulated at all. Recorded BEFORE smoothing,
+% because the NaN-aware kernel below would otherwise fill an unsimulated cell
+% from its neighbours and invent a threshold where nothing was ever run.
+hadData = squeeze(any(isfinite(Pgrid), 3));
+if ~all(hadData(:))
+    fprintf(['[detect] %d of %d (tau, sigma_L) cells have no simulated reps at any ' ...
+             'amplitude -> NaN (grey)\n'], nnz(~hadData), numel(hadData));
+end
+
+% ---- smooth P over the (sigma_L, tau) plane, one amplitude at a time -------
+% NaN-aware: the kernel is renormalised by the weight that actually landed on
+% simulated pixels, so edges and gaps are not pulled toward zero.
+if pSmooth > 0
+    hw = max(1, ceil(2*pSmooth));
+    [gx, gy] = meshgrid(-hw:hw, -hw:hw);
+    Kp = exp(-(gx.^2 + gy.^2) / (2*pSmooth^2));  Kp = Kp / sum(Kp(:));
+    for iA = 1:nA
+        A = Pgrid(:,:,iA);  v = isfinite(A);  A(~v) = 0;
+        den = conv2(double(v), Kp, 'same');
+        S   = conv2(A, Kp, 'same') ./ den;
+        S(den <= 0 | ~hadData) = NaN;     % never fill a cell that was not simulated
+        Pgrid(:,:,iA) = S;
+    end
+    fprintf('[detect] P smoothed over (sigma_L, tau) with a %.2g-cell Gaussian before inversion\n', pSmooth);
+end
+
+thrMV  = nan(nT, nL, numel(pTargets));
+censLo = false(nT, nL, numel(pTargets));
+for ip = 1:numel(pTargets)
+    pT = pTargets(ip);
+    for iTau = 1:nT
+        for iL = 1:nL
+            p = squeeze(Pgrid(iTau,iL,:));
+            if all(isnan(p)), continue; end
+            p = cummax(fillmissing(p, 'linear', 'EndValues', 'nearest'));
+            if p(1) >= pT                                  % threshold below range
+                thrMV(iTau,iL,ip) = alpha_mV(1);  censLo(iTau,iL,ip) = true;  continue
+            end
+            k = find(p >= pT, 1, 'first');
+            if isempty(k), continue; end                   % never reached -> NaN
+            if p(k) > p(k-1)
+                w = (pT - p(k-1)) / (p(k) - p(k-1));
+                thrMV(iTau,iL,ip) = exp(logA(k-1) + w*(logA(k) - logA(k-1)));
+            else
+                thrMV(iTau,iL,ip) = alpha_mV(k);
+            end
+        end
+    end
+end
+
+figure(23); clf;
+tiledlayout(1, numel(pTargets), 'TileSpacing','compact','Padding','compact');
+climMV = [min(thrMV(:),[],'omitnan') max(thrMV(:),[],'omitnan')];
+if ~(climMV(2) > climMV(1)), climMV = climMV(1)*[1 1+eps]; end
+for ip = 1:numel(pTargets)
+    nexttile; hold on;
+    M = thrMV(:,:,ip);
+    imagesc(lengths/2, taus, M, 'AlphaData', isfinite(M));
+    set(gca,'Color',[.75 .75 .75]);                        % NaN = not reachable
+    axis xy; axis tight; colormap(turbo); clim(climMV); set(gca,'ColorScale','log');
+    [Cc,hc] = contour(lengths/2, taus, M, sort(contourMV), 'k-', 'LineWidth', 1);
+    if ~isempty(Cc), clabel(Cc, hc, 'FontSize', 9, 'Color', 'k'); end
+    plot(ell_cable, taus, 'k--', 'LineWidth', 2);
+    [yc, xc] = find(censLo(:,:,ip));                       % censored at the floor
+    if ~isempty(yc), plot(lengths(xc)/2, taus(yc), 'w.', 'MarkerSize', 4); end
+    title(sprintf('P(detect) \\geq %g%%', 100*pTargets(ip)));
+    xlabel('\sigma_L (µm)');
+    if ip == 1, ylabel('\tau (ms)'); else, set(gca,'YTick',[]); end
+    if ip == numel(pTargets)
+        cb = colorbar; cb.Label.String = sprintf('Minimum detectable\namplitude (mV)');
+    end
+    xlim([0 max(lengths)/2]);
+    hold off;
+end
+set_font('Arial'); set_fontsize(16);
+set_figsize(230,75);
+
+fprintf('\n[detect] amplitude grid: %s %%dF/F  =  %s mV\n', ...
+        num2str(alphas*100, '%.2g '), num2str(alpha_mV', '%.1f '));
+for ip = 1:numel(pTargets)
+    M = thrMV(:,:,ip);
+    nCens    = nnz(censLo(:,:,ip));
+    nNoData  = nnz(~hadData);                            % nothing simulated there
+    nUnreach = nnz(~isfinite(M) & hadData);              % simulated, target never reached
+    fprintf('[detect] P >= %3g%%: threshold %.1f-%.1f mV over the grid\n', ...
+            100*pTargets(ip), min(M(:),[],'omitnan'), max(M(:),[],'omitnan'));
+    fprintf('         NaN (grey): %d px never reach %g%% even at %.1f mV, %d px not simulated\n', ...
+            nUnreach, 100*pTargets(ip), alpha_mV(end), nNoData);
+    fprintf('         censored:   %d px already detected at the %.1f mV floor (white dots)\n', ...
+            nCens, alpha_mV(1));
+    % same number read along the cable-spread line, one value per tau
+    onCable = arrayfun(@(iTau) interp1(lengths(:)/2, M(iTau,:)', ell_cable(iTau), ...
+                                       'linear', NaN), (1:nT)');
+    fprintf('         on the cable-spread line: %.1f-%.1f mV (median %.1f)\n', ...
+            min(onCable,[],'omitnan'), max(onCable,[],'omitnan'), median(onCable,'omitnan'));
+end
+
+%% Plot 2d: Detection probability at cable-spread length
 % Same box overlay
 % x = tau
 % y = detection probability

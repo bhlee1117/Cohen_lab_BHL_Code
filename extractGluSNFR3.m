@@ -43,6 +43,25 @@ function GluResult = extractGluSNFR3(mov2_sub, mov2_mc_filt, exposuretime2, opts
 %   .usePeakWeight   weight events by peakZ                  [true]
 %   .doPlot          show all figures                        [true]
 %   .uiSeedThresh    interactive zSeedMin slider             [true]
+%   .computeTraces   compute T_glu / F0_glu / dFF_glu (Step 7); false when only the
+%                    footprints are needed (e.g. detect, merge, then project)   [true]
+%   .stage           'all'     : Steps 0-8 (default)
+%                    'events'  : Steps 0-2 only; returns .eventList, .imgSize, .nFrames
+%                    'cluster' : Steps 3-5 on events pooled from several movies, without
+%                                a movie: call extractGluSNFR3([], [], exposuretime2, opts)
+%                                with opts.eventList, opts.imgSize [H W], opts.nFrames (total
+%                                frames the events come from). UIs, plots, traces and the
+%                                amplitude criterion of opts.synFilter are not used.   ['all']
+%   .clusterMethod   Step 3: 'linkage' = r_min single linkage + k-means split above r_max
+%                    (default); 'density' = density-peak clustering of the event centroids:
+%                    Gaussian kernel density (.densSigma px, kernel peak 1 -> distance-weighted
+%                    event count; .densWeight 'count' or 'peakZ2'), peaks >= .densMinPeak are
+%                    synapse centres, watershed basins of the density; an event joins a synapse
+%                    only in the basin core (density >= .densCoreFrac x the peak, within r_max of
+%                    the peak, density >= .densFloor); synapses need >= .densMinCoreEvents core
+%                    events. Unassigned events get eventSynID 0.     ['linkage']
+%   .sparseFootprints return S_glu as sparse [H*W x Nsyn] instead of H x W x Nsyn (no plots
+%                    or traces then); always used internally for Steps 4-5     [false]
 %   .uiClusterSize   interactive r_max slider                [true]
 %   .uiSynFilter     interactive synapse filter              [true]
 %   .diagSaveDir     folder for saved PNG diagnostics        [pwd]
@@ -96,6 +115,24 @@ opts.diagZoom_pad    = go('diagZoom_pad',    15);
 opts.diagMaxSyn      = go('diagMaxSyn',      16);
 opts.showNMFDiag     = go('showNMFDiag',     true);
 opts.nmfDiagMaxEvent = go('nmfDiagMaxEvent', 6);
+opts.computeTraces   = go('computeTraces',   true);
+opts.stage           = go('stage',           'all');
+opts.sparseFootprints = go('sparseFootprints', false);
+opts.clusterMethod    = go('clusterMethod',    'linkage');
+opts.densSigma        = go('densSigma',        1);
+opts.densMinPeak      = go('densMinPeak',      3);
+opts.densFloor        = go('densFloor',        0.5);
+opts.densCoreFrac     = go('densCoreFrac',     0.5);
+opts.densMinCoreEvents = go('densMinCoreEvents', 3);
+opts.densUp           = go('densUp',           2);
+opts.densWeight       = go('densWeight',       'count');
+clusterMode = strcmpi(opts.stage, 'cluster');
+if clusterMode                     % no movie: no UIs, plots or traces
+    opts.doPlot = false; opts.computeTraces = false;
+end
+if opts.sparseFootprints           % plots and traces below expect H x W x Nsyn footprints
+    opts.doPlot = false; opts.computeTraces = false;
+end
 
 if ~exist(opts.diagSaveDir,'dir'), mkdir(opts.diagSaveDir); end
 
@@ -126,6 +163,7 @@ if isfield(opts,'mode') && strcmpi(opts.mode,'project')
     return
 end
 
+if ~clusterMode   % ---- Steps 0-2 need the movie (skipped in 'cluster' stage) ----
 %% ===================================================================
 %  STEP 0: PREPROCESS
 %% ===================================================================
@@ -384,6 +422,16 @@ if opts.doPlot && opts.showNMFDiag && nmfDiagCount > 0
     saveDiag(fh_gal, opts, 'NMF_split_gallery');
 end
 
+if strcmpi(opts.stage, 'events')
+    GluResult = struct('eventList',eventList, 'imgSize',[H W], 'nFrames',T, ...
+                       'zMaxProj',zMaxProj, 'opts',opts, 'frameRate',frameRate);
+    return
+end
+else   % 'cluster' stage: events pooled from several movies
+    eventList = opts.eventList;
+    H = opts.imgSize(1); W = opts.imgSize(2); T = opts.nFrames;
+end   % ---- end of Steps 0-2 ----
+
 if isempty(eventList)
     warning('No events detected. Returning empty result.');
     GluResult = struct('eventList',[],'S_glu',[],'T_glu',[],...
@@ -425,47 +473,52 @@ if opts.doPlot && opts.uiClusterSize && Nevent > 0
     fprintf('r_max = %.2f px\n', opts.r_max);
 end
 
-% r_min graph connectivity
-r2 = opts.r_min^2;
-A  = false(Nevent,Nevent);
-for i = 1:Nevent
-    dx = cent(i,1)-cent(:,1); dy = cent(i,2)-cent(:,2);
-    A(i,:) = (dx.^2+dy.^2) <= r2;
+if strcmpi(opts.clusterMethod, 'density')
+    % density-peak clustering of the event centroids (no linkage distance)
+    pz2 = [eventList.peakZ]'.^2;
+    [synID, synCounter] = densityClusterEvents(cent, H, W, pz2, opts);
+    fprintf('  %d events -> %d synapses (density: sigma %.2g px, minPeak %g, core %.2g, r_max %.1f px), %d events unassigned\n',...
+        Nevent, synCounter, opts.densSigma, opts.densMinPeak, opts.densCoreFrac, opts.r_max, sum(synID == 0));
+else
+% r_min graph connectivity: KD-tree radius search -> sparse graph (memory ~ neighbour pairs,
+    % not Nevent^2; pooled events from several movies can number 10^5)
+    nbr = rangesearch(cent, cent, opts.r_min);
+    A   = sparse(repelem((1:Nevent)', cellfun(@numel, nbr)), [nbr{:}]', true, Nevent, Nevent);
+    clusters = accumarray(conncomp(graph(A | A'))',(1:Nevent)',[],@(v){v});
+    
+    synID      = zeros(Nevent,1);
+    synCounter = 0;
+    
+    for c = 1:numel(clusters)
+        idx = clusters{c};
+        pts = cent(idx,:);
+        bboxDiag = hypot(max(pts(:,1))-min(pts(:,1)), max(pts(:,2))-min(pts(:,2)));
+    
+        if bboxDiag <= opts.r_max || numel(idx) <= 2
+            synCounter = synCounter + 1;
+            synID(idx) = synCounter;
+            continue
+        end
+    
+        K = max(2, ceil(bboxDiag/opts.r_max));
+        try
+            lab = kmeans(pts,K,'Replicates',5,'MaxIter',300);
+        catch
+            synCounter = synCounter + 1;
+            synID(idx) = synCounter;
+            continue
+        end
+        for k = 1:K
+            si = idx(lab==k);
+            if isempty(si), continue; end
+            synCounter = synCounter + 1;
+            synID(si) = synCounter;
+        end
+    end
+    
+    fprintf('  %d events → %d synapses (r_min=%.1f, r_max=%.1f px)\n',...
+        Nevent, synCounter, opts.r_min, opts.r_max);
 end
-clusters = accumarray(conncomp(graph(A))',(1:Nevent)',[],@(v){v});
-
-synID      = zeros(Nevent,1);
-synCounter = 0;
-
-for c = 1:numel(clusters)
-    idx = clusters{c};
-    pts = cent(idx,:);
-    bboxDiag = hypot(max(pts(:,1))-min(pts(:,1)), max(pts(:,2))-min(pts(:,2)));
-
-    if bboxDiag <= opts.r_max || numel(idx) <= 2
-        synCounter = synCounter + 1;
-        synID(idx) = synCounter;
-        continue
-    end
-
-    K = max(2, ceil(bboxDiag/opts.r_max));
-    try
-        lab = kmeans(pts,K,'Replicates',5,'MaxIter',300);
-    catch
-        synCounter = synCounter + 1;
-        synID(idx) = synCounter;
-        continue
-    end
-    for k = 1:K
-        si = idx(lab==k);
-        if isempty(si), continue; end
-        synCounter = synCounter + 1;
-        synID(si) = synCounter;
-    end
-end
-
-fprintf('  %d events → %d synapses (r_min=%.1f, r_max=%.1f px)\n',...
-    Nevent, synCounter, opts.r_min, opts.r_max);
 
 if opts.doPlot && opts.plotCentroids && synCounter > 0
     fh = figure('Name','Event centroids by synapse');
@@ -501,6 +554,8 @@ end
 % Normal events are also cropped, which removes any stray pixels at the
 % edge of a blob that belong spatially to a neighbouring synapse.
 fprintf('Step 4: building synapse footprints (r_max crop = %.1f px)...\n', opts.r_max);
+% Footprints are accumulated as a sparse [H*W x Nsyn] matrix (each is non-zero only within r_max
+% of its synapse, plus the smoothing kernel), giving the same values as full H x W images.
 
 % Pre-compute synapse centroids from clustering (weighted mean of event centroids)
 % We need these before building footprints so we can crop relative to them.
@@ -512,26 +567,18 @@ for s = 1:synCounter
     end
 end
 
-S_glu0       = zeros(H,W,synCounter,'double');
-synEventCnt0 = zeros(synCounter,1);
-
+synEventCnt0 = accumarray(synID(synID>0), 1, [synCounter 1]);
+rowsC = cell(Nevent,1); colsC = rowsC; valsC = rowsC;
 for e = 1:Nevent
     s = synID(e);
     if s == 0, continue; end
-    synEventCnt0(s) = synEventCnt0(s) + 1;
-
     pixIdx_d = double(eventList(e).pixIdx(:));
     pixVal_d = double(eventList(e).pixVal(:));
 
     % --- Crop pixels to within r_max of this synapse's centroid ---
-    cx = synCentroid0(s,1);   % synapse centroid x (col)
-    cy = synCentroid0(s,2);   % synapse centroid y (row)
     [pr, pc] = ind2sub([H,W], pixIdx_d);
-    inRadius = (pc - cx).^2 + (pr - cy).^2 <= opts.r_max^2;
-    pixIdx_d = pixIdx_d(inRadius);
-    pixVal_d = pixVal_d(inRadius);
-
-    if isempty(pixIdx_d), continue; end   % entire event outside r_max (rare)
+    inRadius = (pc - synCentroid0(s,1)).^2 + (pr - synCentroid0(s,2)).^2 <= opts.r_max^2;
+    if ~any(inRadius), continue; end   % entire event outside r_max (rare)
 
     if opts.usePeakWeight
         w = max(eventList(e).peakZ, 0);
@@ -539,46 +586,58 @@ for e = 1:Nevent
     else
         w = 1;
     end
-
-    fp_slice = zeros(H,W);
-    fp_slice(pixIdx_d) = w * pixVal_d;
-    S_glu0(:,:,s) = S_glu0(:,:,s) + fp_slice;
+    rowsC{e} = pixIdx_d(inRadius);
+    colsC{e} = repmat(s, nnz(inRadius), 1);
+    valsC{e} = w * pixVal_d(inRadius);
 end
+S_glu0 = sparse(vertcat(rowsC{:}), vertcat(colsC{:}), vertcat(valsC{:}), H*W, synCounter);   % sums events
+clear rowsC colsC valsC
 
-% Divide by event count → mean weighted z-score footprint
-for s = 1:synCounter
-    if synEventCnt0(s) > 0
-        S_glu0(:,:,s) = S_glu0(:,:,s) / synEventCnt0(s);
-    end
-end
+% Divide by event count -> mean weighted z-score footprint
+S_glu0 = S_glu0 * spdiags(1 ./ max(synEventCnt0,1), 0, synCounter, synCounter);
 
-% Optional spatial smoothing
+% Optional spatial smoothing, in a window around each footprint (kernel half-width ceil(2*sigma))
 if opts.footSigma > 0
+    hw = ceil(2*opts.footSigma);
+    rowsC = cell(synCounter,1); colsC = rowsC; valsC = rowsC;
     for s = 1:synCounter
-        S_glu0(:,:,s) = imgaussfilt(S_glu0(:,:,s), opts.footSigma);
+        [pi_, ~, v] = find(S_glu0(:,s));
+        if isempty(pi_), continue; end
+        [pr, pc] = ind2sub([H,W], pi_);
+        r0 = max(1, min(pr)-hw); r1 = min(H, max(pr)+hw);
+        c0 = max(1, min(pc)-hw); c1 = min(W, max(pc)+hw);
+        loc = zeros(r1-r0+1, c1-c0+1);
+        loc(sub2ind(size(loc), pr-r0+1, pc-c0+1)) = v;
+        loc = imgaussfilt(loc, opts.footSigma);
+        [lr, lc, lv] = find(loc);
+        rowsC{s} = sub2ind([H,W], lr+r0-1, lc+c0-1);
+        colsC{s} = repmat(s, numel(lv), 1);
+        valsC{s} = lv;
     end
+    S_glu0 = sparse(vertcat(rowsC{:}), vertcat(colsC{:}), vertcat(valsC{:}), H*W, synCounter);
+    clear rowsC colsC valsC
 end
 
 % L2 normalise
-for s = 1:synCounter
-    v = S_glu0(:,:,s);
-    S_glu0(:,:,s) = v / (sqrt(sum(v(:).^2)) + eps);
-end
+nrm = sqrt(full(sum(S_glu0.^2, 1)));
+S_glu0 = S_glu0 * spdiags(1 ./ (nrm(:) + eps), 0, synCounter, synCounter);
 
 %% ===================================================================
 %  STEP 5: BOUNDARY FILTER + INTERACTIVE SYNAPSE FILTER
 %% ===================================================================
 fprintf('Step 5: boundary filter + synapse selection...\n');
-bd   = opts.bound;
-cSum = squeeze(sum(S_glu0(bd+1:H-bd, bd+1:W-bd, :), [1 2]));
-keep = cSum > 0;
+bd    = opts.bound;
+inner = false(H,W); inner(bd+1:H-bd, bd+1:W-bd) = true;
+cSum  = full(double(inner(:))' * S_glu0)';
+keep  = cSum > 0;
 
-S_glu   = S_glu0(:,:,keep);
-newNsyn = size(S_glu,3);
+S_glu   = S_glu0(:,keep);
+newNsyn = size(S_glu,2);
 
 mapOld = zeros(synCounter,1);
 mapOld(find(keep)) = 1:newNsyn;
-newSynID = mapOld(synID);
+newSynID = zeros(size(synID));
+newSynID(synID > 0) = mapOld(synID(synID > 0));       % 0 = event not assigned (density method)
 
 % Recompute centroid / event count for kept synapses
 synEventCount = zeros(newNsyn,1);
@@ -590,17 +649,20 @@ for s = 1:newNsyn
 end
 
 % Footprint features
-synArea = zeros(newNsyn,1);
-synAmp  = zeros(newNsyn,1);
-for s = 1:newNsyn
-    fp = S_glu(:,:,s);
-    nz = fp(fp > opts.areaThr);
-    synArea(s) = numel(nz);
-    synAmp(s)  = ifelse(isempty(nz), 0, mean(nz));
+if opts.areaThr >= 0
+    Bthr = S_glu > opts.areaThr;
+else
+    Bthr = full(S_glu) > opts.areaThr;
 end
+synArea = full(sum(Bthr,1))';
+synAmp  = full(sum(S_glu .* Bthr,1))' ./ max(synArea,1);   % 0 where the area is 0
 
 % Quick amplitude proxy: dot zMov onto each footprint
-amp  = max(reshape(zMov,H*W,T)' * reshape(S_glu,H*W,newNsyn), [], 1)';
+if clusterMode
+    amp = nan(newNsyn,1);    % needs the z-score movie; not available when clustering pooled events
+else
+    amp = full(max(reshape(zMov,H*W,T)' * S_glu, [], 1))';
+end
 cnt  = synEventCount;
 area = synArea;
 
@@ -608,7 +670,7 @@ area = synArea;
 keepUI = true(newNsyn,1);
 if ~isempty(opts.synFilter) && ~(opts.doPlot && opts.uiSynFilter)
     fr = opts.synFilter;
-    keepUI = (amp  >= fr.ampRange(1)   & amp  <= fr.ampRange(2))  & ...
+    keepUI = ((amp >= fr.ampRange(1) & amp <= fr.ampRange(2)) | isnan(amp)) & ...
              (cnt  >= fr.countRange(1) & cnt  <= fr.countRange(2)) & ...
              (area >= fr.areaRange(1)  & area <= fr.areaRange(2));
 end
@@ -663,10 +725,10 @@ if opts.doPlot && opts.uiSynFilter && newNsyn > 0
 end
 
 % Apply UI mask
-S_glu         = S_glu(:,:,keepUI);
+S_glu         = S_glu(:,keepUI);
 synCentroid   = synCentroid(keepUI,:);
 synEventCount = synEventCount(keepUI);
-newNsyn       = size(S_glu,3);
+newNsyn       = size(S_glu,2);
 mapUI         = zeros(numel(keepUI),1);
 mapUI(find(keepUI)) = 1:newNsyn;
 valid = newSynID>0;
@@ -677,10 +739,10 @@ newSynID = tmp;
 % Hard minimum-events cut
 keepCnt       = synEventCount >= opts.minEventsSyn;
 fprintf('  Removing %d synapses with < %d events.\n', sum(~keepCnt), opts.minEventsSyn);
-S_glu         = S_glu(:,:,keepCnt);
+S_glu         = S_glu(:,keepCnt);
 synCentroid   = synCentroid(keepCnt,:);
 synEventCount = synEventCount(keepCnt);
-newNsyn       = size(S_glu,3);
+newNsyn       = size(S_glu,2);
 map2  = zeros(numel(keepCnt),1);
 map2(find(keepCnt)) = 1:newNsyn;
 tmp   = zeros(size(newSynID));
@@ -691,6 +753,9 @@ newSynID = tmp;
 duration_s      = T / frameRate;
 synEventRate_Hz = synEventCount / max(duration_s,eps);
 fprintf('  Kept %d synapses.  Median rate: %.3f Hz\n', newNsyn, median(synEventRate_Hz));
+if ~opts.sparseFootprints
+    S_glu = reshape(full(S_glu), H, W, newNsyn);   % H x W x Nsyn, as before
+end
 
 %% ===================================================================
 %  STEP 6: OVERVIEW VISUALISATION
@@ -737,15 +802,17 @@ end
 %% ===================================================================
 %  STEP 7: COMPUTE T_glu  (least-squares projection)
 %% ===================================================================
-fprintf('Step 7: computing T_glu...\n');
-usedPix = find(tovec(max(S_glu,[],3)) > 0);
-Smat    = tovec(S_glu);     Smat = Smat(usedPix,:);   % Npix x Nsyn
-Msub    = tovec(double(mov2_sub)); Msub = Msub(usedPix,:);
-Msub(~isfinite(Msub)) = 0;
-T_glu = Smat \ Msub;                                  % Nsyn x T
+T_glu = []; F0_glu = []; dFF_glu = [];
+if opts.computeTraces
+    fprintf('Step 7: computing T_glu...\n');
+    usedPix = find(tovec(max(S_glu,[],3)) > 0);
+    Smat    = tovec(S_glu);     Smat = Smat(usedPix,:);   % Npix x Nsyn
+    Msub    = tovec(double(mov2_sub)); Msub = Msub(usedPix,:);
+    Msub(~isfinite(Msub)) = 0;
+    T_glu = Smat \ Msub;                                  % Nsyn x T
+end
 
-F0_glu = []; dFF_glu = [];
-if ~isempty(mov2_mc_filt)
+if opts.computeTraces && ~isempty(mov2_mc_filt)
     M0 = tovec(double(mov2_mc_filt)); M0 = M0(usedPix,:);
     M0(~isfinite(M0)) = 0;
     F0_glu  = Smat \ M0;
@@ -755,7 +822,7 @@ end
 %% ===================================================================
 %  STEP 8: TRACE DIAGNOSTIC FIGURES
 %% ===================================================================
-if opts.doPlot && newNsyn > 0
+if opts.doPlot && newNsyn > 0 && ~isempty(T_glu)
     tvec  = (0:T-1)/frameRate;
     pad   = opts.diagZoom_pad;
     nShow = min(newNsyn, opts.diagMaxSyn);
@@ -815,6 +882,7 @@ end
 %% ===================================================================
 GluResult = struct();
 GluResult.eventList       = eventList;
+GluResult.eventSynID      = newSynID;                  % synapse of each event (0 = none)
 GluResult.Smap_event      = Smap_counts;
 GluResult.S_glu           = S_glu;
 GluResult.synCentroid     = synCentroid;
@@ -986,3 +1054,46 @@ GluResult.frameRate       = frameRate;
     end
 
 end % extractGluSNFR3
+
+function [synID, nSyn] = densityClusterEvents(cent, H, W, pz2, o)
+% Density-peak clustering of event centroids (see .clusterMethod = 'density').
+% Centroids are binned on a grid oversampled o.densUp times and smoothed with a Gaussian of
+% o.densSigma camera px (kernel peak 1). Local maxima >= o.densMinPeak are synapse centres; the
+% density is split into watershed basins seeded by them. An event joins its basin only in the core:
+% density >= o.densFloor and >= o.densCoreFrac x the basin's peak, and within o.r_max of the peak.
+% Basins with fewer than o.densMinCoreEvents core events are dropped. synID: 1..nSyn, 0 = none.
+up = o.densUp; sz = [H W] * up;
+g  = min(max(round(cent(:,[2 1]) * up), 1), sz);          % grid [row col]
+if strcmpi(o.densWeight, 'peakZ2'), w = pz2 / mean(pz2); else, w = ones(size(cent,1),1); end
+C  = accumarray(g, w, sz);
+s  = o.densSigma * up; hw = ceil(3*s); [kx, ky] = meshgrid(-hw:hw);
+Dd = conv2(C, exp(-(kx.^2 + ky.^2) / (2*s^2)), 'same');  % distance-weighted event count
+pk = imregionalmax(Dd) & Dd >= o.densMinPeak;
+cc = bwconncomp(pk);                                      % plateaus -> one centre each
+seed = false(sz);
+for k = 1:cc.NumObjects
+    [~, j] = max(Dd(cc.PixelIdxList{k})); seed(cc.PixelIdxList{k}(j)) = true;
+end
+if ~any(seed(:)), synID = zeros(size(cent,1),1); nSyn = 0; return; end
+fg = Dd >= o.densFloor;
+L  = double(watershed(imimposemin(-Dd, seed)));           % one basin per peak
+L(~fg) = 0;
+[~, nn] = bwdist(L > 0); Lf = L(nn); Lf(~fg) = 0;         % ridge lines -> nearest basin
+lab = Lf(sub2ind(sz, g(:,1), g(:,2)));
+% basin core: density and distance to the basin's peak
+sidx = find(seed); nL = max(L(:)) + 1;
+pkD  = accumarray(L(sidx), Dd(sidx), [nL 1]);
+pkXY = nan(nL, 2); [sr, sc] = ind2sub(sz, sidx); pkXY(L(sidx), :) = [sc sr] / up;
+in = lab > 0;
+de = Dd(sub2ind(sz, g(:,1), g(:,2)));
+ok = false(size(lab));
+ok(in) = de(in) >= o.densCoreFrac * pkD(lab(in)) & ...
+         hypot(cent(in,1) - pkXY(lab(in),1), cent(in,2) - pkXY(lab(in),2)) <= o.r_max;
+lab(~ok) = 0;
+if any(lab > 0)
+    nb = accumarray(lab(lab > 0), 1, [nL 1]);
+    lab(lab > 0 & nb(max(lab,1)) < o.densMinCoreEvents) = 0;
+end
+[~, ~, synID] = unique(lab); synID = synID(:) - (min(lab) == 0);   % 1..nSyn, 0 = unassigned
+nSyn = max([synID; 0]);
+end

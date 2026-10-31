@@ -21,6 +21,7 @@ nTime = length(tr_sub);
 
 % Create figure and main plot
 f = figure('Name','Interactive CS Finder','NumberTitle','off','Position',[200 200 900 500]);
+try, theme(f, 'light'); catch, end
 ax = axes('Parent', f, 'Position', [0.1 0.35 0.85 0.6]);
 plot(ax, tr_hi, 'k'); hold on; grid on;
 plot(ax, tr_sub,'color',[1 0.8 0]);

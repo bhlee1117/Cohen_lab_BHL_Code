@@ -1,0 +1,2073 @@
+%% Combined Voltron-ST (soma voltage) + iGluSNFR (glutamate) + VR + structure, spinning-disk data
+%  Two-camera spinning-disk recording:
+%    - Orange cam (Device_Data{3}, mc*.bin , cam1_vsyn) -> Voltron-ST voltage
+%    - Blue   cam (Device_Data{4}, mc2*.bin, cam2_vsyn) -> iGluSNFR glutamate
+%
+%  Per recording (folder fpath{f}) this builds the full set
+%    VR_Result.mat        VR (ViRMEn) on the voltage frames                         (Section 1)
+%    Volt_Result.mat      voltage ROIs/footprints/traces (versioned: Result.version, see Section
+%                         2c), also mapped onto the glutamate image with transformCamera_O2B
+%                         (ref_im_glu, ftprnt_glu, ROIpoly_glu), curated spikes / complex
+%                         spikes (SpClass, GoodNeuron)                                    (Section 2)
+%    Glu_Result.mat       glutamate footprints/traces                                (Section 3)
+%    Structure_Result.mat where the recording sits in the structure z-stack          (Section 4)
+%    Fullset_Result.mat   all of the above in one file + overview figure             (Section 5)
+%  Every step is skipped when its result already exists in the folder (voltage traces: when they
+%  are of the current version opt.voltVersion). Section 2c (v2) uses Structure_Result.mat, so run
+%  Section 4 before it.
+%
+%  Assumes motion-corrected bins already exist:
+%    voltage : mc%02d.bin  + mcTrace%02d.mat
+%    glut.   : mc2%02d.bin + mc2Trace%02d.mat
+
+%% Section 0 : Setup
+clear
+clc;
+
+% Remove any shadow of the built-in 'graph' (old cvx/sdpt3 defines graph.m,
+% which breaks the centroid clustering in extractVoltronST / extractGluSNFR3).
+gshadow = which('graph','-all');
+for gi = 1:numel(gshadow)
+    if ~contains(gshadow{gi}, fullfile('toolbox','matlab'))   % keep MATLAB's built-in
+        rmpath(fileparts(gshadow{gi}));
+        fprintf('Removed shadowing graph.m folder from path: %s\n', fileparts(gshadow{gi}));
+    end
+end
+
+xlsFile = '/Volumes/cohen_lab/Lab/Labmembers/Byung Hun Lee/Data/Prism_V2+Glu_Data_Arrangement_V2.xlsx';
+xlsFirstRow = 5;                       % raw(i,:) is Excel row i + xlsFirstRow - 1
+[~, ~, raw] = xlsread(xlsFile, 'Sheet1', 'C5:AA45');
+load('/Volumes/BHL18TB_D2/20260203_SD_V2+iGluSNFR4/25X_transformationMatrix.mat');   % tformReg (orange -> blue)
+fpath             = raw(:,1)';         % C : data location
+EndFrameBlue      = raw(:,5)';         % G : last valid glutamate frame (blue laser off afterwards); empty = all
+StructureFilePath = raw(:,6)';         % H : morphology (structure z-stack) folder
+VRfpath           = raw(:,8)';         % J : ViRMEn log
+VRnth             = raw(:,9)';         % K : which recording (acquisition block) of the ViRMEn log
+V2moviemaxTime  = 15000;   % voltage movie chunk length (frames)
+GlumoviemaxTime = 3500;    % glutamate tile length (frames) of the mc2XX.bin files (tiles are read from the files)
+o_laser         = 200001;  % 607/488 modulation onset (DAQ sample index, ~2 s after acq start)
+mod488          = 200001;
+foi             = [14:29]; % files of interest
+set(0,'DefaultFigureWindowStyle','docked')
+
+% VR
+opt.VRtrackLength = 115;           % track length in ViRMEn units (world 1 is rescaled to it)
+opt.VRminDur_s    = 60;            % shorter acquisition blocks (tests) are not suggested as VR_nth
+opt.VRmaxLag_min  = 10;            % warn when the VR block starts this far from the recording
+% Voltage
+opt.refSeg        = 1;             % chunk to draw ROIs on
+opt.staTau        = -20:20;        % frames averaged around each spike to form the footprint
+opt.dilatePx      = 5;             % px dilation of each ROI bounding its footprint
+opt.spikeThr      = [4.2 1.5];     % find_spike_bh thresholds on the z-scored rough trace
+opt.spikeUseFrac  = 0.8;           % spikes after this fraction of the recording are not used for the footprint
+opt.removeOldVolt = true;          % delete VoltResult.mat once Volt_Result.mat holds the same/more
+opt.voltSpikeFiles = foi;          % Section 2e: recordings to curate spikes/CS on (e.g. 16 for one file)
+opt.voltStopband   = [49 51; 184.5 186.5];   % Hz, line-noise notches before spike detection
+opt.voltSpikeHPWin = 500;          % frames, initial movmedian high-pass window (set per ROI in Section 2e)
+opt.voltEnvMinSpikes = 1;          % Section 2e bleach envelope: bins with fewer putative spikes are skipped
+opt.voltEnvPct     = 75;           %   bin spike height = this percentile of the heights in the bin
+opt.voltNoiseFloor = 4;            % Section 2e: spikes must also exceed this on the uncorrected z trace
+opt.voltSpikeDetHP = 50;           % Section 2e, spike detection only: initial movmedian high-pass (frames)
+                                   %   after the bleach correction (0 = none; set per ROI in the spike finder). It also lowers spikes riding on
+                                   %   depolarisations (bursts): #16 ROI 6 median height 8.8 -> 5.2 noise SD
+opt.voltSTAFilter  = false;         %   false: no STA matched filter (detection trace = bleach-corrected,
+                                   %   Detection-HP high-passed trace only)
+opt.voltSTAWin     = -3:4;         %   lags (frames, 0 = spike peak) of the STA waveform used as matched filter
+opt.voltSTAMinSpikes = 20;         %   STA from fewer rough spikes: no matched filter for that ROI (Inf = never)
+opt.voltSTAZeroMean  = false;      %   true: template mean removed (acts as a strong high-pass of its own,
+                                   %   ~ms scale, so the Detection HP window barely matters)
+opt.voltLaserOffFrac   = 0.5;      % Section 2e: orange laser off where mean F0 falls below this fraction
+opt.voltLaserOffMargin = 20;       %   of its end level; the trace drift before it is cut plus this many frames
+% Glutamate: extractGluSNFR3 parameters from Analysis_20260911_GiANTcompare.m (the function's
+% default operating point, UIs and plots off)
+gp = struct('smoothSigma',1, 'zSeedMin',4.5, 'zThrFoot',2.5, 'minPeakDist_s',0.2, 'minPeakProm',0.75, ...
+    'minArea',2, 'eventMaxArea',20, 'nmfReps',5, 'r_min',2.5, 'r_max',3.5, 'bound',10, 'minEventsSyn',2, ...
+    'footSigma',0.75, 'usePeakWeight',true, 'doPlot',false, 'uiSeedThresh',false, 'uiClusterSize',false, ...
+    'uiSynFilter',false, 'plotCentroids',false, 'showNMFDiag',false);
+opt.gluParams = gp;
+opt.gluTauRise_ms  = 1.5;          % iGluSnFR4 kinetics for the temporal matched filter applied to the
+opt.gluTauDecay_ms = 30;           %   detection movie (Section 3a picker and Section 3 Pass 1); [] = none
+opt.gluCluster = struct('method','density', 'sigma',1, 'minPeak',3, 'floor',0.5, ...   % Step 3 of the pooled
+    'coreFrac',0.5, 'minCoreEvents',2, 'weight','count');  % events: density-peak clustering (synapse size = r_max);
+                                                           % 'linkage' = r_min single linkage + k-means split
+opt.gluDetectFirst  = 4;           % synapses are detected on the first N tiles ...
+opt.gluDetectMiddle = 0;           % ... plus N consecutive tiles from the middle, then projected onto all
+opt.gluBaseWin_s   = 3;            % Section 3 dF/F: baseline window at the front and end of each tile (s)
+opt.gluBasePct     = 30;           %   and its percentile (tiles are bleach-normalised separately)
+opt.gluMaxEvents   = 3e5;          % stop a recording when more events are pooled (zSeedMin too low;
+                                   %   ~43k events per tile at zSeedMin 4 vs ~2.7k at 5 on file 20)
+opt.voltVersion   = 4;            % Section 2c pipeline version written to Volt_Result.mat (versions: see 2c)
+opt.voltBaseWin_s = 3;            % 2c v3: baseline window at the front and end of each chunk (s)
+opt.voltBasePct   = 50;           %   and its percentile (Voltron dims with depolarisation: median)
+opt.voltReextract = true;         % re-extract Volt_Result.mat older than opt.voltVersion (old file archived)
+opt.voltAxial = struct('use',true, ...   % 2c v2: axial (z) motion regressed out of the traces
+    'zHalf',10, ...                % structure slices (2 um) on each side of Structure.slice
+    'bin',10, ...                  % frames averaged per depth estimate
+    'subSlice',true, ...           % parabolic sub-slice depth (false: best slice, as in Baruchin et al.)
+    'zMedFilt',3, ...              % depth samples, running median against single-sample jumps
+    'hpSigma',8, 'border',15, ...  % px: spatial high-pass for the matching; edge left out (lateral shifts)
+    'marginPx',40, 'marginV',40, ...   % px around the field of view for the stack-to-movie alignment
+    'segLen_s',5, 'segOverlap_s',1, ...   % z, z^2 fitted per segment (s) within each chunk, overlap (s)
+    'lateral',true, ...            % v4: mc, mc^2, mc_x*mc_y refitted in the same segments with z, z^2
+    'minStructPeak',0.5, ...       % Structure_Result correlation needed to trust the site in the stack
+    'minAlignPeak',0.5);           % stack-to-movie alignment peak needed to estimate depth
+opt.gluVersion   = 2;             % Section 3 projection version written to Glu_Result.mat (versions: see 3)
+opt.gluReextract = true;          % re-project Glu_Result.mat older than opt.gluVersion (S_glu kept, old file archived)
+opt.gluAxial = opt.voltAxial;     % Section 3 v2: axial motion z_B from the glutamate movie and the blue
+opt.gluAxial.bin = 1;             %   structure stack, z_B and z_B^2 regressed out per segment within each tile
+opt.gluAxial.lateral = false;     %   true: also mc, mc^2, mc_x*mc_y per segment (set opt.gluVersion = 3 with it)
+% Spike-triggered voltage and glutamate movies (Section 6)
+opt.trig = struct('win_s',[-0.15 0.3], ...   % voltage and glutamate frames around each event (s)
+    'mergeISI_s',0.02, ...         % spikes (and complex spikes) closer than this form one event
+    'goodOnly',true, ...           % only neurons marked Good in Section 2e
+    'maxBinGB',2.5, ...            % start the next .bin when a file would grow beyond this
+    'pixBlock',50000, ...          % pixels per block in the per-pixel segment regression (memory)
+    'redo',false);                 % true: rebuild (the old TriggerSnippets folder is renamed, not deleted)
+% Structure
+opt.snapROI       = [524 1000 524 1000];   % camera ROI of the tiling snaps (from the snap .mat xdata/ydata)
+opt.structPixel_um = 0.887;        % um/px of the structure camera image (20260902 calibration)
+opt.xySearch_px   = 200;           % correlation search around the stage-predicted position (stage error
+opt.zSearch       = 25;            %   reached ~80 px and 13 slices on 20260902); slices searched around it
+opt.corrMinMargin = 0.3;           % a correlation match is used when its peak exceeds the best match at any
+                                   %   other location (>40 px away) by this much (true 0.4-0.8, false <0.2)
+opt.corrSurePeak  = 0.95;          % ... or when the peak alone is this high (near-identical image)
+opt.cropMargin_px = 100;           % structure crop saved around the recording FOV
+opt.cropZhalf     = 5;             % slices saved on each side of the matched slice
+
+%% Section 1 : VR data (run first: asks for VR_nth where the sheet has none)
+%  The ViRMEn log holds 12 doubles per iteration; row 10 is the acquisition flag, and each
+%  contiguous flagged block is one recording. VR_nth (column K) picks the block. When it is
+%  missing, the blocks are listed with their start times next to the recording start and you
+%  are asked for the number (Enter accepts the suggestion).
+for f = foi
+    fp = fpath{f};
+    if hasResult(fullfile(fp,'VR_Result.mat')), fprintf('#%d VR: VR_Result.mat exists, skipped\n', f); continue; end
+    if isMissing(VRfpath{f}) || ~isfile(VRfpath{f}), fprintf('#%d VR: no ViRMEn log in the sheet, skipped\n', f); continue; end
+
+    VRdata = readVRlog(VRfpath{f});
+    seg    = vrBlocks(VRdata);
+    tRec   = recordingStart(fp);
+    lag    = minutes(seg.start - tRec);
+    [~,bn] = fileparts(VRfpath{f});
+
+    nth = VRnth{f};
+    if ischar(nth) || isstring(nth), nth = str2double(nth); end
+    if isMissing(nth)
+        cand = find(seg.dur_s >= opt.VRminDur_s);
+        if isempty(cand), cand = 1:numel(seg.dur_s); end
+        [~,k] = min(abs(lag(cand))); suggest = cand(k);
+        fprintf('\n#%d %s : VR_nth missing (Excel row %d, column K)\n', f, fp, f+xlsFirstRow-1);
+        fprintf('   log %s, recording started %s\n', bn, datestr(tRec,'HH:MM:SS'));
+        for b = 1:numel(seg.dur_s)
+            fprintf('   block %d : start %s, %5.0f s, %+6.1f min from recording%s\n', b, ...
+                datestr(seg.start(b),'HH:MM:SS'), seg.dur_s(b), lag(b), repmat('   <- suggested',1,b==suggest));
+        end
+        load(fullfile(fp,'output_data.mat'), 'Device_Data');
+        ci = Device_Data{1,2}.Counter_Inputs(1,1);
+        showVRblocks(VRdata, seg, tRec, numel(ci.data)/ci.rate, suggest, sprintf('#%d %s', f, bn));
+        s = input(sprintf('   VR_nth for file #%d [Enter = %d]: ', f, suggest), 's');
+        if isempty(s), nth = suggest; else, nth = str2double(s); end
+        VRnth{f} = nth;
+        fprintf('   using block %d; please also enter %d in Excel row %d, column K\n', nth, nth, f+xlsFirstRow-1);
+    end
+    if abs(lag(nth)) > opt.VRmaxLag_min
+        warning('#%d: VR block %d starts %.1f min from the recording (%s) - check the VR file in the sheet', ...
+            f, nth, lag(nth), bn);
+    end
+
+    % Align: VR clock stretched onto the voltage camera frames, then cropped to the analysed frames
+    load(fullfile(fp,'output_data.mat'), 'Device_Data');
+    vc = voltageClock(Device_Data, o_laser, V2moviemaxTime);
+    VRdata = VRdata(:, seg.label == nth);
+    w1 = VRdata(2,:) == 1;                                   % world 1 runs from -6: rescale to the track
+    VRdata(5,w1) = (VRdata(5,w1) + 6) * opt.VRtrackLength/121;
+    t_DAQ = vc.CamTrigger / vc.DAQ_rate;
+    t_VR  = (VRdata(1,:) - VRdata(1,1)) * 86400;             % datenum -> s from block start
+    VRdata(1,:) = t_VR * t_DAQ(end) / t_VR(end);
+    [VR_Result, vel] = virmen_interpolate(VRdata, opt.VRtrackLength, t_DAQ);
+    VR_Result(end+1,:) = vel;
+    VR_Result = VR_Result(:, vc.cam1_vsyn(o_laser) + (1:vc.nFrame2analyze));
+    VRinfo = struct('file',VRfpath{f}, 'nth',nth, 'blockStart',seg.start(nth), 'blockDur_s',seg.dur_s(nth), ...
+        'lag_min',lag(nth), 'rows','1 t, 2 world, 5 position, 8 lap, 9 lick, 10 acq, 11 reward, 12 blue, 13 cum. track, 14 velocity', ...
+        'timebase','voltage frames (Volt_Result.t_ax)');
+    saveResult(fullfile(fp,'VR_Result.mat'), struct('VR_Result',VR_Result, 'VRinfo',VRinfo));
+    fprintf('#%d VR: block %d aligned, %d frames, saved VR_Result.mat\n', f, nth, size(VR_Result,2));
+end
+
+%% Section 2a : Voltage - consolidate VoltResult.mat into Volt_Result.mat
+%  Older runs saved ROIs (and sometimes a full extraction) to VoltResult.mat. Keep the more
+%  complete file as Volt_Result.mat (has traces > more fields > newer) and remove the other.
+for f = foi
+    consolidateVolt(fpath{f}, opt.removeOldVolt);
+end
+
+%% Section 2b : Voltage - reference-chunk ROIs (clicky)
+%  Draw soma ROIs on the voltage reference chunk; skipped when Volt_Result.mat has ROIs.
+for f = foi
+    fp = fpath{f};
+    if hasFields(fullfile(fp,'Volt_Result.mat'), {'ROIpoly'}), fprintf('#%d voltage ROIs exist, skipped\n', f); continue; end
+    fprintf('=== Voltage ROIs, file #%2.0f : %s\n', f, fp);
+    load(fullfile(fp,'output_data.mat'), 'Device_Data');
+    vc = voltageClock(Device_Data, o_laser, V2moviemaxTime);
+    Result = struct('VmovTimesegments',vc.VmovTimesegments, 't_ax',vc.t_vol);
+    readFrames = diff(vc.VmovTimesegments);
+    [movR_ref, mov_mc_ref] = loadVoltChunk(fp, opt.refSeg, vc.sz, readFrames(opt.refSeg));
+    Result.ref_im  = mean(mov_mc_ref, 3);
+    [roi_points, ~] = clicky(movR_ref, Result.ref_im);   % click somata, right-click to finish
+    Result.ROIpoly = roi_points;
+    clear movR_ref mov_mc_ref
+    saveResult(fullfile(fp,'Volt_Result.mat'), struct('Result',Result));
+    fprintf('  %d ROI(s) drawn on chunk %d, saved Volt_Result.mat\n', numel(roi_points), opt.refSeg);
+end
+
+%% Section 2c : Voltage - rough trace, spike-triggered footprint, projection, axial regression
+%  Version opt.voltVersion is written to Result.version / Result.versionInfo:
+%    v1  traces = footprint projection of the lateral-motion-regressed movie (loadVoltChunk:
+%        mc, mc^2, mc_x*mc_y per chunk). Results without Result.version are v1.
+%    v2  v1 + axial motion: depth z_O of every frame from the orange structure stack around the
+%        recording site (Structure_Result.mat, Section 4), matched as in the z-stack correction of
+%        Baruchin et al. 2026 (bioRxiv 2026.09.25.754364) with parabolic sub-slice depth; z_O and
+%        z_O^2 regressed out of the traces in opt.voltAxial.segLen_s segments overlapping by
+%        segOverlap_s within each chunk (removed parts blended across the overlaps). v1 traces are
+%        kept as traces_lateral, the depth as zO (um from its median), the details in Result.axial.
+%        Without a usable orange stack (none, poor site match or alignment) traces = traces_lateral
+%        and Result.axial.reason says why.
+%    v3  v2 with the baseline kept and chunks joined: v1/v2 removed every pixel's mean in each
+%        chunk (loadVoltChunk), so slow drifts left steps at the chunk boundaries (up to ~12 noise
+%        SD). Now F = S\M - S\movR (M: pixel means of the bleach-normalised chunk) keeps the
+%        baseline, z_O/z_O^2 are regressed out of F, and each chunk gets a baseline from the
+%        opt.voltBasePct percentile of its first and last opt.voltBaseWin_s s joined linearly (as the
+%        glutamate tiles). traces = -(F / baseline - 1): spike-positive -dF/F, no steps between
+%        chunks. tracesF = F (axial-corrected), baselineKnots = [front end] x chunks per ROI,
+%        traces_lateral = the same -dF/F without the axial regression.
+%    v4  v3 with the lateral motion regressors (mc, mc^2, mc_x*mc_y, as in loadVoltChunk) fitted again
+%        in the same segments as z_O, z_O^2, in one regression (opt.voltAxial.lateral): the
+%        per-chunk lateral fit can follow motion coupling that changes within a chunk. Without a
+%        usable stack the segment fit has the lateral regressors only. traces_lateral = -dF/F
+%        before the segment fit (per-chunk lateral regression only).
+%  A result older than opt.voltVersion is re-extracted when opt.voltReextract: the old file is kept
+%  as Volt_Result_v<old>.mat, ROIs (2b), footprints (pass A) and their glutamate mapping (2d) are
+%  reused, the spike curation (2e) moves to Result.prevCuration and has to be redone on the new
+%  traces (a partial curation file is renamed alike).
+for f = foi
+    fp = fpath{f};
+    vf = fullfile(fp,'Volt_Result.mat');
+    if ~hasResult(vf), continue; end
+    ver = voltVersion(vf);                               % 0: no traces yet
+    if ver >= opt.voltVersion, fprintf('#%d voltage traces v%d exist, skipped\n', f, ver); continue; end
+    if ver > 0 && ~opt.voltReextract
+        fprintf('#%d voltage traces v%d kept (older than v%d; opt.voltReextract)\n', f, ver, opt.voltVersion); continue
+    end
+    fprintf('=== Voltage extraction v%d, file #%2.0f : %s\n', opt.voltVersion, f, fp);
+    load(vf, 'Result');
+    if ver > 0, Result = archiveVolt(fp, Result, ver); end
+    load(fullfile(fp,'output_data.mat'), 'Device_Data');
+    sz = double(Device_Data{3}.ROI([2 4]));              % [nCol nRow] orange cam
+    H = sz(2); W = sz(1);
+    if ~isequal(size(Result.ref_im), [H W])
+        error('File #%d: ref_im is %dx%d but the movie is %dx%d. Redraw the ROIs (Section 2b).', ...
+            f, size(Result.ref_im,1), size(Result.ref_im,2), H, W);
+    end
+    nROI = numel(Result.ROIpoly);
+    readFrames = diff(Result.VmovTimesegments);
+    nSeg = numel(readFrames);
+    fsV = 1/median(diff(Result.t_ax));
+
+    if ~isfield(Result, 'ftprnt')
+        % ---- rough soma trace over all chunks + spike finding ----
+        rough_tr = []; segFrames = zeros(nSeg,1); Result.mc = [];
+        for j = 1:nSeg
+            [movR, ~, mtr, nT] = loadVoltChunk(fp, j, sz, readFrames(j));
+            segFrames(j) = nT;
+            Result.mc    = [Result.mc; mtr];
+            rough_tr     = [rough_tr, apply_clicky(Result.ROIpoly, movR, 'no')'];   %#ok<AGROW> nROI x T
+            fprintf('  rough trace chunk %2.0d/%2.0d\n', j, nSeg);
+        end
+        tr_hi = rough_tr - movmedian(rough_tr, 30, 2);
+        tr_z  = tr_hi ./ get_threshold(tr_hi, 1);
+        sp = zeros(size(tr_z));
+        for n = 1:nROI, sp(n,:) = find_spike_bh(tr_z(n,:), opt.spikeThr(1), opt.spikeThr(2)); end
+        sp(:, round(end*opt.spikeUseFrac):end) = 0;
+        Result.spike_rough = sp;
+        Result.rough_tr    = rough_tr;
+        fprintf('  spikes per ROI: %s\n', mat2str(sum(sp,2)'));
+        figure(3*f-1); clf; show_traces_spikes(rescale2(rough_tr,2), sp, sum(sp,1)); drawnow;
+
+        % ---- PASS A: spike-triggered footprint pooled over all chunks (streaming) ----
+        tau1 = -opt.staTau(1); tau2 = opt.staTau(end);
+        staSum = zeros(H,W,numel(opt.staTau),nROI);
+        staCnt = zeros(1,nROI);
+        for j = 1:nSeg
+            off = sum(segFrames(1:j-1));
+            if ~any(sp(:, off+1:off+segFrames(j)), 'all'), continue; end
+            movVec = tovec(loadVoltChunk(fp, j, sz, readFrames(j)));
+            for n = 1:nROI
+                [~, mat2cat, tp] = get_STA(movVec, sp(n, off+1:off+segFrames(j)), tau1, tau2);
+                if isempty(tp), continue; end
+                staSum(:,:,:,n) = staSum(:,:,:,n) + toimg(permute(sum(mat2cat,2),[1 3 2]), H, W);
+                staCnt(n)       = staCnt(n) + numel(tp);
+            end
+            fprintf('  STA chunk %2.0d/%2.0d\n', j, nSeg);
+        end
+        S_full = zeros(H,W,nROI);
+        for n = 1:nROI
+            if staCnt(n) > 0
+                fpr = staSum(:,:,:,n) / staCnt(n);
+                fpr = fpr - median(fpr(:,:,1:15),3);
+                fpr = imgaussfilt(max(fpr,[],3),1);
+            else
+                warning('ROI %d has no spikes; footprint left empty.', n);
+                fpr = zeros(H,W);
+            end
+            m   = imdilate(poly2mask(Result.ROIpoly{n}(:,1), Result.ROIpoly{n}(:,2), H, W), strel('disk',opt.dilatePx));
+            fpr = fpr .* m;
+            S_full(:,:,n) = fpr / (sqrt(sum(fpr(:).^2)) + eps);
+        end
+        Result.ftprnt = S_full;
+        Result.STAmovieRough = staSum;
+        Result.STAcountRough = staCnt;
+    else
+        S_full = Result.ftprnt;
+        fprintf('  footprints of v%d reused\n', ver);
+    end
+
+    % ---- axial reference: orange structure stack aligned to the voltage camera ----
+    [AO, axial] = axialStack(fp, Result.ref_im, opt.voltAxial, 'orange', Device_Data, tformReg);
+    if isempty(AO)
+        fprintf('  no axial correction: %s\n', axial.reason);
+    else
+        fprintf('  orange stack: slices %d-%d, best %d (alignment peak %.2f)\n', axial.slices([1 end]), ...
+            axial.slices(axial.align.best), axial.align.peak);
+    end
+
+    % ---- PASS B: project the footprints onto each chunk (streaming), depth of every frame ----
+    optsP = struct('mode','project');
+    Smat = reshape(double(S_full), [], nROI);
+    F_all = []; F0_all = []; mc_all = []; iz_all = []; chunkLen = zeros(1, nSeg); ctr = nan(1, nSeg);
+    for j = 1:nSeg
+        [movR, mov_mc, mtr, chunkLen(j), Mimg] = loadVoltChunk(fp, j, sz, readFrames(j));
+        tmp = extractVoltronST(movR, mov_mc, optsP, S_full);
+        F_all  = [F_all, (Smat \ Mimg(:)) - tmp.T_glu];   %#ok<AGROW> baseline kept (F, Voltron dims with spikes)
+        F0_all = [F0_all, tmp.F0_glu];  %#ok<AGROW>
+        mc_all = [mc_all; mtr];         %#ok<AGROW>
+        if ~isempty(AO)
+            [izc, ctr(j)] = axialDepth(mov_mc, AO, opt.voltAxial);
+            iz_all = [iz_all, izc];     %#ok<AGROW>
+        end
+        fprintf('  project chunk %2.0d/%2.0d\n', j, nSeg);
+    end
+    clear movR mov_mc
+    Result.mc = mc_all;
+    Result.F0 = F0_all;
+    nb = round(opt.voltBaseWin_s * fsV);
+    Result.traces_lateral = -tileBaselineDFF(F_all, chunkLen, nb, opt.voltBasePct);   % before the segment fit
+    Xlat = [];                                           % lateral regressors refitted per segment (v4)
+    if opt.voltAxial.lateral, Xlat = [mc_all, mc_all.^2, mc_all(:,1).*mc_all(:,end)]; end
+    if ~isempty(AO), axial.contrast = ctr; else, iz_all = []; end
+    if ~isempty(AO) || ~isempty(Xlat)
+        [F_ax, Result.zO, axial] = axialRegress(F_all, iz_all, chunkLen, fsV, axial, opt.voltAxial, Xlat);
+        if axial.applied
+            fprintf('  axial: depth SD %.2f um, %.1f%% frames without depth, z_ref %+.1f um from Structure.slice\n', ...
+                axial.zSD_um, axial.noDepthPct, axial.zRef_um);
+        end
+        fprintf('  segment regression (%g s, %g s overlap): %s\n', opt.voltAxial.segLen_s, opt.voltAxial.segOverlap_s, strjoin(axial.regressors, ', '));
+    else
+        F_ax = F_all; Result.zO = [];
+    end
+    [dff, Result.baselineKnots] = tileBaselineDFF(F_ax, chunkLen, nb, opt.voltBasePct);   % baseline per chunk
+    Result.tracesF = F_ax;
+    Result.traces  = -dff;                                % spike-positive -dF/F
+    Result.chunkLen = chunkLen;
+    Result.axial = axial;
+    Result.version = opt.voltVersion;
+    Result.versionInfo = struct('version',opt.voltVersion, 'date',char(datetime('now')), ...
+        'script','Analysis_20261002_SD_VoltronST_plus_Glu.m (Section 2c)', ...
+        'lateral','loadVoltChunk: bleach fit, mc, mc^2, mc_x*mc_y regressed per chunk', ...
+        'axial',axial.applied, 'lateralSegments',opt.voltAxial.lateral, ...
+        'baseline',struct('win_s',opt.voltBaseWin_s, 'pct',opt.voltBasePct), ...
+        'previousVersion',ver);
+    saveResult(vf, struct('Result',Result));             % save before any figure export
+    fprintf('Saved Volt_Result.mat (v%d) to %s\n', opt.voltVersion, fp);
+
+    figure(2*f); clf; tiledlayout(3,2);
+    ax1 = nexttile; show_footprnt_contour(Result.ftprnt, Result.ref_im); colormap(ax1,gray(256));
+    nexttile; imshow2(im_merge(Result.ftprnt, lines(nROI))*10, []);
+    nShow = min(size(Result.traces,2), 58000);
+    nexttile(3,[1 2]); plot(rescale2(Result.traces(:,1:nShow),2)' + (1:nROI)); title(sprintf('-dF/F (v%d)', opt.voltVersion), 'FontSize',9);
+    nexttile(5,[1 2]);
+    if ~isempty(Result.zO), plot(Result.zO(1:nShow), 'r'); ylabel('z_O (um)'); title(sprintf('depth, SD %.2f um', axial.zSD_um), 'FontSize',9);
+    else, text(0.5, 0.5, ['no axial correction: ' axial.reason], 'HorizontalAlignment','center', 'Interpreter','none'); axis off; end
+    sgtitle(fp, 'Interpreter','none'); drawnow;
+    savefig(gcf, fullfile(fp,'Volt_extraction_result.fig'));
+    savePNG(gcf, fullfile(fp,'Volt_extraction_result.png'));
+end
+
+%% Section 2d : Voltage ROIs on the glutamate image (transformCamera_O2B)
+%  Reference image, footprints and ROI polygons of the voltage camera mapped into the
+%  glutamate (blue) camera frame. Skipped when Volt_Result.mat already has them.
+for f = foi
+    fp = fpath{f};
+    vf = fullfile(fp,'Volt_Result.mat');
+    if ~hasFields(vf, {'traces'}), continue; end
+    if hasFields(vf, {'ftprnt_glu'}), fprintf('#%d voltage ROIs already on the glutamate image, skipped\n', f); continue; end
+    load(vf, 'Result');
+    load(fullfile(fp,'output_data.mat'), 'Device_Data');
+    G = gluMeanImage(fp, Device_Data);
+    Result.ref_im_glu = transformCamera_O2B(Device_Data, tformReg, Result.ref_im, G);
+    Result.ftprnt_glu = transformCamera_O2B(Device_Data, tformReg, Result.ftprnt, G);
+    Result.ROIpoly_glu = cellfun(@(p) voltPointsToGlu(p, Device_Data, tformReg, size(Result.ref_im), size(G)), ...
+        Result.ROIpoly, 'UniformOutput', false);
+    Result.gluImageSize = size(G);
+    saveResult(vf, struct('Result',Result));
+    fprintf('#%d voltage ROIs mapped onto the glutamate image\n', f);
+end
+
+%% Section 2e : Voltage - interactive spike + complex-spike detection (per ROI)
+%  Interactive; one ROI at a time on every recording of opt.voltSpikeFiles still without SpClass.
+%    (0) the end of recordings where the orange laser turns off (mean F0 < opt.voltLaserOffFrac of
+%        its end level; #14, #17, #29), including the drift of the traces in the 0.3-0.5 s before
+%        it, is cut before any filtering (Result.voltValidEnd),
+%        motion (Result.mc, mc^2) regressed out of the traces within each voltage chunk (each
+%        chunk's mean kept, so no steps between chunks), then
+%        line-noise notches (opt.voltStopband) -> Result.traces_filt (NaN after the cut)
+%    (1) interactive_bleach_envelope: high-pass window (movmedian, default opt.voltSpikeHPWin) set
+%        first, then putative spikes (own thresholds), their heights binned in time (bin value =
+%        opt.voltEnvPct percentile, bins with >= opt.voltEnvMinSpikes spikes) and fitted over
+%        time (exp / exp2 / smooth) -> envelope; the high-passed, z-scored trace is divided by it so
+%        spike height is flat (in units of the start of the recording) -> Result.BleachEnv
+%    (1b) spike detection trace (only for finding spikes): the bleach-corrected trace (without the
+%        envelope window's high-pass) minus its
+%        running median ('Detection HP' box in the spike finder, starting at opt.voltSpikeDetHP
+%        frames; saved as Result.DetHP), then, when the ROI has a spike-triggered average
+%        (Section 2c, >= opt.voltSTAMinSpikes spikes), filtered with its waveform (lags
+%        opt.voltSTAWin, unit norm; mean removed only with opt.voltSTAZeroMean) as a matched filter,
+%        rescaled to noise units.
+%        interactive_spike_finder on it -> spikes + [thr1 thr2]. The bleach correction also
+%        scales up the noise where the envelope is low (late spikes have truly lower SNR: noise is
+%        flat in z units while spike height halves on #16), so a spike must also exceed a noise
+%        floor (opt.voltNoiseFloor, editable) on the uncorrected z-scored trace
+%    (2) interactive_cs_finder on the bleach-corrected trace -> complex-spike (CS) trace + CS parameters
+%    (3) interactive_spike_checker: add/remove spikes, mark/unmark CS spans; 'Set end' marks the last
+%        valid frame for a neuron that degrades later in the recording (spikes and CS after it
+%        dropped) -> Result.SpikeEnd (frames 1:SpikeEnd were searched)
+%    (4) keep this neuron? (Good/Bad)
+%  SpClass is (2 x nT x nROI): row 1 simple spikes (outside CS), row 2 CS onsets (first spike of
+%  each CS). Finished ROIs are kept in Volt_spike_curation_partial.mat, so a stopped curation
+%  resumes at the next ROI; that file is removed once Volt_Result.mat is saved.
+for f = opt.voltSpikeFiles(end)
+    fp = fpath{f};
+    vf = fullfile(fp,'Volt_Result.mat');
+    if ~hasFields(vf, {'traces'}), continue; end
+    if hasFields(vf, {'SpClass'}), fprintf('#%d spikes already curated, skipped\n', f); continue; end
+    fprintf('=== Spike/CS curation, file #%d : %s\n', f, fp);
+    load(vf, 'Result');
+    [nROI, nT] = size(Result.traces);
+    fsV = 1/median(diff(Result.t_ax));                    % voltage frame rate (Hz)
+
+    % ---- (0) laser-off cut, motion regression per chunk, notch filters ----
+    [nV, off] = voltValidEnd(Result.traces, Result.F0, opt.voltLaserOffFrac, opt.voltLaserOffMargin, fsV);
+    if nV < nT
+        fprintf('  orange laser off at frame %d, traces drift from %d: last %d frames (%.2f s) excluded\n', ...
+            off, nV + opt.voltLaserOffMargin, nT-nV, (nT-nV)/fsV);
+        if nT - nV > 10*fsV, warning('#%d: laser off %.0f s before the end of the recording', f, (nT-nV)/fsV); end
+    end
+    segLen = diff(Result.VmovTimesegments(:)');
+    if sum(segLen) ~= nT
+        segLen = diff([1:V2moviemaxTime:nT, nT+1]);       % chunk lengths not recoverable: V2moviemaxTime
+    end
+    segLen = diff([0, unique(min(cumsum(segLen), nV))]);  % chunks within the valid frames
+    trf = Result.traces(:,1:nV);
+    mcTr = [];
+    if isfield(Result,'mc') && ~isempty(Result.mc)
+        mcTr = Result.mc;
+        if size(mcTr,1) ~= nT, mcTr = mcTr'; end          % [T x 2]
+        if size(mcTr,1) ~= nT, warning('#%d: Result.mc does not match the traces, no motion regression', f); mcTr = [];
+        else, mcTr = mcTr(1:nV,:); end
+    end
+    if ~isempty(mcTr)
+        e = cumsum(segLen); s0 = [1, e(1:end-1)+1];
+        for s = 1:numel(segLen)
+            idx = s0(s):e(s);
+            trf(:,idx) = regressKeepMean(trf(:,idx), mcTr(idx,:));        % keeps each chunk's mean:
+            trf(:,idx) = regressKeepMean(trf(:,idx), mcTr(idx,:).^2);     %   no steps between chunks
+        end
+        fprintf('  motion regressed out within %d chunk(s)\n', numel(segLen));
+    end
+    for sb = 1:size(opt.voltStopband,1)
+        trf = get_bandstop(trf, fsV, opt.voltStopband(sb,:));
+    end
+    Result.traces_filt = [trf, nan(nROI, nT-nV)];
+    Result.voltValidEnd = nV;
+
+    % ---- per-ROI interactive curation (resumes from the partial file) ----
+    pf = fullfile(fp,'Volt_spike_curation_partial.mat');
+    if hasResult(pf)
+        load(pf, 'Cur'); fprintf('  resuming: %d/%d ROI(s) already curated\n', sum(Cur.done), nROI);
+        if ~isfield(Cur,'BleachEnv'), Cur.BleachEnv = ones(nROI,nT,'single'); Cur.EnvInfo = cell(nROI,1); end
+        if ~isfield(Cur,'SpikeFloor'), Cur.SpikeFloor = nan(nROI,1); end
+        if ~isfield(Cur,'HPWin'), Cur.HPWin = repmat(opt.voltSpikeHPWin, nROI, 1); end
+        if ~isfield(Cur,'STAKernel'), Cur.STAKernel = cell(nROI, 1); end
+        if ~isfield(Cur,'DetHP'), Cur.DetHP = nan(nROI, 1); end
+        if ~isfield(Cur,'SpikeEnd'), Cur.SpikeEnd = nan(nROI, 1); end
+    else
+        Cur = struct('done',false(nROI,1), 'spike',zeros(nROI,nT), 'CStrace',zeros(nROI,nT), ...
+            'SpClass',zeros(2,nT,nROI), 'SpikeThr',nan(nROI,2), 'CSThr',nan(nROI,2), ...
+            'CS_NSpike',nan(nROI,1), 'CS_MaxAUC',nan(nROI,1), 'CS_NSpike2ISI',nan(nROI,1), ...
+            'GoodNeuron',false(nROI,1), 'BleachEnv',ones(nROI,nT,'single'), 'EnvInfo',{cell(nROI,1)}, ...
+            'SpikeFloor',nan(nROI,1), 'HPWin',nan(nROI,1), 'STAKernel',{cell(nROI,1)}, 'DetHP',nan(nROI,1), ...
+            'SpikeEnd',nan(nROI,1));
+    end
+    for n = find(~Cur.done)'
+        fprintf('--- #%d ROI %d / %d ---\n', f, n, nROI);
+        tr = trf(n,:) ./ get_threshold(trf(n,:), 1);    % noise-normalised (spikes positive-going)
+        tr0 = tr;                                        % before the envelope window's high-pass
+
+        % (1) high-pass window, then spike-height envelope (bleaching) -> flat spike height
+        [env, envInfo, hp] = interactive_bleach_envelope(tr, fsV, [], opt.voltSpikeHPWin, ...
+            struct('minSpikes',opt.voltEnvMinSpikes, 'pct',opt.voltEnvPct));
+        tr = hp ./ env;                                  % corrected trace used from here on
+
+        % (1b) spikes on the detection trace: short high-pass (window set in the window),
+        %      STA matched filter when available
+        w = [];
+        if opt.voltSTAFilter, w = staKernel(Result, n, opt.staTau, opt.voltSTAWin, opt.voltSTAMinSpikes, opt.voltSTAZeroMean); end
+        if ~isempty(w)
+            fprintf('  STA matched filter (%d rough spikes, lags %d:%d)\n', Result.STAcountRough(n), opt.voltSTAWin([1 end]));
+        else
+            fprintf('  no STA matched filter (opt.voltSTAFilter off or too few rough spikes)\n');
+        end
+        % detection trace from the bleach-corrected trace WITHOUT the envelope window's high-pass, so
+        % the Detection HP window is its only high-pass
+        trB0 = tr0 ./ env;
+        detFn = @(win) spikeDetTrace(trB0, win, w, opt.voltSTAWin);
+        [spIdx, thr1, thr2, zFl, detWin] = interactive_spike_finder([], envInfo.thr, hp, opt.voltNoiseFloor, detFn, opt.voltSpikeDetHP);
+        sp = ind2vec(nV, spIdx, 1);
+
+        % (2) complex spikes on the bleach-corrected trace
+        [CS_tr, cs_thres, cs_params] = interactive_cs_finder(sp, tr);
+
+        % (3) manual curation of spikes and CS spans together
+        [sp, CS_tr, spEnd] = interactive_spike_checker(tr, sp, CS_tr);   % 'Set end': last valid frame
+        sp = [double(sp), zeros(1,nT-nV)]; CS_tr = [double(CS_tr), zeros(1,nT-nV)];   % back to all frames
+
+        % CS onsets = first spike within each CS span
+        CS_spk = sp .* bwlabel(CS_tr);
+        [lab, CS_spk_t] = unique(CS_spk); CS_spk_t = CS_spk_t(lab > 0);
+
+        % (4) neuron QC
+        isGood = strcmp(questdlg(sprintf('#%d ROI %d: keep this neuron?', f, n), 'Neuron QC', 'Good','Bad','Good'), 'Good');
+
+        Cur.spike(n,:)      = sp;
+        Cur.CStrace(n,:)    = CS_tr;
+        Cur.SpClass(1,:,n)  = sp .* (1 - CS_tr);          % simple spikes
+        Cur.SpClass(2,CS_spk_t,n) = 1;                    % complex-spike onsets
+        Cur.SpikeThr(n,:)   = [thr1 thr2];
+        Cur.SpikeFloor(n)   = zFl;
+        Cur.HPWin(n)        = envInfo.hpWin;
+        Cur.STAKernel{n}    = w;
+        Cur.DetHP(n)        = detWin;
+        Cur.SpikeEnd(n)     = spEnd;                      % spikes searched in frames 1:SpikeEnd
+        Cur.CSThr(n,:)      = cs_thres;
+        Cur.CS_NSpike(n)    = cs_params.N_Spike;
+        Cur.CS_MaxAUC(n)    = cs_params.Max_AUC;
+        Cur.CS_NSpike2ISI(n)= cs_params.N_Spike2ISI;
+        Cur.GoodNeuron(n)   = isGood;
+        Cur.BleachEnv(n,1:nV) = env;  Cur.BleachEnv(n,nV+1:end) = env(end);
+        Cur.EnvInfo{n}      = envInfo;
+        Cur.done(n)         = true;
+        save(pf, 'Cur');
+        qcstr = {'BAD','GOOD'};
+        fprintf('  ROI %d: %d SS, %d CS | thr=[%.2f %.2f] CSthr=[%.2f %.2f] -> %s\n', n, ...
+            sum(Cur.SpClass(1,:,n)), sum(Cur.SpClass(2,:,n)), thr1, thr2, cs_thres(1), cs_thres(2), qcstr{isGood+1});
+    end
+
+    for fn = {'spike','CStrace','SpClass','SpikeThr','CSThr','CS_NSpike','CS_MaxAUC','CS_NSpike2ISI','GoodNeuron','BleachEnv','EnvInfo','SpikeFloor','HPWin','STAKernel','DetHP','SpikeEnd'}
+        Result.(fn{1}) = Cur.(fn{1});
+    end
+    Result.spikeParams = struct('stopband',opt.voltStopband, 'hpWinDefault',opt.voltSpikeHPWin, 'frameRate',fsV, ...
+        'detHP',opt.voltSpikeDetHP, 'staWin',opt.voltSTAWin, 'staMinSpikes',opt.voltSTAMinSpikes, ...
+        'chunkLen',segLen, 'validEnd',nV);
+    saveResult(vf, struct('Result',Result));
+    delete(pf);
+    fprintf('#%d saved spikes/CS to Volt_Result.mat (%d/%d ROIs good)\n', f, sum(Result.GoodNeuron), nROI);
+
+    figure(3000+f); clf;
+    hpAll = zeros(nROI, nV);                              % as curated (per-ROI high-pass and envelope)
+    for n = 1:nROI
+        w = Result.HPWin(n); if isnan(w), w = opt.voltSpikeHPWin; end
+        hpAll(n,:) = (trf(n,:) - movmedian(trf(n,:), w, 2)) ./ Result.BleachEnv(n,1:nV);
+    end
+    show_traces_spikes(rescale2(hpAll, 2), Result.spike(:,1:nV), Result.CStrace(:,1:nV));
+    sgtitle(sprintf('#%d spikes (top), CS spans (bottom), good ROIs: %s', f, mat2str(find(Result.GoodNeuron)')), 'FontSize',9);
+    drawnow; savePNG(gcf, fullfile(fp,'Volt_spikes.png'));
+end
+
+%% Section 3a : Glutamate detection boundary + seed threshold (zSeedMin) - interactive, before Section 3
+%  For each recording still without Glu_Result.mat, tile 1 is prepared as in Section 3.
+%   1) Draw the boundary for synapse detection on the mean glutamate image (get_ROI: draw one or
+%      more polygons, a single click finishes; nothing drawn = whole FOV).
+%   2) Choose zSeedMin with the extractGluSNFR3 z-score shown inside the boundary: left, pixels
+%      whose peak z exceeds zSeedMin (seed candidates); right, the max-z projection. Press Accept.
+%  zSeedMin, detectMask and detectPoly are saved as Glu_zSeedMin.mat in the recording folder and
+%  used by Section 3. A file from before the boundary existed keeps its zSeedMin; only the
+%  boundary is asked.
+for f = foi
+    fp = fpath{f};
+    if hasResult(fullfile(fp,'Glu_Result.mat')), continue; end
+    sf = fullfile(fp,'Glu_zSeedMin.mat');
+    prev = struct();
+    if hasResult(sf), prev = load(sf); end
+    if isfield(prev,'detectMask')
+        fprintf('#%d zSeedMin = %.2f and detection boundary already set\n', f, prev.zSeedMin); continue
+    end
+    load(fullfile(fp,'output_data.mat'), 'Device_Data');
+    nCol2 = double(Device_Data{4}.ROI(2)); nRow2 = double(Device_Data{4}.ROI(4));
+    fprintf('#%d preparing tile 1 ...\n', f);
+    tk = gluTemporalKernel(Device_Data{4}.exposuretime, opt.gluTauRise_ms, opt.gluTauDecay_ms);
+    [~, tileMax] = gluTileLimits(fp, nRow2, nCol2, EndFrameBlue{f});
+    [mov_sub, ~, mov2_mc] = gluPrepTile(fp, 1, nRow2, nCol2, round(5/Device_Data{4}.exposuretime), 'detect', [], {}, tk, tileMax(1));
+    G1 = mean(mov2_mc, 3); clear mov2_mc
+    [~, recName] = fileparts(fp);
+    [detectPoly, m] = get_ROI(G1, [], sprintf('#%d %s: detection boundary (single click to finish; none = whole FOV)', f, recName));
+    if isempty(m), detectMask = true(size(G1)); else, detectMask = any(m, 3); end
+    if isfield(prev,'zSeedMin')
+        zSeedMin = prev.zSeedMin;
+    else
+        zSeedMin = pickSeedThreshold(mov_sub, opt.gluParams.smoothSigma, opt.gluParams.zSeedMin, ...
+            sprintf('#%d %s', f, recName), detectMask);
+    end
+    clear mov_sub
+    save(sf, 'zSeedMin', 'detectMask', 'detectPoly');
+    fprintf('#%d zSeedMin = %.2f, detection area %.0f%% of the FOV, saved\n', f, zSeedMin, 100*mean(detectMask(:)));
+end
+
+%% Section 3 : Glutamate extraction via extractGluSNFR3
+%  Non-interactive (parameters in opt.gluParams, zSeedMin per recording from Section 3a), so it
+%  can run unattended. Events are detected on the first opt.gluDetectFirst tiles plus
+%  opt.gluDetectMiddle tiles from the middle of the recording, pooled, clustered into synapses
+%  once (density-peak clustering, opt.gluCluster), and the synapses are projected onto every
+%  tile. The detection movie is temporally matched-filtered (opt.gluTauRise_ms/gluTauDecay_ms).
+%  A failing recording is reported and the loop continues.
+%  Version opt.gluVersion is written to Glu_Result.mat (version, versionInfo):
+%    v1  T_glu = projection of the bleach-normalised tiles with the motion and row-artifact
+%        regressors removed (dF/F with one mean baseline per synapse, steps at tile boundaries;
+%        a per-tile baseline was added afterwards by the former Section 3c). No version = v1.
+%    v2  v1 + axial motion: depth z_B of every frame from the blue structure stack around the
+%        recording site (Structure_Result.mat, Section 4; matching as in Section 2c v2, opt.gluAxial),
+%        z_B and z_B^2 regressed out of T_glu in opt.gluAxial.segLen_s segments overlapping by
+%        segOverlap_s within each tile (equivalent to regressing every pixel of the movie);
+%        dF/F with a per-tile baseline: opt.gluBasePct percentile of the first and the last
+%        opt.gluBaseWin_s s of each tile, joined linearly (each tile is bleach-normalised on its own,
+%        so one baseline per synapse leaves steps). Depth in zB (um from its median), details
+%        in axial; without a usable blue stack T_glu stays v1-like and axial.reason says why.
+%  Skipped when Glu_Result.mat of the current version exists. An older one is re-projected when
+%  opt.gluReextract: the synapses (S_glu) and detection results are kept and only Pass 2 runs; the
+%  old file is kept as Glu_Result_v<old>.mat.
+gluFailed = [];
+for f = foi
+    fp = fpath{f};
+    gf = fullfile(fp,'Glu_Result.mat');
+    ver = gluVersion(gf);                                % 0: no traces yet
+    if ver >= opt.gluVersion, fprintf('#%d glutamate traces v%d exist, skipped\n', f, ver); continue; end
+    if ver > 0 && ~opt.gluReextract
+        fprintf('#%d glutamate traces v%d kept (older than v%d; opt.gluReextract)\n', f, ver, opt.gluVersion); continue
+    end
+    try
+    tGlu = tic;
+    fprintf('=== Glutamate extraction v%d, file #%2.0f : %s\n', opt.gluVersion, f, fp);
+    load(fullfile(fp,'output_data.mat'), 'Device_Data');
+    nCol2 = double(Device_Data{4}.ROI(2));
+    nRow2 = double(Device_Data{4}.ROI(4));
+    exposuretime2 = Device_Data{4}.exposuretime;
+    gc = gluClock(Device_Data, mod488, GlumoviemaxTime);
+    [Ntile, tileMax, endFr] = gluTileLimits(fp, nRow2, nCol2, EndFrameBlue{f});   % tiles up to EndFrame (Blue)
+    if Ntile == 0, warning('#%d: no mc2XX.bin files, skipped', f); continue; end
+    if isfinite(endFr)
+        fprintf('  EndFrame (Blue) %d: tiles 1-%d used, last one up to frame %d\n', endFr, Ntile, tileMax(Ntile));
+    end
+    lowWin = round(5/exposuretime2);                      % slow baseline window (5 s)
+    regsCache = cell(Ntile,1);                            % motion + row-artifact regressors, reused in Pass 2
+    mcTrace_glu = [];
+    if ver > 0                                            % re-projection: synapses of the older version
+        GluResult = archiveGlu(fp, ver, [nRow2 nCol2]);
+        S_full = GluResult.S_glu; Nsyn = size(S_full,2); detectMask = GluResult.detectMask;
+        if ~isfield(GluResult,'AvgGluImg'), GluResult.AvgGluImg = gluMeanImage(fp, Device_Data); end
+        fprintf('  re-projection of the %d synapses of v%d\n', Nsyn, ver);
+    else
+    detTiles = detectionTiles(Ntile, opt.gluDetectFirst, opt.gluDetectMiddle);
+    nDet = numel(detTiles);
+    opts = opt.gluParams;
+    detectMask = true(nRow2, nCol2);
+    if hasResult(fullfile(fp,'Glu_zSeedMin.mat'))
+        S = load(fullfile(fp,'Glu_zSeedMin.mat')); opts.zSeedMin = S.zSeedMin;
+        if isfield(S,'detectMask'), detectMask = S.detectMask; end
+    else
+        fprintf('  no Glu_zSeedMin.mat (Section 3a); using zSeedMin = %.2f and the whole FOV\n', opts.zSeedMin);
+    end
+    GluResult = struct('zSeedMin',opts.zSeedMin, 'detectMask',detectMask, 'detectTiles',detTiles, 'endFrameBlue',endFr);
+    tk = gluTemporalKernel(exposuretime2, opt.gluTauRise_ms, opt.gluTauDecay_ms);   % detection matched filter
+    opts.computeTraces = false;                           % Pass 1 only needs footprints; traces come from Pass 2
+
+    % ---------- PASS 1: events from the first + middle tiles, clustered together ----------
+    % extractGluSNFR3 Steps 0-2 (z-score, seeds, blob/NMF events) per tile; the events of all
+    % detection tiles are pooled and Steps 3-5 (centroid clustering, footprints, filters) run
+    % once on them. All tiles share the motion-correction reference, so pixel coordinates agree.
+    events = []; nFrDet = 0; evPerTile = zeros(1, nDet);
+    optsEv = opts; optsEv.stage = 'events';
+    for i = 1:nDet
+        k = detTiles(i);
+        fprintf('Glu events: tile %d (%d / %d, tiles %s; zSeedMin %.2f) ...\n', k, i, nDet, mat2str(detTiles), opts.zSeedMin);
+        [mov_sub, ~, mov2_mc, ~, regsCache{k}] = gluPrepTile(fp, k, nRow2, nCol2, lowWin, 'detect', [], {}, tk, tileMax(k));
+        if i == 1, GluResult.AvgGluImg = mean(mov2_mc,3); end
+        nFrDet = nFrDet + size(mov_sub,3);
+        optsEv.diagSaveDir = fp; optsEv.diagPrefix = sprintf('glu_tile%02d', k);
+        rng(k);                                           % NMF splitting uses random starts: reproducible
+        Rk = extractGluSNFR3(mov_sub .* detectMask, [], exposuretime2, optsEv);   % detect inside the boundary
+        clear mov_sub mov2_mc
+        ev = Rk.eventList;
+        evPerTile(i) = numel(ev);
+        if isempty(ev), continue; end
+        [ev.tile] = deal(k);
+        events = [events, ev];                            %#ok<AGROW>
+        fprintf('  %d events (total %d)\n', numel(ev), numel(events));
+    end
+    if numel(events) > opt.gluMaxEvents
+        error('%d events pooled (> opt.gluMaxEvents = %d): raise zSeedMin in Section 3a', numel(events), opt.gluMaxEvents);
+    end
+    optsCl = opts; optsCl.stage = 'cluster'; optsCl.sparseFootprints = true;   % S_glu: sparse [pixels x synapses]
+    optsCl.clusterMethod = opt.gluCluster.method;  optsCl.densSigma = opt.gluCluster.sigma;
+    optsCl.densMinPeak   = opt.gluCluster.minPeak; optsCl.densFloor = opt.gluCluster.floor;
+    optsCl.densCoreFrac  = opt.gluCluster.coreFrac; optsCl.densMinCoreEvents = opt.gluCluster.minCoreEvents;
+    optsCl.densWeight    = opt.gluCluster.weight;
+    optsCl.eventList = events; optsCl.imgSize = [nRow2 nCol2]; optsCl.nFrames = nFrDet;
+    rng(0);                                               % k-means split of large clusters
+    C = insideBoundary(extractGluSNFR3([], [], exposuretime2, optsCl), detectMask);
+    S_full = C.S_glu;
+    Nsyn = size(S_full,2);
+    GluResult.synCentroid   = C.synCentroid;
+    GluResult.synEventCount = C.synEventCount;            % events per synapse over the detection tiles
+    GluResult.nEvents       = numel(events);
+    GluResult.fracUnassigned = mean(C.eventSynID == 0);   % events outside every synapse core
+    GluResult.cluster       = opt.gluCluster;
+    GluResult.eventsPerTile = evPerTile;                  % events in each of detectTiles
+    fprintf('  %d events from %d tiles -> %d synapses (%s; %.0f%% of events unassigned)\n', ...
+        numel(events), nDet, Nsyn, opt.gluCluster.method, 100*GluResult.fracUnassigned);
+    end
+
+    % ---------- axial reference: blue structure stack (glutamate camera) ----------
+    [AB, axial] = axialStack(fp, GluResult.AvgGluImg, opt.gluAxial, 'blue');
+    if isempty(AB), depthFn = []; fprintf('  no axial correction: %s\n', axial.reason);
+    else
+        depthFn = @(mv) axialDepth(mv, AB, opt.gluAxial);
+        fprintf('  blue stack: slices %d-%d, best %d (alignment peak %.2f)\n', axial.slices([1 end]), ...
+            axial.slices(axial.align.best), axial.align.peak);
+    end
+
+    % ---------- PASS 2: projection onto every tile ----------
+    % Movie without the movmedian low-pass subtraction: bleach-normalised, with the motion and
+    % row-artifact regressors removed and each pixel's mean kept, so T_glu keeps the baseline.
+    % Least squares only on footprint pixels inside the detection boundary; the normal-equation
+    % factorisation is computed once and reused for every tile (same solution as S \ M there).
+    used = find(any(S_full > 0, 2) & detectMask(:));
+    Smat = S_full(used,:);
+    G = decomposition(full(Smat' * Smat));
+    if isIllConditioned(G), G = decomposition(full(Smat' * Smat), 'cod'); end   % overlapping footprints
+    fprintf('  projection on %d pixels (%.1f%% of the FOV), %d synapses\n', numel(used), 100*numel(used)/(nRow2*nCol2), Nsyn);
+    T_all = zeros(Nsyn, 0); tileLen = zeros(1, Ntile); iz_all = []; ctr = nan(1, Ntile);
+    for k = 1:Ntile
+        fprintf('Glu project: tile %d / %d ...\n', k, Ntile);
+        [P, ~, ~, mcxy, ~, izk] = gluPrepTile(fp, k, nRow2, nCol2, lowWin, 'project', used, regsCache{k}, [], tileMax(k), depthFn);
+        mcTrace_glu = [mcTrace_glu; mcxy];                %#ok<AGROW>
+        T_all = [T_all, G \ (Smat' * P)];                 %#ok<AGROW>
+        tileLen(k) = size(P, 2);
+        if ~isempty(depthFn), iz_all = [iz_all, izk]; end %#ok<AGROW>
+        clear P
+    end
+    zB = [];
+    Xlat = [];                                            % lateral regressors per segment (opt.gluAxial.lateral)
+    if opt.gluAxial.lateral, Xlat = [mcTrace_glu, mcTrace_glu.^2, mcTrace_glu(:,1).*mcTrace_glu(:,end)]; end
+    if isempty(depthFn), iz_all = []; end
+    if ~isempty(depthFn) || ~isempty(Xlat)                % z_B, z_B^2 (+ lateral) regressed out per segment within each tile
+        [T_all, zB, axial] = axialRegress(T_all, iz_all, tileLen, 1/exposuretime2, axial, opt.gluAxial, Xlat);
+        if axial.applied
+            fprintf('  axial: depth SD %.2f um, %.1f%% frames without depth, z_ref %+.1f um from Structure.slice\n', ...
+                axial.zSD_um, axial.noDepthPct, axial.zRef_um);
+        end
+    end
+    [dFF_all, knots] = tileBaselineDFF(T_all, tileLen, round(opt.gluBaseWin_s/exposuretime2), opt.gluBasePct);
+    GluResult.mc        = mcTrace_glu;
+    GluResult.S_glu     = S_full;
+    GluResult.T_glu     = T_all;
+    GluResult.F0_glu    = mean(knots, [2 3]);             % per-synapse mean baseline
+    GluResult.dFF_glu   = dFF_all;                        % per-tile baseline
+    GluResult.baselineKnots = knots;
+    GluResult.baselineCorrected = struct('win_s',opt.gluBaseWin_s, 'pct',opt.gluBasePct);
+    GluResult.frameRate = 1/exposuretime2;
+    GluResult.tileLen   = tileLen;                        % frames of each projected tile (segment boundaries)
+    GluResult.t_ax      = gc.t_glu(1:min(end, size(T_all,2)));
+    GluResult.endFrameBlue = endFr;
+    GluResult.zB        = zB;
+    GluResult.axial     = axial;
+    GluResult.version   = opt.gluVersion;
+    GluResult.versionInfo = struct('version',opt.gluVersion, 'date',char(datetime('now')), ...
+        'script','Analysis_20261002_SD_VoltronST_plus_Glu.m (Section 3)', ...
+        'lateral','gluPrepTile: bleach fit, mc, mc^2, mc_x*mc_y, row artifacts regressed per tile', ...
+        'axial',axial.applied, 'lateralSegments',opt.gluAxial.lateral, 'previousVersion',ver);
+    saveResult(gf, GluResult);
+    fprintf('Saved Glu_Result.mat (v%d) to %s (%d synapses, %.0f min)\n', opt.gluVersion, fp, Nsyn, toc(tGlu)/60);
+    [~, recName] = fileparts(fp);
+    if isfield(GluResult, 'eventsPerTile')
+        gluSummaryFigure(GluResult, sprintf('#%d %s (v%d)', f, recName, opt.gluVersion), fullfile(fp,'Glu_summary.png'), 2000+f);
+    end
+    catch ME
+        gluFailed(end+1) = f; %#ok<SAGROW>
+        fprintf(2, '#%d glutamate extraction FAILED: %s\n', f, ME.message);
+        fprintf(2, '   at %s\n', strjoin(arrayfun(@(x) sprintf('%s:%d', x.name, x.line), ME.stack, 'UniformOutput', false), ' < '));
+    end
+end
+if ~isempty(gluFailed), fprintf(2, 'Glutamate extraction failed for files %s\n', mat2str(gluFailed)); end
+
+%% Section 4 : Recording site in the structure z-stack
+%  Stage XYZ of the recording (output_data.mat) is mapped into the structure image:
+%    stitched z-stack (*_StitchInfo.mat): tile stage positions + canvas positions + plane z
+%    single z-stack   (*_RegInfo.mat)   : its stage XY; plane z is unknown -> found by correlation
+%  The glutamate mean image (blue camera, same as the structure) is then correlated around
+%  the prediction; without a usable stage prediction the whole stack is searched.
+%  Recording pixel (r,c) <-> structure pixel (rows(r), cols(c)) on slice Structure.slice.
+for f = foi
+    fp = fpath{f};
+    if hasResult(fullfile(fp,'Structure_Result.mat')), fprintf('#%d Structure_Result.mat exists, skipped\n', f); continue; end
+    if isMissing(StructureFilePath{f}), fprintf('#%d no structure file in the sheet, skipped\n', f); continue; end
+    load(fullfile(fp,'output_data.mat'), 'Device_Data');
+    G = gluMeanImage(fp, Device_Data);
+    Structure = locateInStructure(G, Device_Data, char(StructureFilePath{f}), opt);
+    saveResult(fullfile(fp,'Structure_Result.mat'), struct('Structure',Structure));
+    saveMatchQC(G, Structure, sprintf('#%d %s', f, fp), fullfile(fp,'Structure_match.png'));
+    fprintf('#%d structure: %s, slice %d, rows %d-%d, cols %d-%d (%s; peak %.2f, margin %.2f)\n', f, Structure.name, ...
+        Structure.slice, Structure.rows([1 end]), Structure.cols([1 end]), Structure.method, Structure.corrPeak, Structure.corrMargin);
+end
+
+%% Section 5 : Full set per recording (voltage + glutamate + VR + structure) + overview
+%  Fullset_Result.mat holds everything except the glutamate trace matrices (dFF_glu / T_glu /
+%  F0_glu, up to several GB each), which stay in Glu_Result.mat:
+%     dFF = load(Fullset.Glu.file, 'dFF_glu');      % synapses x glutamate frames
+%  Glutamate footprints are stored as a sparse [pixels x synapses] matrix (Fullset.Glu.S_glu).
+for f = foi
+    fp = fpath{f};
+    need = {'Volt_Result.mat','Glu_Result.mat','VR_Result.mat','Structure_Result.mat'};
+    have = cellfun(@(x) hasResult(fullfile(fp,x)), need);
+    if ~all(have)
+        fprintf('#%d full set incomplete, missing: %s\n', f, strjoin(need(~have), ', '));
+        continue
+    end
+    if hasResult(fullfile(fp,'Fullset_Result.mat'))
+        why = fullsetStale(fullfile(fp,'Fullset_Result.mat'), fullfile(fp,'Volt_Result.mat'), fullfile(fp,'Glu_Result.mat'));
+        if isempty(why), fprintf('#%d Fullset_Result.mat exists, skipped\n', f); continue; end
+        fprintf('#%d Fullset_Result.mat rebuilt: %s\n', f, why);
+    end
+    load(fullfile(fp,'Volt_Result.mat'), 'Result');
+    gf = fullfile(fp,'Glu_Result.mat');
+    gv = whos('-file', gf);
+    G  = loadRetry(gf, 'S_glu', 'AvgGluImg', 't_ax', 'frameRate', 'mc');
+    nTg = gv(strcmp({gv.name},'dFF_glu')).size(2);
+    S = load(fullfile(fp,'VR_Result.mat'));
+    if isfield(S,'VRinfo'), VRinfo = S.VRinfo; else, VRinfo = struct('note','VR_Result.mat from an earlier script'); end
+    load(fullfile(fp,'Structure_Result.mat'), 'Structure');
+
+    Fullset = struct('file',f, 'fpath',fp, 'mouse',raw{f,3});
+    Fullset.Volt = rmfield(Result, intersect(fieldnames(Result), {'STAmovieRough','rough_tr'}));
+    Fullset.Glu  = struct('file',gf, 'version',gluVersion(gf), 'S_glu',sparseFootprints(G.S_glu, size(G.AvgGluImg)), 'AvgGluImg',G.AvgGluImg, ...
+        't_ax',G.t_ax(1:nTg), 'frameRate',G.frameRate, 'mc',G.mc, 'nSynapse',gv(strcmp({gv.name},'dFF_glu')).size(1));
+    nV = min(size(S.VR_Result,2), numel(Result.t_ax));
+    Fullset.VR.onVolt = S.VR_Result(:,1:nV);                     % one column per voltage frame
+    Fullset.VR.onGlu  = S.VR_Result(:, match_nearest(G.t_ax(1:nTg), Result.t_ax(1:nV)));   % per glutamate frame
+    Fullset.VR.info   = VRinfo;
+    Fullset.Structure = Structure;
+    saveResult(fullfile(fp,'Fullset_Result.mat'), struct('Fullset',Fullset));
+
+    % Overview: voltage ROIs + synapse centroids on the glutamate image, and the site in the structure
+    [~, recName] = fileparts(fp);
+    syn = synapseCentroids(Fullset.Glu.S_glu, size(G.AvgGluImg));
+    figure(1000+f); clf; tiledlayout(1,3,'TileSpacing','compact');
+    nexttile; imshow(G.AvgGluImg, prctile(G.AvgGluImg(:),[1 99.7])); hold on;
+    plot(syn(:,1), syn(:,2), '.', 'Color',[1 0 1], 'MarkerSize',3);
+    for n = 1:numel(Result.ROIpoly_glu)
+        P = Result.ROIpoly_glu{n}; plot(P([1:end 1],1), P([1:end 1],2), 'y', 'LineWidth',1);   % closed outline
+    end
+    title(sprintf('Glu mean: voltage ROIs (yellow), %d synapses (magenta)', size(syn,1)), 'FontSize',9);
+    fovBox = [Structure.cropFOV(2) Structure.cropFOV(1) numel(Structure.cols) numel(Structure.rows)];
+    nexttile; imshow(Structure.cropMIPBlue, prctile(single(Structure.cropMIPBlue(:)),[1 99.7])); hold on;
+    rectangle('Position', fovBox, 'EdgeColor','y');
+    title({sprintf('structure blue MIP (FOV: slice %d)', Structure.slice), Structure.method}, 'FontSize',9);
+    if isfield(Structure,'cropMIPOrange')
+        nexttile; imshow(Structure.cropMIPOrange, prctile(single(Structure.cropMIPOrange(:)),[1 99.7])); hold on;
+        rectangle('Position', fovBox, 'EdgeColor','y'); title('structure orange MIP', 'FontSize',9);
+    end
+    sgtitle(sprintf('#%d %s', f, recName), 'Interpreter','none', 'FontSize',10); drawnow;
+    savePNG(gcf, fullfile(fp,'Fullset_overview.png'));
+    fprintf('#%d saved Fullset_Result.mat\n', f);
+end
+
+%% Section 6 : Spike-triggered voltage and glutamate movies (.bin) for spike-triggered averages
+%  For every good neuron (Section 2e GoodNeuron) with curated spikes, events are built from its
+%  spikes up to Result.SpikeEnd: a complex spike (CStrace span) is one event at its first spike,
+%  and spikes or complex spikes closer than opt.trig.mergeISI_s (20 ms) form one event at the first
+%  spike. For each event the frames from opt.trig.win_s(1) to win_s(2) around it are cut from both
+%  movies (voltage: from the event's spike frame; glutamate: from the nearest frame, offset kept as
+%  tShift_s) and written to <fp>/TriggerSnippets/
+%    VoltTrig_ROI<nn>_<kkk>.bin   single, [H W nFrames] per event (voltage camera), events in time order
+%    GluTrig_ROI<nn>_<kkk>.bin    single, [H W nFrames] per event (glutamate camera)
+%    Trig_ROI<nn>_<kkk>.mat       info: the events in both .bin files (spike frames, CS, times, ...)
+%    Trig_index.mat               all bins per neuron
+%  Both series split at the same events: a new <kkk> starts before either .bin would exceed
+%  opt.trig.maxBinGB. Read with readTrigSnippets.
+%  The movies are corrected as their traces (each a projection on the footprints reproduces them):
+%    voltage   (Section 2c v3+): chunk-wise bleach-normalised movie with the motion regressors removed
+%              and each pixel's mean kept (loadVoltChunk), then the segment regressors of 2c
+%              (z_O, z_O^2 and the lateral ones, Result.axial.regressors) in the same segments;
+%              projection on ftprnt = Result.tracesF. Fluorescence: Voltron dims with spikes.
+%    glutamate (Section 3): tile-wise bleach-normalised movie with motion and row-artifact regressors
+%              removed and each pixel's mean kept, then z_B, z_B^2 (+ lateral, as that version) per
+%              segment; projection on S_glu = T_glu.
+%  Values keep the baseline but are normalised per chunk/tile: take dF/F against each event's
+%  pre-event frames. Skipped when Trig_index.mat exists (opt.trig.redo renames the old folder).
+for f = foi(6:end)
+    fp = fpath{f};
+    vf = fullfile(fp,'Volt_Result.mat'); gf = fullfile(fp,'Glu_Result.mat');
+    od = fullfile(fp,'TriggerSnippets'); idxf = fullfile(od,'Trig_index.mat');
+    if ~hasFields(vf, {'SpClass'}), fprintf('#%d no curated spikes (Section 2e), skipped\n', f); continue; end
+    if isfile(idxf) && ~opt.trig.redo, fprintf('#%d spike-triggered snippets exist, skipped\n', f); continue; end
+    try
+    tTrig = tic;
+    load(vf, 'Result');
+    vver = voltVersion(vf); gver = gluVersion(gf);
+    doV = vver >= 3; doG = gver > 0;
+    if ~doV, fprintf('#%d voltage traces v%d: no voltage snippets (needs v3+, Section 2c)\n', f, vver); end
+    if ~doG, fprintf('#%d no Glu_Result.mat: no glutamate snippets\n', f); end
+    if ~doV && ~doG, continue; end
+    if isfolder(od), movefile(od, sprintf('%s_old_%s', od, char(datetime('now','Format','yyyyMMdd_HHmmss')))); end
+    mkdir(od);
+    load(fullfile(fp,'output_data.mat'), 'Device_Data');
+    blk = opt.trig.pixBlock;
+
+    % ---- voltage: frames, segment regressors as in 2c ----
+    fsV = 1/median(diff(Result.t_ax)); nV = size(Result.traces, 2);
+    vEnd = nV; if isfield(Result,'voltValidEnd') && ~isempty(Result.voltValidEnd), vEnd = Result.voltValidEnd; end
+    preV = round(-opt.trig.win_s(1)*fsV); postV = round(opt.trig.win_s(2)*fsV); nFrV = preV + postV + 1;
+    szV = double(Device_Data{3}.ROI([4 2]));             % [rows cols]
+    evV = prod(szV) * nFrV * 4 * doV;
+    if doV
+        chunkLen = diff(Result.VmovTimesegments(:)'); if isfield(Result,'chunkLen'), chunkLen = Result.chunkLen; end
+        [regV, segV] = trigRegressors(Result.axial, ~isempty(Result.zO), false, opt.voltAxial, fsV);
+    end
+
+    % ---- glutamate: frames, segment regressors as in Section 3 ----
+    evG = 0;
+    if doG
+        G = loadRetry(gf, 't_ax', 'tileLen', 'frameRate');
+        w = who('-file', gf); zB = []; Gax = struct(); latSeg = false;
+        if ismember('zB', w), S = loadRetry(gf, 'zB', 'axial'); zB = S.zB; Gax = S.axial; end
+        if ismember('versionInfo', w), S = loadRetry(gf, 'versionInfo'); latSeg = isfield(S.versionInfo,'lateralSegments') && S.versionInfo.lateralSegments; end
+        [regG, segG] = trigRegressors(Gax, ~isempty(zB), latSeg, opt.gluAxial, G.frameRate);
+        szG = double(Device_Data{4}.ROI([4 2]));
+        fsG = G.frameRate; tG = G.t_ax(:)'; tileLen = G.tileLen; nG = sum(tileLen); lowWin = round(5*fsG);
+        preG = round(-opt.trig.win_s(1)*fsG); postG = round(opt.trig.win_s(2)*fsG); nFrG = preG + postG + 1;
+        evG = prod(szG) * nFrG * 4;
+    end
+
+    % ---- events per neuron ----
+    rois = 1:size(Result.spike,1);
+    if opt.trig.goodOnly, rois = rois(Result.GoodNeuron(rois) > 0); end
+    mergeFr = round(opt.trig.mergeISI_s*fsV);
+    perBin = max(1, floor(opt.trig.maxBinGB*1e9 / max(evV, evG)));   % events per .bin (both series)
+    EV = cell(1, numel(rois)); binOf = EV;
+    for i = 1:numel(rois)
+        n = rois(i); sp = Result.spike(n,:) > 0; cs = Result.CStrace(n,:) > 0;
+        if isfield(Result,'SpikeEnd') && ~isnan(Result.SpikeEnd(n)), sp(Result.SpikeEnd(n)+1:end) = false; end
+        ev = spikeEvents(sp, cs, mergeFr);
+        ok = true(1, numel(ev));
+        for e = 1:numel(ev)
+            ev(e).t_s = Result.t_ax(ev(e).voltFrame);
+            ev(e).gluFrame0 = NaN; ev(e).tShift_s = NaN;
+            if doV, ok(e) = ev(e).voltFrame - preV >= 1 && ev(e).voltFrame + postV <= vEnd; end
+            if doG
+                [~, ev(e).gluFrame0] = min(abs(tG - ev(e).t_s));
+                ev(e).tShift_s = ev(e).t_s - tG(ev(e).gluFrame0);   % event time after the centre glutamate frame
+                ok(e) = ok(e) && ev(e).gluFrame0 - preG >= 1 && ev(e).gluFrame0 + postG <= nG && abs(ev(e).tShift_s) < 1/fsG;
+            end
+        end
+        EV{i} = ev(ok); binOf{i} = ceil((1:numel(EV{i})) / perBin);
+        fprintf('#%d ROI %d: %d events (%d CS) from %d spikes, %d outside the recordings; ~%.1f GB\n', f, n, ...
+            numel(EV{i}), sum([EV{i}.isCS]), sum(sp), sum(~ok), numel(EV{i})*(evV + evG)/1e9);
+    end
+    if all(cellfun(@isempty, EV)), fprintf('#%d no events, skipped\n', f); continue; end
+
+    % ---- write the snippets: corrected movie piece by piece, events cut as their frames arrive ----
+    if doG
+        fprintf('  glutamate (%d frames per event):\n', nFrG);
+        trigPass(@(k) gluTrigTile(fp, k, szG, lowWin, tileLen(k), trigZ(zB, sum(tileLen(1:k-1)), tileLen(k)), regG, segG, blk), ...
+            tileLen, cellfun(@(ev) [ev.gluFrame0], EV, 'UniformOutput', false), preG, postG, binOf, od, 'GluTrig', rois, prod(szG));
+    end
+    if doV
+        fprintf('  voltage (%d frames per event):\n', nFrV);
+        cE = cumsum(chunkLen); c0 = [0 cE(1:end-1)];
+        trigPass(@(j) voltTrigChunk(fp, j, Device_Data, chunkLen(j), trigZ(Result.zO, c0(j), chunkLen(j)), ...
+            Result.mc(c0(j)+1:cE(j),:), regV, segV, blk), chunkLen, cellfun(@(ev) [ev.voltFrame], EV, 'UniformOutput', false), ...
+            preV, postV, binOf, od, 'VoltTrig', rois, prod(szV));
+    end
+
+    % ---- information per bin and index ----
+    common = struct('file',f, 'fpath',fp, 'win_s',opt.trig.win_s, 'mergeISI_s',opt.trig.mergeISI_s, ...
+        'voltVersion',vver, 'gluVersion',gver, 'layout','[H W nFrames] per event, events in time order, single');
+    if doV
+        common.volt = struct('frameSize',szV, 'nFramesPerEvent',nFrV, 'frameTimes_s',(-preV:postV)/fsV, 'frameRate',fsV, ...
+            'regressors',{regV}, 'note','Voltron fluorescence (dims with depolarisation); projection on ftprnt = Result.tracesF');
+    end
+    if doG
+        common.glu = struct('frameSize',szG, 'nFramesPerEvent',nFrG, 'frameTimes_s',(-preG:postG)/fsG, 'frameRate',fsG, ...
+            'regressors',{regG}, 'note','iGluSnFR fluorescence; projection on S_glu = T_glu; tShift_s = event time after the centre frame');
+    end
+    index = struct('roi',num2cell(rois), 'bins',{{}}, 'nEvents',0);
+    for i = 1:numel(rois)
+        for b = unique(binOf{i})
+            info = common; info.roi = rois(i); info.bin = b;
+            info.voltFile = ''; info.gluFile = '';
+            if doV, info.voltFile = sprintf('VoltTrig_ROI%02d_%03d.bin', rois(i), b); end
+            if doG, info.gluFile  = sprintf('GluTrig_ROI%02d_%03d.bin',  rois(i), b); end
+            info.events = EV{i}(binOf{i} == b); info.nEvents = numel(info.events);
+            mf = sprintf('Trig_ROI%02d_%03d.mat', rois(i), b);
+            save(fullfile(od, mf), 'info');
+            index(i).bins{end+1} = mf;
+        end
+        index(i).nEvents = numel(EV{i});
+    end
+    save(idxf, 'index', 'common');
+    fprintf('#%d spike-triggered snippets saved to %s (%.0f min)\n', f, od, toc(tTrig)/60);
+    catch ME
+        fprintf(2, '#%d spike-triggered snippets FAILED: %s\n', f, ME.message);
+        fprintf(2, '   at %s\n', strjoin(arrayfun(@(x) sprintf('%s:%d', x.name, x.line), ME.stack, 'UniformOutput', false), ' < '));
+        fclose('all');
+    end
+end
+
+%% Local functions
+function saveResult(fn, S)
+% Save the fields of S as variables (-v7.3) to a local temp file, then move it into place.
+% A failed or interrupted write on the network share then never leaves a broken result file
+% behind (an empty VR_Result.mat would otherwise be taken as done and skipped).
+tmp = [tempname '.mat'];
+save(tmp, '-struct', 'S', '-v7.3');
+movefile(tmp, fn, 'f');
+end
+
+function tf = hasResult(fn)
+% Result file present and not empty
+d = dir(fn);
+tf = ~isempty(d) && d(1).bytes > 0;
+end
+
+function tf = isMissing(x)
+tf = isempty(x) || (isnumeric(x) && all(isnan(x))) || (isstring(x) && all(ismissing(x))) || ...
+    (~ischar(x) && ~isstring(x) && ~isnumeric(x));
+end
+
+function tf = hasFields(fn, flds)
+% True when fn exists and its Result struct has all fields flds
+tf = false;
+if ~hasResult(fn), return; end
+S = load(fn, 'Result');
+tf = isfield(S,'Result') && all(isfield(S.Result, flds));
+end
+
+function [nV, off] = voltValidEnd(T, F0, frac, margin, fs)
+% Last valid voltage frame. Orange laser off: mean F0 below frac of its end level (frame off).
+% The traces already drift before that, so walk back from off to where the common trace
+% (median over ROIs of the robust z-score, 50 ms mean) last sat within 4 SD of the 20 s before.
+nT = size(T,2); nV = nT;
+Fm  = mean(F0, 1);
+off = find(Fm < frac * median(Fm(max(1,end-30000):end)), 1);
+if isempty(off), return; end
+W   = max(1, off - round(20*fs)) : off - round(3*fs);     % reference: 20 s to 3 s before off
+z   = (T(:,1:off-1) - median(T(:,W),2)) ./ (1.4826*mad(T(:,W),1,2) + eps);
+c   = movmean(median(z,1), round(0.05*fs));
+mu  = mean(c(W)); sd = std(c(W));
+last = find(abs(c - mu) < 4*sd, 1, 'last');
+nV  = max(1, last - margin);
+end
+
+function why = fullsetStale(ff, vf, gf)
+% Reason to rebuild Fullset_Result.mat ('' = up to date): the voltage or glutamate version changed,
+% or the spikes were curated (Section 2e) after it was built
+S = load(ff, 'Fullset'); V = load(vf, 'Result'); why = '';
+vF = 1; if isfield(S.Fullset.Volt, 'version'), vF = S.Fullset.Volt.version; end
+vV = 1; if isfield(V.Result, 'version'), vV = V.Result.version; end
+gF = 1; if isfield(S.Fullset.Glu, 'version'), gF = S.Fullset.Glu.version; end
+gG = gluVersion(gf);
+if vF ~= vV, why = sprintf('voltage traces v%d -> v%d', vF, vV);
+elseif gF ~= gG, why = sprintf('glutamate traces v%d -> v%d', gF, gG);
+elseif isfield(V.Result, 'SpClass') && ~isfield(S.Fullset.Volt, 'SpClass'), why = 'curated spikes (Section 2e)';
+end
+end
+
+function w = staKernel(Result, n, lags, win, minSpikes, zeroMean)
+% Spike-triggered average waveform of ROI n (Section 2c pass A: STA movie projected on its
+% footprint, baseline = median of the first 15 lags) on lags win, unit norm, for a matched filter
+% (zeroMean: mean removed too, which makes it a high-pass on its own). Empty without an STA or with
+% fewer than minSpikes spikes.
+w = [];
+if ~isfield(Result, 'STAmovieRough') || ~isfield(Result, 'STAcountRough') || Result.STAcountRough(n) < minSpikes, return; end
+sta = squeeze(sum(double(Result.ftprnt(:,:,n)) .* Result.STAmovieRough(:,:,:,n), [1 2])) / Result.STAcountRough(n);
+sta = sta(:)' - median(sta(1:15));
+[ok, k] = ismember(win, lags);
+if ~all(ok), return; end
+if nargin < 6, zeroMean = false; end
+w = sta(k); if zeroMean, w = w - mean(w); end
+w = w / norm(w);
+end
+
+function y = spikeDetTrace(tr, win, w, lags)
+% Spike-detection trace: tr minus its win-frame running median (win 0 = none), filtered with the
+% STA template w on lags (if any) and rescaled to noise units
+y = tr;
+if win > 0, y = tr - movmedian(tr, win, 2); end
+if ~isempty(w), y = matchedFilterLags(y, w, lags); y = y ./ get_threshold(y, 1); end
+end
+
+function y = matchedFilterLags(x, w, lags)
+% y(t) = sum_k w(k) x(t + lags(k)): correlation with the template, peak at the spike frame (lag 0)
+T = numel(x); y = zeros(1, T);
+for k = 1:numel(lags)
+    src = (1:T) + lags(k); ok = src >= 1 & src <= T;
+    y(ok) = y(ok) + w(k) * x(src(ok));
+end
+end
+
+function ev = spikeEvents(sp, cs, mergeFr)
+% Events from a spike train sp and complex-spike spans cs (1 x T logical): each CS span is one unit
+% (its first spike; it ends at its last spike), every other spike is a unit; units separated by
+% <= mergeFr frames (from the end of one to the start of the next) form one event at the first spike
+ev = struct('voltFrame',{}, 'spikeFrames',{}, 'nSpikes',{}, 'isCS',{}, 'csSpan',{});
+t = find(sp); if isempty(t), return; end
+lab = bwlabel(cs); lt = lab(t);
+keep = true(size(t));
+for L = unique(lt(lt > 0)), i = find(lt == L); keep(i(2:end)) = false; end
+u = t(keep); lk = lt(keep); ue = u;
+for j = find(lk > 0), ue(j) = max(t(lt == lk(j))); end
+grp = cumsum([true, (u(2:end) - ue(1:end-1)) > mergeFr]);
+for gI = 1:max(grp)
+    m = find(grp == gI); f0 = u(m(1)); f1 = ue(m(end));
+    L = unique(lk(m)); L = L(L > 0); span = zeros(0, 2);
+    for q = L(:)', fr = find(lab == q); span(end+1,:) = fr([1 end]); end %#ok<AGROW>
+    ev(end+1) = struct('voltFrame',f0, 'spikeFrames',t(t >= f0 & t <= f1), 'nSpikes',sum(t >= f0 & t <= f1), ...
+        'isCS',~isempty(L), 'csSpan',span); %#ok<AGROW>
+end
+end
+
+function trigPass(loadFn, segLen, cen, pre, post, binOf, od, prefix, rois, npix)
+% Write the snippets of one movie: pieces k (lengths segLen) are corrected by loadFn(k) (pixels x
+% frames, single); event j of neuron i (centre frame cen{i}(j)) goes to <prefix>_ROI<nn>_<binOf{i}(j)>.bin
+% once its last frame is available (a tail of the previous piece covers events across a boundary).
+% Pieces no event window touches are not loaded.
+nR = numel(rois); fid = -ones(1, nR); cur = zeros(1, nR); nxt = ones(1, nR);
+tail = zeros(npix, 0, 'single'); tailStart = 1; s0 = 0;
+for k = 1:numel(segLen)
+    nT = segLen(k);
+    need = any(cellfun(@(c) any(c + post > s0 & c - pre <= s0 + nT), cen));
+    if ~need
+        tail = zeros(npix, 0, 'single'); tailStart = s0 + nT + 1; s0 = s0 + nT;
+        continue
+    end
+    B = [tail, loadFn(k)]; bStart = tailStart;
+    for i = 1:nR
+        c = cen{i};
+        while nxt(i) <= numel(c) && c(nxt(i)) + post <= s0 + nT
+            j = nxt(i);
+            if binOf{i}(j) ~= cur(i)                      % next .bin
+                if fid(i) > 0, fclose(fid(i)); end
+                cur(i) = binOf{i}(j);
+                fid(i) = fopen(fullfile(od, sprintf('%s_ROI%02d_%03d.bin', prefix, rois(i), cur(i))), 'w');
+            end
+            fwrite(fid(i), B(:, (c(j)-pre : c(j)+post) - bStart + 1), 'single');
+            nxt(i) = j + 1;
+        end
+    end
+    keepN = min(size(B,2), pre + post);                   % frames a later event may still need
+    tail = B(:, end-keepN+1:end); tailStart = s0 + nT - keepN + 1; clear B
+    s0 = s0 + nT;
+    fprintf('    piece %d / %d, events written per neuron: %s\n', k, numel(segLen), mat2str(nxt - 1));
+end
+for i = 1:nR, if fid(i) > 0, fclose(fid(i)); end, end
+end
+
+function [names, seg] = trigRegressors(ax, hasZ, latSeg, pDefault, fs)
+% Segment regressors and segment lengths (frames) used for a trace version: from ax.regressors
+% when recorded, else z, z^2 when a depth exists plus the lateral ones when latSeg
+if isfield(ax, 'regressors')
+    names = ax.regressors;
+else
+    names = {}; if hasZ, names = {'z','z^2'}; end
+    if latSeg, names = [names, {'mc'}]; end
+end
+p = pDefault; if isfield(ax, 'params'), p = ax.params; end
+seg = round([p.segLen_s p.segOverlap_s] * fs);
+end
+
+function z = trigZ(zAll, s0, n)
+% Depth of frames s0+1 : s0+n ([] when there is none)
+z = []; if ~isempty(zAll), z = zAll(s0+1 : s0+n); end
+end
+
+function X = trigX(names, z, mc)
+% Segment regressor matrix as built in Section 2c/3: z, z^2 first, then mc, mc^2, mc_x*mc_y
+X = zeros(max(numel(z), size(mc,1)), 0);
+if any(strcmp(names, 'z')), X = [z(:), z(:).^2]; end
+if any(startsWith(names, 'mc')), X = [X, mc, mc.^2, mc(:,1).*mc(:,end)]; end
+end
+
+function P = pixSegRegress(P, X, seg, blk)
+% Segment regression (ztRegress) of every pixel row of P, in blocks of blk pixels
+if isempty(X), return; end
+ok = all(isfinite(X), 2)';
+[segs, W] = ztSegments(size(P,2), seg(1), seg(2));
+for b0 = 1:blk:size(P,1)
+    bi = b0 : min(size(P,1), b0+blk-1);
+    P(bi,:) = single(ztRegress(double(P(bi,:)), X, ok, segs, W));
+end
+end
+
+function P = gluTrigTile(fp, k, szG, lowWin, nTk, z, names, seg, blk)
+% Corrected glutamate tile k as in Section 3, every pixel (pixels x frames, single)
+[P, ~, ~, mcxy] = gluPrepTile(fp, k, szG(1), szG(2), lowWin, 'project', (1:prod(szG))', {}, [], nTk);
+P = pixSegRegress(single(P), trigX(names, z, mcxy), seg, blk);
+end
+
+function P = voltTrigChunk(fp, j, Device_Data, nT, z, mc, names, seg, blk)
+% Corrected voltage chunk j as in Section 2c v3+, every pixel: pixel means + motion-regressed residual
+% (loadVoltChunk: F = M - movR), then the segment regression (pixels x frames, single)
+sz = double(Device_Data{3}.ROI([2 4]));                  % [nCol nRow]
+[movR, ~, ~, nTr, M] = loadVoltChunk(fp, j, sz, nT);
+P = single(M(:) - reshape(movR, [], nTr)); clear movR
+P = pixSegRegress(P, trigX(names, z, mc), seg, blk);
+end
+
+function v = gluVersion(fn)
+% Version of the glutamate traces in Glu_Result.mat: 0 = no traces, 1 = traces without a version
+v = 0;
+if ~hasResult(fn), return; end
+w = who('-file', fn);
+if ~ismember('T_glu', w), return; end
+v = 1; if ismember('version', w), S = loadRetry(fn, 'version'); v = S.version; end
+end
+
+function GR = archiveGlu(fp, ver, szG)
+% Before re-projecting: the old Glu_Result.mat is kept as Glu_Result_v<ver>.mat; the synapses and
+% detection results are reused (S_glu as a sparse [pixels x synapses] matrix)
+gf = fullfile(fp, 'Glu_Result.mat'); af = fullfile(fp, sprintf('Glu_Result_v%d.mat', ver));
+old = loadRetry(gf);
+if ~isfile(af), copyfile(gf, af); fprintf('  old result kept as %s\n', af); end
+keep = {'zSeedMin','detectMask','detectTiles','AvgGluImg','synCentroid','synEventCount','nEvents', ...
+    'fracUnassigned','cluster','eventsPerTile','S_glu'};
+GR = struct();
+for k = reshape(intersect(keep, fieldnames(old), 'stable'), 1, []), GR.(k{1}) = old.(k{1}); end
+if ~isfield(GR, 'S_glu'), error('Glu_Result.mat v%d has no S_glu', ver); end
+if ndims(GR.S_glu) == 3, GR.S_glu = sparseFootprints(GR.S_glu, szG); end
+if ~isfield(GR, 'detectMask'), GR.detectMask = true(szG); end
+end
+
+function v = voltVersion(fn)
+% Version of the voltage traces in Volt_Result.mat: 0 = no traces, 1 = traces without a version
+v = 0;
+if ~hasResult(fn), return; end
+S = load(fn, 'Result');
+if ~isfield(S, 'Result') || ~isfield(S.Result, 'traces'), return; end
+v = 1; if isfield(S.Result, 'version'), v = S.Result.version; end
+end
+
+function Result = archiveVolt(fp, Result, ver)
+% Before re-extracting: the old Volt_Result.mat is kept as Volt_Result_v<ver>.mat. ROIs (2b),
+% footprints (pass A) and their glutamate mapping (2d) are reused; the spike curation (2e) goes to
+% Result.prevCuration; a partial curation file is renamed with the version
+vf = fullfile(fp, 'Volt_Result.mat'); af = fullfile(fp, sprintf('Volt_Result_v%d.mat', ver));
+if ~isfile(af), copyfile(vf, af); fprintf('  old result kept as %s\n', af); end
+pf = fullfile(fp, 'Volt_spike_curation_partial.mat');
+if isfile(pf)
+    movefile(pf, fullfile(fp, sprintf('Volt_spike_curation_partial_v%d.mat', ver)));
+    fprintf('  partial spike curation of v%d renamed\n', ver);
+end
+keep = {'VmovTimesegments','t_ax','ref_im','ROIpoly', 'spike_rough','rough_tr','ftprnt', ...
+    'STAmovieRough','STAcountRough', 'ref_im_glu','ftprnt_glu','ROIpoly_glu','gluImageSize'};
+cur = {'spike','CStrace','SpClass','SpikeThr','CSThr','CS_NSpike','CS_MaxAUC','CS_NSpike2ISI', ...
+    'GoodNeuron','EnvInfo','SpikeFloor','HPWin','STAKernel','DetHP','SpikeEnd'};
+New = struct();
+for k = reshape(intersect(keep, fieldnames(Result), 'stable'), 1, []), New.(k{1}) = Result.(k{1}); end
+c = reshape(intersect(cur, fieldnames(Result), 'stable'), 1, []);
+if ~isempty(c)
+    prev = struct('version', ver);
+    for k = c, prev.(k{1}) = Result.(k{1}); end
+    New.prevCuration = prev;
+    fprintf('  spike curation of v%d moved to Result.prevCuration: Section 2e has to be redone\n', ver);
+end
+Result = New;
+end
+
+function [A, ax] = axialStack(fp, ref, p, chan, Device_Data, tformReg)
+% Structure-stack slices around the recording site for depth matching, aligned to the movie mean
+% ref (one rigid shift from the best-matching slice). chan 'orange': orange stack warped into the
+% voltage camera (tformReg); 'blue': blue stack, already in the glutamate camera. A = [] when
+% unavailable (ax.reason says why).
+A = []; ax = struct('applied',false, 'reason','');
+sf = fullfile(fp, 'Structure_Result.mat');
+if ~p.use, ax.reason = 'axial correction off (opt)'; return; end
+if ~hasResult(sf), ax.reason = 'no Structure_Result.mat (run Section 4 first)'; return; end
+load(sf, 'Structure');
+fld = [chan 'File'];
+if ~isfield(Structure, fld) || ~isfile(Structure.(fld)), ax.reason = sprintf('no %s structure stack', chan); return; end
+if Structure.corrPeak < p.minStructPeak
+    ax.reason = sprintf('recording site in the stack uncertain (correlation %.2f)', Structure.corrPeak); return
+end
+file = Structure.(fld); info = imfinfo(file);
+dz = 2; tok = regexp(info(1).ImageDescription, 'spacing=([\d.]+)', 'tokens', 'once');
+if ~isempty(tok), dz = str2double(tok{1}); end
+zs = Structure.slice + (-p.zHalf:p.zHalf); zs = zs(zs >= 1 & zs <= numel(info));
+m = p.marginPx;
+rows = Structure.rows(1)-m : Structure.rows(end)+m; cols = Structure.cols(1)-m : Structure.cols(end)+m;
+st = ztReadStack(file, zs, rows, cols);
+if strcmp(chan, 'orange'), st = ztWarpToVolt(st, Device_Data, tformReg, m, p.marginV); m = p.marginV; end
+[As, al] = ztAlignStack(st, ref, m, p.hpSigma);
+ax = struct('applied',false, 'reason','', 'stack',file, 'slices',zs, 'dz',dz, 'structSlice',Structure.slice, 'align',al);
+if al.peak < p.minAlignPeak, ax.reason = sprintf('stack alignment peak %.2f', al.peak); return; end
+A = As;
+end
+
+function [iz, ctr] = axialDepth(mov, A, p)
+% Depth (fractional slice index of A) of every frame of a movie chunk: frames (binned by p.bin)
+% matched to the slices (ztDepth), running median, linear interpolation to the frames;
+% ctr = correlation drop one slice away from the best (depth sensitivity)
+[izb, C] = ztDepth(mov, A, p.bin, p.hpSigma, p.border, p.subSlice);
+if p.zMedFilt > 1, izb = medfilt1(izb, p.zMedFilt, 'omitnan', 'truncate'); end
+nT = size(mov, 3); tb = ((1:numel(izb)) - 0.5) * p.bin + 0.5;
+iz = interp1(tb, izb, 1:nT, 'linear', 'extrap');
+ctr = ztContrast(C);
+end
+
+function [Tc, zO, ax] = axialRegress(T, iz, chunkLen, fs, ax, p, Xlat)
+% Segment regression of the traces (rows of T) within each chunk/tile, in overlapping segments
+% (p.segLen_s, p.segOverlap_s; removed parts blended across the overlaps): z and z^2 (z = depth in
+% um from its median; iz = [] for none) and the lateral regressors Xlat (frames x k, [] for none)
+% in one fit. Frames without depth are left uncorrected. Equivalent to regressing every pixel of
+% the movie and then projecting (the projection is linear).
+if nargin < 7, Xlat = []; end
+nT = size(T, 2); X = zeros(nT, 0); names = {}; zO = [];
+if ~isempty(iz)
+    izRef = median(iz, 'omitnan');
+    zO = (iz - izRef) * ax.dz;
+    X = [X, zO(:), zO(:).^2]; names = [names, {'z', 'z^2'}];
+end
+if ~isempty(Xlat)
+    X = [X, Xlat(1:nT,:)];
+    names = [names, arrayfun(@(k) sprintf('mc%d', k), 1:size(Xlat,2), 'UniformOutput', false)];
+end
+ok = all(isfinite(X), 2)';
+Tc = T; e = cumsum(chunkLen); s0 = [0 e(1:end-1)]; beta = cell(1, numel(chunkLen));
+for c = 1:numel(chunkLen)
+    idx = s0(c)+1 : e(c);
+    [segs, W] = ztSegments(numel(idx), round(p.segLen_s*fs), round(p.segOverlap_s*fs));
+    [Tc(:,idx), ~, beta{c}] = ztRegress(T(:,idx), X(idx,:), ok(idx), segs, W);
+end
+if ~isempty(iz)
+    ax.applied = true; ax.izRef = izRef;
+    ax.zRef_um = (izRef - (ax.structSlice - ax.slices(1) + 1)) * ax.dz;
+    ax.zSD_um = std(zO, 'omitnan'); ax.noDepthPct = 100 * mean(isnan(zO));
+end
+ax.regressors = names; ax.beta = beta; ax.params = p;
+end
+
+function consolidateVolt(fp, removeOld)
+% Keep the more complete of Volt_Result.mat / VoltResult.mat as Volt_Result.mat:
+% has traces > more fields > newer file. The other file is removed (removeOld) once the kept
+% Volt_Result.mat has been read back.
+a = fullfile(fp,'Volt_Result.mat'); b = fullfile(fp,'VoltResult.mat');
+if ~hasResult(b), return; end
+if ~hasResult(a)
+    if removeOld, movefile(b, a); fprintf('%s: VoltResult.mat renamed to Volt_Result.mat\n', fp);
+    else, fprintf('%s: would rename VoltResult.mat to Volt_Result.mat\n', fp); end
+    return
+end
+ka = resultScore(a); kb = resultScore(b);
+d = find(ka ~= kb, 1);
+keepB = ~isempty(d) && kb(d) > ka(d);
+if keepB, keepName = 'VoltResult.mat (moved to Volt_Result.mat)'; else, keepName = 'Volt_Result.mat'; end
+if ~removeOld, fprintf('%s: would keep %s and remove the other\n', fp, keepName); return; end
+if keepB, movefile(b, a, 'f'); else, delete(b); end
+S = load(a, 'Result'); assert(isfield(S,'Result'), '%s: Volt_Result.mat unreadable', fp);
+fprintf('%s: kept %s, removed the other\n', fp, keepName);
+end
+
+function k = resultScore(fn)
+S = load(fn, 'Result'); info = dir(fn);
+k = [isfield(S.Result,'traces'), numel(fieldnames(S.Result)), info.datenum];
+end
+
+function vc = voltageClock(Device_Data, o_laser, maxTime)
+% Voltage (orange) camera frame counter, patched past the counter saturation, and the chunking
+vc.DAQ_rate = Device_Data{1,2}.Counter_Inputs(1,1).rate;
+vc.sz = double(Device_Data{3}.ROI([2 4]));                   % [nCol nRow]
+cam1_vsyn = Device_Data{1,2}.Counter_Inputs(1,1).data;
+start_idx = find(cam1_vsyn == max(cam1_vsyn), 1);
+end_idx   = numel(Device_Data{1,2}.buffered_tasks(1,2).channels(1,1).data);
+trig      = find(diff(cam1_vsyn) > 0);
+segment_size = round(median(diff(trig)));
+n_to_add  = end_idx - start_idx + 1;
+added     = repelem((cam1_vsyn(start_idx-1)+1 : cam1_vsyn(start_idx-1)+ceil(n_to_add/segment_size))', segment_size);
+cam1_vsyn(start_idx:end_idx) = added(1:n_to_add);
+seg = (cam1_vsyn(o_laser)+2) : maxTime : cam1_vsyn(end);
+seg(end+1) = cam1_vsyn(end);
+vc.cam1_vsyn = cam1_vsyn;
+vc.VmovTimesegments = seg;
+vc.nFrame2analyze = seg(end) - seg(1);
+vc.CamTrigger = find(diff(cam1_vsyn));
+trigVec = ind2vec(numel(cam1_vsyn), trig(1):segment_size:cam1_vsyn(end)*segment_size, 1);
+trigVec = trigVec(o_laser:end);
+first   = find(trigVec > 0, 1);
+vc.t_vol = (first : segment_size : (first + segment_size*vc.nFrame2analyze)) / vc.DAQ_rate;
+end
+
+function gc = gluClock(Device_Data, mod488, maxTime)
+% Glutamate (blue) camera frame counter, patched past the counter saturation, and the tiling
+DAQ_rate  = Device_Data{1,2}.Counter_Inputs(1,1).rate;
+cam2_vsyn = Device_Data{1,2}.Counter_Inputs(1,2).data;
+segment_size2 = round(median(diff(find(diff(cam2_vsyn) == 1))));
+start_idx = find(cam2_vsyn == max(cam2_vsyn), 1);
+end_idx   = numel(Device_Data{1,2}.buffered_tasks(1,2).channels(1,2).data);
+n_to_add  = end_idx - start_idx + 1;
+added     = repelem((cam2_vsyn(start_idx-1)+1 : cam2_vsyn(start_idx-1)+ceil(n_to_add/segment_size2))', segment_size2);
+cam2_vsyn(start_idx:end_idx) = added(1:n_to_add);
+cam2_trig = find(diff(cam2_vsyn) == 1) + 1;
+t_start   = cam2_trig(cam2_vsyn(mod488)+2) - mod488 + 1;
+if cam2_vsyn(end) < maxTime
+    seg = [(cam2_vsyn(mod488)+2) cam2_vsyn(end)];
+else
+    seg = (cam2_vsyn(mod488)+2) : maxTime : cam2_vsyn(end);
+    seg(end+1) = cam2_vsyn(end);
+end
+gc.GluemovTimesegments = seg;
+gc.t_glu = (t_start : segment_size2 : (t_start + segment_size2*(seg(end)-seg(1)))) / DAQ_rate;
+end
+
+function gluSummaryFigure(GR, ttl, fn, figNo)
+% Glutamate extraction summary: synapses on the mean image, footprints, event counts,
+% dF/F heatmap, example traces, population mean and motion
+[H, W] = size(GR.AvgGluImg);
+S = GR.S_glu; if ~ismatrix(S) || size(S,1) ~= H*W, S = reshape(S, H*W, []); end
+N = size(S,2); nT = size(GR.dFF_glu,2);
+t = GR.t_ax(1:min(end,nT)); t = t(:)'; if numel(t) < nT, t = (0:nT-1)/GR.frameRate; end
+cnt = GR.synEventCount(:);
+[~, ord] = sort(cnt, 'descend');
+fig = figure(figNo); clf; set(fig, 'Name', ttl);
+try, theme(fig, 'light'); catch, set(fig, 'Color', 'w'); end
+tl = tiledlayout(fig, 3, 3, 'TileSpacing', 'compact', 'Padding', 'compact');
+% 1: mean image + boundary + centroids by event count
+ax = nexttile(tl, 1);
+g = mat2gray(GR.AvgGluImg, double(prctile(GR.AvgGluImg(:), [1 99.7])));
+image(ax, repmat(g, [1 1 3])); axis(ax, 'image', 'off'); hold(ax, 'on');   % RGB: colormap only for the dots
+B = bwboundaries(GR.detectMask);
+for b = 1:numel(B), plot(ax, B{b}(:,2), B{b}(:,1), 'y', 'LineWidth', 1); end
+scatter(ax, GR.synCentroid(:,1), GR.synCentroid(:,2), 6, log10(max(cnt,1)), 'filled'); colormap(ax, turbo);
+clim(ax, [0 max(1, log10(max(cnt)))]);
+cb = colorbar(ax); cb.Label.String = 'log_{10} events';
+title(ax, sprintf('%d synapses (boundary: yellow)', N), 'FontSize', 9);
+% 2: footprints
+ax = nexttile(tl, 2); imagesc(ax, reshape(full(max(S, [], 2)), H, W)); axis(ax, 'image', 'off'); colormap(ax, hot);
+title(ax, 'footprints (max over synapses)', 'FontSize', 9);
+% 3: events per tile + events per synapse
+ax = nexttile(tl, 3);
+bar(ax, GR.eventsPerTile); ylabel(ax, 'events');
+set(ax, 'XTick', 1:numel(GR.detectTiles), 'XTickLabel', string(GR.detectTiles)); xlabel(ax, 'detection tile');
+title(ax, {sprintf('%d events, zSeedMin %.2f', GR.nEvents, GR.zSeedMin), ...
+    sprintf('events/synapse: median %g, max %g', median(cnt), max(cnt)), ...
+    sprintf('%.0f%% of events unassigned', 100*GR.fracUnassigned)}, 'FontSize', 9);
+% 4: dF/F heatmap, synapses sorted by event count, time binned
+ax = nexttile(tl, 4, [1 3]);
+nb = min(nT, 1500); edges = round(linspace(0, nT, nb+1));
+Hm = zeros(N, nb);
+for k = 1:nb, Hm(:,k) = mean(GR.dFF_glu(ord, edges(k)+1:edges(k+1)), 2); end
+imagesc(ax, t([1 end]), [1 N], Hm, prctile(Hm(:), [1 99.5])); colormap(ax, parula); colorbar(ax);
+ylabel(ax, 'synapse (by event count)'); title(ax, 'dF/F', 'FontSize', 9);
+% 5: example traces (most events)
+ax = nexttile(tl, 7, [1 2]); hold(ax, 'on');
+nEx = min(15, N);
+for k = 1:nEx
+    tr = GR.dFF_glu(ord(k), :);
+    plot(ax, t, tr / (prctile(tr, 99.5) + eps) + k, 'LineWidth', 0.5);
+end
+xlabel(ax, 'time (s)'); ylabel(ax, 'synapse (scaled dF/F)'); axis(ax, 'tight');
+title(ax, sprintf('top %d synapses by event count', nEx), 'FontSize', 9);
+% 6: population mean dF/F + motion
+ax = nexttile(tl, 9);
+yyaxis(ax, 'left'); plot(ax, t, mean(GR.dFF_glu, 1), 'LineWidth', 0.5); ylabel(ax, 'mean dF/F');
+if isfield(GR, 'mc') && size(GR.mc,1) >= nT
+    yyaxis(ax, 'right'); plot(ax, t, GR.mc(1:nT, 1) - median(GR.mc(1:nT, 1)), 'LineWidth', 0.5); ylabel(ax, 'motion x (px)');
+end
+xlabel(ax, 'time (s)'); axis(ax, 'tight'); title(ax, 'population mean and motion', 'FontSize', 9);
+title(tl, ttl, 'Interpreter', 'none', 'FontSize', 11);
+drawnow;
+savePNG(fig, fn);
+end
+
+function [Ntile, tileMax, endFr] = gluTileLimits(fp, nRow2, nCol2, endFrame)
+% Glutamate tiles mc201.bin, mc202.bin, ... and their usable frames. endFrame (Excel G, frames counted
+% from the first frame of mc201.bin) ends the recording early: later tiles are dropped and the
+% last tile is cut. tileMax(k) = frames to read from tile k (Inf = all).
+b = dir(fullfile(fp, 'mc2*.bin'));
+b = b(~cellfun(@isempty, regexp({b.name}, '^mc2\d{2}\.bin$', 'once')));   % not the voltage mc2X.bin
+nFr = sort(arrayfun(@(x) sscanf(x.name, 'mc2%d.bin'), b));
+len = zeros(size(nFr));
+for i = 1:numel(nFr)
+    d = dir(fullfile(fp, sprintf('mc2%02d.bin', nFr(i)))); len(i) = d.bytes / (2*nRow2*nCol2);
+end
+Ntile = numel(nFr); tileMax = inf(1, Ntile); endFr = Inf;
+if Ntile == 0 || isempty(endFrame) || ~isnumeric(endFrame) || ~isfinite(endFrame), return; end
+endFr = endFrame;
+cs = cumsum(len);
+Ntile = find(cs >= endFr, 1);
+if isempty(Ntile), Ntile = numel(nFr); endFr = cs(end); end   % EndFrame beyond the recording
+tileMax = inf(1, Ntile);
+tileMax(Ntile) = endFr - sum(len(1:Ntile-1));
+end
+
+function [segs, W] = ztSegments(nT, L, O)
+% Segments of L frames overlapping by O frames covering 1:nT; the last one ends at nT and is merged
+% into the previous one when it would be shorter than L/2. Blending weights: linear ramps over each
+% overlap that sum to 1, 1 elsewhere. One segment when nT <= L.
+if nT <= L, segs = {1:nT}; W = ones(1, nT); return; end
+st = 1:(L-O):nT; en = min(st + L - 1, nT);
+k = find(en == nT, 1); st = st(1:k); en = en(1:k);                        % last segment reaches nT
+if numel(st) > 1 && en(end) - st(end) + 1 < L/2, st(end) = []; en(end) = []; en(end) = nT; end
+nS = numel(st); segs = cell(1, nS); W = zeros(nS, nT);
+for s = 1:nS
+    idx = st(s):en(s); segs{s} = idx; w = ones(1, numel(idx));
+    if s > 1, ov = en(s-1) - st(s) + 1; w(1:ov) = (1:ov) / (ov+1); end
+    if s < nS, ov = en(s) - st(s+1) + 1; w(end-ov+1:end) = min(w(end-ov+1:end), (ov:-1:1) / (ov+1)); end
+    W(s, idx) = w;
+end
+end
+
+function [Fr, comp, b] = ztRegress(F, X, ok, segs, W)
+% Regress the columns of X out of every row of F within each segment (X and F centred within the
+% segment, frames with ok only); the removed components are blended with the weights W
+% (segments x frames). Fr = F - component; frames without ok are left unchanged.
+% b{s}: coefficients (regressors x rows)
+[nR, nT] = size(F); comp = zeros(nR, nT); wsum = zeros(1, nT); b = cell(1, numel(segs));
+for s = 1:numel(segs)
+    k = segs{s}(ok(segs{s}));
+    if numel(k) < 10 * size(X,2), continue; end
+    Xs = X(k,:) - mean(X(k,:), 1);
+    b{s} = pinv(Xs) * (F(:,k) - mean(F(:,k), 2))';       % pinv: regressors can be collinear in a segment
+    comp(:,k) = comp(:,k) + W(s,k) .* (Xs * b{s})';
+    wsum(k) = wsum(k) + W(s,k);
+end
+comp = comp ./ wsum; comp(:, wsum == 0) = 0;
+Fr = F - comp;
+end
+
+function S = ztReadStack(file, zs, rows, cols)
+% Slices zs of a tif stack, region rows x cols (zero outside the stack)
+info = imfinfo(file);
+S = zeros(numel(rows), numel(cols), numel(zs), 'single');
+vr = rows >= 1 & rows <= info(1).Height; vc = cols >= 1 & cols <= info(1).Width;
+for k = 1:numel(zs)
+    I = imread(file, zs(k), 'Info', info);
+    S(vr, vc, k) = single(I(rows(vr), cols(vc)));
+end
+end
+
+function V = ztWarpToVolt(S, Device_Data, tformReg, m, mV)
+% Glutamate-camera stack (with margin m) -> voltage camera (with margin mV), via tformReg
+Rg = refFromROI(size(S(:,:,1)) - 2*m, double(Device_Data{1,4}.ROI));
+Rg = imref2d(size(S(:,:,1)), Rg.XWorldLimits + [-m m], Rg.YWorldLimits + [-m m]);
+Rv = refFromROI(double(Device_Data{1,3}.ROI([4 2])), double(Device_Data{1,3}.ROI));
+Rv = imref2d(Rv.ImageSize + 2*mV, Rv.XWorldLimits + [-mV mV], Rv.YWorldLimits + [-mV mV]);
+V = zeros([Rv.ImageSize size(S,3)], 'single');
+for k = 1:size(S,3)
+    V(:,:,k) = imwarp(S(:,:,k), Rg, tformReg, 'OutputView', Rv);
+end
+end
+
+function [A, al] = ztAlignStack(S, ref, m, sig)
+% Rigid xy alignment of a stack (margin m around the field of view) to the movie mean: the slice
+% with the highest normalised cross-correlation gives one shift, applied to all slices
+hp = @(x) x - imgaussfilt(x, sig);
+[H, W] = size(ref); T = hp(double(ref));
+pk = zeros(1, size(S,3)); sh = zeros(size(S,3), 2);
+for k = 1:size(S,3)
+    c = normxcorr2(T, hp(double(S(:,:,k))));
+    c = c(H:end-H+1, W:end-W+1);                         % template fully inside
+    [pk(k), i] = max(c(:)); [r, cc] = ind2sub(size(c), i);
+    sh(k,:) = [r cc] - 1 - m;                             % shift from the nominal position
+end
+[~, best] = max(pk);
+r0 = m + sh(best,1); c0 = m + sh(best,2);
+A = S(r0 + (1:H), c0 + (1:W), :);
+al = struct('best',best, 'peak',pk(best), 'shift',sh(best,:), 'peaks',pk);
+end
+
+function [iz, C] = ztDepth(mov, A, bin, sig, border, subSlice)
+% Best-matching slice of every (binned) frame: Pearson correlation after spatial high-pass
+% within the border-cropped field; matches at either stack end are NaN. subSlice: refine by the
+% vertex of the parabola through the best slice and its two neighbours (offset within +-0.5).
+% Frames are processed in blocks in single precision (large glutamate tiles).
+[H, W, T] = size(mov); nb = floor(T / bin); nZ = size(A, 3);
+hp = @(x) x - imgaussfilt(x, sig);
+rr = border+1:H-border; cc = border+1:W-border;
+R = hp(single(A)); R = reshape(R(rr,cc,:), [], nZ); R = (R - mean(R,1)) ./ std(R,0,1);
+C = zeros(nb, nZ); blk = max(1, floor(200 / bin) * 1);
+for b0 = 1:blk:nb
+    bi = b0 : min(nb, b0+blk-1); nbi = numel(bi);
+    X = single(mov(:, :, (bi(1)-1)*bin+1 : bi(end)*bin));
+    if bin > 1, X = reshape(mean(reshape(X, H, W, bin, nbi), 3), H, W, nbi); end
+    X = imgaussfilt(hp(X), 1); X = reshape(X(rr,cc,:), [], nbi);
+    X = (X - mean(X,1)) ./ std(X,0,1);
+    C(bi,:) = double(X' * R) / (size(X,1) - 1);
+end
+[~, iz] = max(C, [], 2); iz = iz(:)';
+iz(iz == 1 | iz == nZ) = NaN;
+if subSlice
+    k = find(~isnan(iz)); i0 = iz(k);
+    cm = C(sub2ind(size(C), k, i0-1)); c0 = C(sub2ind(size(C), k, i0)); cp = C(sub2ind(size(C), k, i0+1));
+    d = 0.5 * (cm - cp) ./ (cm - 2*c0 + cp);
+    d(~isfinite(d)) = 0;
+    iz(k) = i0 + max(-0.5, min(0.5, d));
+end
+end
+
+function d = ztContrast(C)
+% Median drop of the frame-slice correlation from the typical best slice to its two neighbours
+[~, iz] = max(C, [], 2);
+k = min(max(round(median(iz)), 2), size(C,2)-1);
+d = median(C(:,k) - mean(C(:,[k-1 k+1]), 2));
+end
+
+function S = loadRetry(fn, varargin)
+% load() for -v7.3 files on the network share. Some files fail over SMB with HDF5
+% 'Error closing file' every time (not transient; the file itself is intact). Then copy it to
+% local disk, load the copy and delete it.
+try
+    S = load(fn, varargin{:}); return
+catch ME
+    fprintf('  network load failed (%s) -> loading a local copy\n', ME.message);
+end
+tmp = [tempname '.mat'];
+copyfile(fn, tmp);
+c = onCleanup(@() delete(tmp));
+S = load(tmp, varargin{:});
+end
+
+function [dFF, knots] = tileBaselineDFF(T, tileLen, win, pct)
+% Baseline of each trace in every tile: pct percentile of the first and of the last win frames,
+% joined linearly across the tile; dFF = T ./ baseline - 1. knots: [front end] x tiles per trace.
+[N, nT] = size(T);
+dFF = zeros(N, nT); knots = zeros(N, 2, numel(tileLen));
+e = cumsum(tileLen); s0 = [1, e(1:end-1) + 1];
+for k = 1:numel(tileLen)
+    idx = s0(k):e(k); n = numel(idx);
+    if n >= 2*win
+        b1 = prctile(T(:, idx(1:win)), pct, 2);
+        b2 = prctile(T(:, idx(end-win+1:end)), pct, 2);
+        tc = ((1:n) - (win+1)/2) / (n - win);             % 0 at the front window centre, 1 at the end
+        B  = b1 + (b2 - b1) .* tc;
+    else
+        b1 = prctile(T(:, idx), pct, 2); b2 = b1; B = repmat(b1, 1, n);
+    end
+    knots(:,:,k) = [b1 b2];
+    dFF(:, idx) = T(:, idx) ./ B - 1;
+end
+end
+
+function t = detectionTiles(Ntile, nFirst, nMid)
+% First nFirst tiles plus the nMid other tiles closest to the middle of the recording
+first = 1:min(nFirst, Ntile);
+rest  = setdiff(1:Ntile, first);
+[~, o] = sort(abs(rest - (Ntile+1)/2));
+t = sort([first, rest(o(1:min(nMid, numel(rest))))]);
+end
+
+function R = insideBoundary(R, mask)
+% Keep synapses whose centroid lies inside the detection boundary (smoothing lets footprints at
+% the edge spill just outside it). S_glu may be H x W x N or sparse [H*W x N].
+if isempty(R.S_glu), return; end
+[H, W] = size(mask);
+c = min(max(round(R.synCentroid(:,1)),1),W); r = min(max(round(R.synCentroid(:,2)),1),H);
+keep = mask(sub2ind([H W], r, c));
+if ismatrix(R.S_glu) && size(R.S_glu,1) == H*W, R.S_glu = R.S_glu(:,keep);
+else, R.S_glu = R.S_glu(:,:,keep); end
+R.synCentroid = R.synCentroid(keep,:);
+for fld = {'synEventCount','T_glu','F0_glu','dFF_glu'}
+    if isfield(R, fld{1}) && size(R.(fld{1}),1) == numel(keep), R.(fld{1}) = R.(fld{1})(keep,:); end
+end
+end
+
+function z = pickSeedThreshold(mov_sub, smoothSigma, z0, ttl, mask)
+% Seed-threshold slider with the z-score of extractGluSNFR3 (smoothing + robust per-pixel z),
+% shown inside the detection boundary mask. max(zMov > thr, [], 3) equals (max-z projection >
+% thr), so only the projection is kept.
+mov_sm = imgaussfilt(single(mov_sub), smoothSigma);
+medImg = median(mov_sm, 3);
+sigImg = 1.4826 * mad(mov_sm, 1, 3) + eps;
+zMax = -Inf(size(medImg), 'single');
+for t = 1:size(mov_sm,3), zMax = max(zMax, (mov_sm(:,:,t) - medImg) ./ sigImg); end
+clear mov_sm
+zMax(~isfinite(zMax)) = 0;                       % flat pixels (e.g. zero borders after motion correction)
+zMax(~mask) = 0;                                 % outside the detection boundary
+zTop = double(max(6, ceil(min(prctile(zMax(:), 99.99), 100))));   % finite double limits for uislider;
+                                                  % a few extreme pixels only saturate the display
+z0 = double(z0);
+fig = uifigure('Name', ['zSeedMin: ' ttl], 'Position', [80 80 920 610]);
+ax1 = uiaxes(fig, 'Position', [20 160 430 415]);
+ax2 = uiaxes(fig, 'Position', [465 160 430 415]);
+sld = uislider(fig, 'Position', [20 115 880 3], 'Limits', [0 zTop], 'Value', min(z0, zTop));
+lbl = uilabel(fig, 'Position', [20 70 700 26], 'FontSize', 13);
+uilabel(fig, 'Position', [20 585 880 22], 'Text', ttl, 'FontWeight', 'bold', 'Interpreter', 'none');
+uibutton(fig, 'Text', 'Accept', 'Position', [720 18 180 36], 'FontSize', 13, 'ButtonPushedFcn', @(~,~) uiresume(fig));
+sld.ValueChangedFcn = @(src,~) redraw(src.Value);
+redraw(sld.Value);
+uiwait(fig);
+z = sld.Value;
+close(fig);
+    function redraw(thr)
+        seed = zMax > thr;
+        lbl.Text = sprintf('zSeedMin = %.2f   (%d seed pixels, %.2f%% of the detection area)', thr, nnz(seed), 100*nnz(seed)/nnz(mask));
+        imagesc(ax1, seed); colormap(ax1, gray); axis(ax1, 'image'); axis(ax1, 'off');
+        title(ax1, sprintf('max(zMov > %.2f, [], 3)', thr), 'FontSize', 9);
+        imagesc(ax2, zMax, [0 zTop]); colormap(ax2, turbo); axis(ax2, 'image'); axis(ax2, 'off');
+        title(ax2, 'Max z-score projection', 'FontSize', 9);
+        drawnow;
+    end
+end
+
+function [movA, movB, mov2_mc, mcxy, regs, iz] = gluPrepTile(fp, k, nRow2, nCol2, lowWin, mode, pix, regs, tk, nMax, depthFn)
+% Glutamate tile k: bleach correction, then
+%   'detect'  : movA = high-pass movie (movmedian low-pass subtracted) with motion and row
+%               (line) artifacts regressed out, then the temporal matched filter tk (if given);
+%               movB = []; regs = the regressors used (taken before the temporal filter)
+%   'project' : movA = [numel(pix) x T] traces of pixels pix from the bleach-normalised movie, no
+%               low-pass subtraction, with the SAME regressors removed and each pixel's mean kept
+%               (baseline preserved); movB = []. Pass regs from 'detect' to skip recomputing them.
+% The row-artifact regressors are always taken from the high-pass movie, as in detection. Each
+% pixel is regressed independently, so regressing only pix gives the same values as the full frame.
+% The whole mc2XX.bin is read (readBinMov takes the frame count from the file size; the tile
+% length set at motion correction need not match GlumoviemaxTime), then cut to nMax frames (blue
+% laser off afterwards) before any bleach fit or baseline, so the dark frames cannot bias them.
+% depthFn (optional, 'project'): iz = depthFn(bleach-normalised tile), the axial depth of every frame
+% (per-frame scaling does not change the frame-to-stack correlation).
+if nargin < 8, regs = {}; end
+if nargin < 11, depthFn = []; end
+iz = [];
+if nargin < 9, tk = []; end
+if nargin < 10 || isempty(nMax), nMax = Inf; end
+mov2_mc = double(readBinMov(fullfile(fp, sprintf('mc2%02d.bin',k)), nRow2, nCol2));
+mov2_mc = mov2_mc(:, :, 1:min(end, nMax));
+nT = size(mov2_mc,3);
+S = load(fullfile(fp, sprintf('mc2Trace%02d.mat',k)), 'mcTrace2');
+mcxy = S.mcTrace2.xymean(1:nT,:);
+meanF = squeeze(mean(mov2_mc,[1 2]));
+y_fit = expfitDM_2((1:nT)', meanF, (1:nT)', [10000 100]);
+mov_filt = mov2_mc ./ reshape(y_fit,1,1,[]);
+movB = [];
+if strcmp(mode,'project') && ~isempty(depthFn), iz = depthFn(mov_filt); end
+if strcmp(mode,'project'), mov2_mc = []; end
+if strcmp(mode,'detect') || isempty(regs)
+    mov_lw  = movmedian(mov_filt, lowWin, 3);
+    mov_sub = mov_filt - mov_lw; clear mov_lw
+    regs = {mcxy, mcxy.^2, mcxy(:,1).*mcxy(:,end)};
+    for r = 1:numel(regs), mov_sub = SeeResiduals(mov_sub, regs{r}); end
+    regs{end+1} = permute(mean(mov_sub,2),[3 1 2]);    % row (line) artifacts
+    if strcmp(mode,'detect')
+        movA = SeeResiduals(mov_sub, regs{end});
+        if ~isempty(tk), movA = temporalMatchedFilter(movA, tk); end
+        return
+    end
+    clear mov_sub
+end
+P = reshape(mov_filt, [], nT); P = P(pix,:); clear mov_filt
+for r = 1:numel(regs), P = regressKeepMean(P, regs{r}); end
+movA = P;
+end
+
+function w = gluTemporalKernel(dt_s, tauRise_ms, tauDecay_ms)
+% Per-frame weights of the glutamate transient h(t) = exp(-t/tau_decay) - exp(-t/tau_rise),
+% integrated over each exposure (frame n covers [n, n+1]*dt), to 5 tau_decay; unit L2 norm so white
+% noise keeps its scale. Empty when no time constants are given.
+if isempty(tauDecay_ms), w = []; return; end
+dt = dt_s * 1000;
+n  = 0:ceil(5*tauDecay_ms/dt);
+H  = @(t) tauDecay_ms*(1 - exp(-t/tauDecay_ms)) - tauRise_ms*(1 - exp(-t/tauRise_ms));   % integral of h
+w  = H((n+1)*dt) - H(n*dt);
+w  = w / norm(w);
+end
+
+function Y = temporalMatchedFilter(X, w)
+% Forward-looking matched filter along time: Y(:,:,t) = sum_n w(n) X(:,:,t+n), so an event that
+% starts at t and decays afterwards peaks at its onset frame (as GIAnT's backward-running filter)
+Y = flip(filter(w, 1, flip(X, 3), [], 3), 3);
+end
+
+function P = regressKeepMean(P, R)
+% Remove regressors R (T x n) from pixel traces P (pixels x T), keeping each pixel's mean
+% (same algebra as SeeResiduals with the offset, then the offset added back)
+I = [ones(1, size(P,2)); (R - mean(R,1))'];
+C = (P * I') / (I * I');
+P = P - C(:,2:end) * I(2:end,:);
+end
+
+function G = gluMeanImage(fp, Device_Data)
+% Mean glutamate (blue camera) image: from Glu_Result.mat, else from the first motion-corrected tile
+gf = fullfile(fp,'Glu_Result.mat');
+if hasResult(gf) && ismember('AvgGluImg', who('-file', gf))
+    S = loadRetry(gf, 'AvgGluImg'); G = S.AvgGluImg; return
+end
+nCol2 = double(Device_Data{4}.ROI(2)); nRow2 = double(Device_Data{4}.ROI(4));
+G = mean(double(readBinMov_times(fullfile(fp,'mc201.bin'), nRow2, nCol2, 1:1000)), 3);
+end
+
+function P = voltPointsToGlu(p, Device_Data, tformReg, szV, szG)
+% Voltage-camera pixel coordinates [x y] -> glutamate-camera pixel coordinates (as transformCamera_O2B)
+Rv = refFromROI(szV, double(Device_Data{1,3}.ROI));
+Rg = refFromROI(szG, double(Device_Data{1,4}.ROI));
+[xw, yw] = intrinsicToWorld(Rv, p(:,1), p(:,2));
+[xg, yg] = transformPointsForward(invert(tformReg), xw, yw);
+[cx, cy] = worldToIntrinsic(Rg, xg, yg);
+P = [cx cy];
+end
+
+function showVRblocks(V, seg, tRec, recDur_s, suggest, ttl)
+% ViRMEn log over clock time: acquisition flag (row 10) with numbered blocks, track position,
+% and the recording span (folder start time + DAQ duration)
+t = datetime(V(1,:), 'ConvertFrom','datenum');
+recSpan = [tRec tRec + seconds(recDur_s)];
+figure(900); clf;
+try, theme(gcf,'light'); catch, set(gcf,'Color','w'); end   % keep the orange span readable in dark mode
+tl = tiledlayout(2,1,'TileSpacing','compact');
+ax1 = nexttile; hold on;
+yl = [-0.1 1.3];
+patch([recSpan fliplr(recSpan)], yl([1 1 2 2]), [1 0.85 0.4], 'EdgeColor','none', 'FaceAlpha',0.5);
+stairs(t, V(10,:) > 0, 'k', 'LineWidth',1);
+for b = 1:numel(seg.dur_s)
+    i = find(seg.label == b);
+    c = [0.2 0.4 0.9]; if b == suggest, c = [0.85 0.1 0.1]; end
+    plot(t([i(1) i(end)]), [1.1 1.1], '-', 'Color',c, 'LineWidth',4);
+    text(t(round(mean(i([1 end])))), 1.22, sprintf('block %d (%.0f s)', b, seg.dur_s(b)), ...
+        'HorizontalAlignment','center', 'Color',c, 'FontWeight','bold');
+end
+xline(tRec, 'Color',[0.9 0.5 0], 'LineWidth',1.5, 'Label','recording start', 'LabelVerticalAlignment','bottom');
+ylim(yl); yticks([0 1]); yticklabels({'off','on'}); ylabel('VR acquisition (row 10)');
+title(sprintf('%s | orange: recording %s-%s | red: suggested block', ttl, ...
+    datestr(recSpan(1),'HH:MM:SS'), datestr(recSpan(2),'HH:MM:SS')), 'Interpreter','none');
+ax2 = nexttile; hold on;
+patch([recSpan fliplr(recSpan)], [0 0 1 1]*120, [1 0.85 0.4], 'EdgeColor','none', 'FaceAlpha',0.5);
+plot(t, V(5,:), 'Color',[0.3 0.3 0.3]);
+ylim([-10 125]); ylabel('track position (row 5)'); xlabel('clock time');
+linkaxes([ax1 ax2], 'x');
+pad = minutes(1);
+xlim([min([t(1) recSpan(1)]) - pad, max([t(end) recSpan(2)]) + pad]);
+drawnow;
+end
+
+function V = readVRlog(fn)
+fid = fopen(fn); V = fread(fid, [12 inf], 'double'); fclose(fid);
+end
+
+function seg = vrBlocks(V)
+% Acquisition blocks of a ViRMEn log (row 10 flag): label per sample, start time, duration
+seg.label = bwlabel(V(10,:) > 0);
+nb = max(seg.label);
+seg.start = NaT(1,nb); seg.dur_s = zeros(1,nb);
+for b = 1:nb
+    i = find(seg.label == b);
+    seg.start(b) = datetime(V(1,i(1)), 'ConvertFrom','datenum');
+    seg.dur_s(b) = (V(1,i(end)) - V(1,i(1))) * 86400;
+end
+end
+
+function t = recordingStart(fp)
+% Recording start from the folder names: <yyyymmdd...>/<HHMMSS...>
+[parent, name] = fileparts(fp);
+[~, pname] = fileparts(parent);
+d = regexp(pname, '^\d{8}', 'match', 'once');
+h = regexp(name, '^\d{6}', 'match', 'once');
+t = datetime([d h], 'InputFormat','yyyyMMddHHmmss');
+end
+
+function Structure = locateInStructure(G, Device_Data, sPath, opt)
+% Position of the recording FOV (glutamate camera image G) in the structure z-stack
+if ~isfolder(sPath), sPath = fileparts(sPath); end
+[~, name] = fileparts(sPath);
+Structure = struct('folder',sPath, 'name',name);
+recROI = double(Device_Data{1,4}.ROI);
+stg = stagePos(Device_Data);
+st = dir(fullfile(sPath,'*_StitchInfo.mat')); rg = dir(fullfile(sPath,'*_RegInfo.mat'));
+st = st(~startsWith({st.name},'._')); rg = rg(~startsWith({rg.name},'._'));   % macOS metadata files
+zPred = NaN;
+if ~isempty(st)                                              % stitched z-stack (20260902)
+    tag = erase(st(1).name, '_StitchInfo.mat');
+    I = load(fullfile(sPath, st(1).name), 'Info', 'Overlap');
+    Structure.blueFile   = fullfile(sPath, [tag '_blue.tif']);
+    Structure.orangeFile = fullfile(sPath, [tag '_orange_bgsub.tif']);
+    pix = mean(I.Info.pixel_um);
+    [~, t] = min(vecnorm(I.Info.tilePos_um - stg(1:2), 2, 2));          % nearest tile
+    d = (stg(1:2) - I.Info.tilePos_um(t,:)) / pix;                       % [dcol drow]
+    col0 = I.Info.tilePos_px(t,1) + (recROI(1) - opt.snapROI(1)) + d(1) - (I.Overlap.blueCols(1) - 1);
+    row0 = I.Info.tilePos_px(t,2) + (recROI(3) - opt.snapROI(3)) + d(2) - (I.Overlap.blueRows(1) - 1);
+    [~, zPred] = min(abs(I.Info.z_um - stg(3)));
+    Structure.type = 'stitched';
+elseif ~isempty(rg)                                          % single-position z-stack (20260712)
+    pre = erase(rg(1).name, '_RegInfo.mat');
+    Structure.blueFile   = fullfile(sPath, [pre '_blue_reg.tif']);
+    Structure.orangeFile = fullfile(sPath, [pre '_orange_reg_bgsub.tif']);
+    ws = warning('off','all'); S = load(fullfile(sPath,'output_data.mat'),'Device_Data'); warning(ws);
+    sROI = []; for k = 1:numel(S.Device_Data), v = S.Device_Data{k};
+        if isstruct(v) && isfield(v,'deviceType') && strcmp(v.deviceType,'Camera'), sROI = double(v.ROI); end, end
+    d = (stg(1:2) - stagePos(S.Device_Data, 2)) / opt.structPixel_um;
+    col0 = (recROI(1) - sROI(1)) + d(1);
+    row0 = (recROI(3) - sROI(3)) + d(2);
+    Structure.type = 'single z-stack (z by correlation)';
+else
+    error('No *_StitchInfo.mat or *_RegInfo.mat in %s', sPath);
+end
+if ~isfile(Structure.orangeFile), Structure.orangeFile = ''; end
+B = readTiffStack(Structure.blueFile);
+[Hs, Ws, nZ] = size(B); [h, w] = size(G);
+row0 = round(row0); col0 = round(col0);
+inside = max(0, min(Hs, row0+h) - max(0,row0)) * max(0, min(Ws, col0+w) - max(0,col0)) / (h*w);
+Structure.stagePrediction = struct('row0',row0, 'col0',col0, 'slice',zPred, 'fractionInside',inside);
+
+% Correlation of the glutamate mean image with the structure slices, around the stage prediction
+% (whole stack when there is none). The match is trusted when it stands out from the best match
+% at any other location: bright somata give high peaks for unrelated positions too.
+T = hpf(G);
+haveXY = inside >= 0.5;
+if haveXY
+    L = opt.xySearch_px;
+    r = (row0-L+1):(row0+h+L); c = (col0-L+1):(col0+w+L);
+    if isnan(zPred), zs = 1:nZ; else, zs = max(1,zPred-opt.zSearch):min(nZ,zPred+opt.zSearch); end
+else
+    r = 1:Hs; c = 1:Ws; zs = 1:nZ;
+end
+pk = -Inf(1,numel(zs)); loc = zeros(numel(zs),2); pk2 = -Inf(1,numel(zs));
+vr = r >= 1 & r <= Hs; vc = c >= 1 & c <= Ws;
+for i = 1:numel(zs)
+    R = zeros(numel(r), numel(c), 'single');
+    R(vr,vc) = hpf(B(r(vr), c(vc), zs(i)));
+    X = normxcorr2(T, R);
+    X = X(h:end-h+1, w:end-w+1);                             % template fully inside the window
+    [pk(i), ix] = max(X(:)); [a, b] = ind2sub(size(X), ix);
+    loc(i,:) = [r(1)+a-2, c(1)+b-2];                         % [row0 col0]
+    X(max(1,a-40):min(end,a+40), max(1,b-40):min(end,b+40)) = -Inf;
+    pk2(i) = max(X(:));                                      % best elsewhere on this slice
+end
+[best, ib] = max(pk);
+far = vecnorm(loc - loc(ib,:), 2, 2)' > 40;                  % other slices' peaks at other positions
+margin = best - max([pk2(ib), pk(far)]);
+Structure.corrPeak = best; Structure.corrMargin = margin;
+Structure.corrPosition = struct('row0',loc(ib,1), 'col0',loc(ib,2), 'slice',zs(ib));
+if margin >= opt.corrMinMargin || best >= opt.corrSurePeak
+    row0 = loc(ib,1); col0 = loc(ib,2); z = zs(ib);
+    if haveXY && ~isnan(zPred)
+        Structure.method = 'stage XYZ, refined by correlation';
+    elseif haveXY
+        Structure.method = 'stage XY, z and refinement by correlation';
+    else
+        Structure.method = 'correlation (stage position outside the structure)';
+    end
+elseif haveXY && ~isnan(zPred)
+    z = zPred; Structure.method = 'stage XYZ (correlation not distinctive)';
+else
+    row0 = loc(ib,1); col0 = loc(ib,2); z = zs(ib);
+    Structure.method = 'UNCERTAIN: best correlation, not distinctive';
+    warning('%s: no distinctive match (peak %.2f, margin %.2f); position uncertain', name, best, margin);
+end
+Structure.slice = z;
+Structure.rows  = row0 + (1:h);
+Structure.cols  = col0 + (1:w);
+Structure.correlationShift = [loc(ib,2) loc(ib,1)] - [Structure.stagePrediction.col0 Structure.stagePrediction.row0];   % [dcol drow]
+
+% Crops around the FOV: matched slice +-cropZhalf and the MIP over all slices, both channels
+m = opt.cropMargin_px;
+cr = max(1, row0+1-m):min(Hs, row0+h+m); cc = max(1, col0+1-m):min(Ws, col0+w+m);
+zz = max(1, z-opt.cropZhalf):min(nZ, z+opt.cropZhalf);
+Structure.cropRows = cr; Structure.cropCols = cc; Structure.cropSlices = zz;
+Structure.cropFOV  = [row0+1-cr(1)+1, col0+1-cc(1)+1];       % FOV top-left inside the crop [row col]
+Structure.cropBlue    = B(cr, cc, zz);
+Structure.cropMIPBlue = max(B(cr, cc, :), [], 3);
+if ~isempty(Structure.orangeFile)
+    O = readTiffStack(Structure.orangeFile);
+    Structure.cropOrange    = O(cr, cc, zz);
+    Structure.cropMIPOrange = max(O(cr, cc, :), [], 3);
+end
+end
+
+function xy = synapseCentroids(Sp, imgSize)
+% Weighted centroid [x y] of each footprint column of a sparse [pixels x synapses] matrix
+[pix, k, v] = find(Sp);
+[r, c] = ind2sub(imgSize, pix);
+wsum = accumarray(k, v, [size(Sp,2) 1]);
+xy = [accumarray(k, v.*c, [size(Sp,2) 1]) accumarray(k, v.*r, [size(Sp,2) 1])] ./ max(wsum, eps);
+end
+
+function Sp = sparseFootprints(S, imgSize)
+% Glutamate footprints as sparse [pixels x synapses] (stored either that way or as H x W x N)
+if ndims(S) == 3 || size(S,1) ~= prod(imgSize)
+    S = reshape(S, prod(imgSize), []);
+end
+Sp = sparse(double(S));
+end
+
+function saveMatchQC(G, Structure, ttl, fn)
+% Recording glutamate mean image next to the matched structure slice region, for checking by eye
+info = imfinfo(Structure.blueFile);
+S = imread(Structure.blueFile, Structure.slice, 'Info', info);
+r = Structure.rows; c = Structure.cols; vr = r >= 1 & r <= size(S,1); vc = c >= 1 & c <= size(S,2);
+P = zeros(numel(r), numel(c)); P(vr,vc) = single(S(r(vr), c(vc)));
+fig = figure('Visible','off'); tiledlayout(1,2,'TileSpacing','compact');
+nexttile; imshow(G, prctile(G(:),[1 99.7])); title('recording, glutamate mean');
+nexttile; imshow(P, prctile(P(P>0),[1 99.7])); title(sprintf('structure slice %d', Structure.slice));
+sgtitle({ttl, sprintf('%s (peak %.2f, margin %.2f)', Structure.method, Structure.corrPeak, Structure.corrMargin)}, 'Interpreter','none');
+savePNG(fig, fn); close(fig);
+end
+
+function p = stagePos(Device_Data, n)
+% Stage [x y z] (um) from the stage-controller entry of Device_Data; n = number of coordinates
+if nargin < 2, n = 3; end
+p = [];
+for k = 1:numel(Device_Data)
+    v = Device_Data{k};
+    if isstruct(v) && isfield(v,'pos') && isstruct(v.pos) && isfield(v.pos,'x')
+        p = [v.pos.x v.pos.y v.pos.z]; p = p(1:n); return
+    end
+end
+error('No stage position in Device_Data');
+end
+
+function S = readTiffStack(f)
+info = imfinfo(f);
+S = zeros(info(1).Height, info(1).Width, numel(info), 'uint16');
+for z = 1:numel(info), S(:,:,z) = imread(f, z, 'Info', info); end
+end
+
+function F = hpf(I)
+% Band-pass for registration; the median filter removes camera hot pixels
+I = medfilt2(single(I), [3 3], 'symmetric');
+F = imgaussfilt(I, 1.5) - imgaussfilt(I, 15);
+end
+
+function savePNG(fig, fn)
+% exportgraphics, a vector print and getframe use different print paths; never abort the loop
+try
+    exportgraphics(fig, fn, 'Resolution', 150);
+catch
+    try
+        print(fig, fn, '-dpng', '-r150', '-painters');
+    catch
+        try, imwrite(frame2im(getframe(fig)), fn); catch ME, warning('PNG export failed for %s : %s', fn, ME.message); end
+    end
+end
+end

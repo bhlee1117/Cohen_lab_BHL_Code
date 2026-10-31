@@ -865,10 +865,10 @@ for m=1:length(LcData_binning.membership)
     d2showCell{m}=[d2show(LcData_binning.membership{m},2)];
 end
 ax3=nexttile([1 1]);
-showtInd=[1:3]; cmap_t=nebula(length(showtInd));
+showtInd=[2:3]; cmap_t=nebula(length(showtInd));
 p=Boxplot_wPoints2(cell2mat(d2showCell(showtInd)),cmap_t);
-line([1 3],[255 255],'LineWidth',2,'color','k');
-text([2],[265],'N.S.','HorizontalAlignment','center','FontSize',20);
+line([1 2],[255 255],'LineWidth',2,'color','k');
+text([1.5],[265],'N.S.','HorizontalAlignment','center','FontSize',18);
 set(gca,'xtick',[1:length(showtInd)],'XTickLabel',LcData_binning.centers(showtInd))
 ylabel('Decay length (µm)'); xlabel('Time after blue onset (ms)'); ylim([0 265]);
 set_font('Arial'); set_fontsize(22); box off;

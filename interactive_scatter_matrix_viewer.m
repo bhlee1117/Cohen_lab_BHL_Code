@@ -1,13 +1,23 @@
-function interactive_scatter_matrix_viewer(Mat1, A, B)
+function interactive_scatter_matrix_viewer(Mat1, A, B, labels)
 % INTERACTIVE_SCATTER_MATRIX_VIEWER Visualizes data by linking scatter plot to matrix slices.
 %
 %   interactive_scatter_matrix_viewer(Mat1, A, B) creates an interactive
 %   figure where A and B define the scatter plot, and Mat1 can be either
 %   a 3D numeric array (N x T x R) or a cell array where each cell is N_i x T_i.
+%
+%   interactive_scatter_matrix_viewer(Mat1, A, B, labels) additionally takes a
+%   cellstr with one identifying label per point (e.g. 'f26 ROI12 frame 493514').
+%   The label of the clicked point is shown in the panel titles and printed to the
+%   command window, so the selected case can be traced back to the source data.
 
     % Validate A/B
     assert(isvector(A) && isvector(B) && numel(A) == numel(B), ...
         'A and B must be vectors of equal length');
+    if nargin < 4 || isempty(labels)
+        labels = arrayfun(@(i) sprintf('#%d', i), 1:numel(A), 'UniformOutput', false);
+    else
+        assert(numel(labels) == numel(A), 'labels must have one entry per point');
+    end
 
     useCell = iscell(Mat1);
     if useCell
@@ -106,7 +116,9 @@ function interactive_scatter_matrix_viewer(Mat1, A, B)
         xlim(ax3, [1 T]);
         ylim(ax3, [min(matSlice(:)), max(matSlice(:))]);
 
-        title(ax2, sprintf('Slice #%d (N x T)', selectedIdx));
-        title(ax3, sprintf('All Traces (Slice #%d)', selectedIdx));
+        title(ax2, sprintf('#%d  %s', selectedIdx, labels{selectedIdx}), 'Interpreter','none');
+        title(ax3, sprintf('All Traces (#%d)', selectedIdx));
+        fprintf('selected #%d: %s   (x=%.3g, y=%.3g)\n', selectedIdx, ...
+            labels{selectedIdx}, A(selectedIdx), B(selectedIdx));
     end
 end
