@@ -310,8 +310,8 @@ if opts.doPlot && opts.uiClusterSize && Nevent > 0
 end
 
 % Pairwise distance clustering: events within r_max px are linked (single-linkage)
-A        = pdist2(cent, cent, 'squaredeuclidean') <= opts.r_max^2;
-clusters = accumarray(conncomp(graph(A))',(1:Nevent)',[],@(v){v});
+% (radius-limited neighbour graph: memory ~ #events instead of #events^2)
+clusters = accumarray(radiusComponents(cent, opts.r_max)',(1:Nevent)',[],@(v){v});
 
 % Split any cluster whose radius (max dist from centroid) exceeds 1.5 * r_max
 synID      = zeros(Nevent,1);
@@ -343,7 +343,7 @@ for c = 1:numel(clusters)
     end
 end
 
-fprintf('  %d events → %d synapses (r_max=%.1f px)\n',...
+fprintf('  %d events → %d footprints (r_max=%.1f px)\n',...
     Nevent, synCounter, opts.r_max);
 
 if opts.doPlot && synCounter > 0
@@ -367,7 +367,7 @@ end
 %% ===================================================================
 % Footprint pixels are cropped to r_max (=15 px) of each synapse centroid.
 % z-scores come from the high-pass filtered movie.
-fprintf('Step 4: building synapse footprints (r_max crop = %.1f px)...\n', opts.r_max);
+fprintf('Step 4: building footprints (r_max crop = %.1f px)...\n', opts.r_max);
 
 % Pre-compute synapse centroids
 synCentroid0 = nan(synCounter, 2);
@@ -433,7 +433,7 @@ end
 %% ===================================================================
 %  STEP 5: BOUNDARY FILTER + INTERACTIVE SYNAPSE FILTER
 %% ===================================================================
-fprintf('Step 5: boundary filter + synapse selection...\n');
+fprintf('Step 5: boundary filter + footprint selection...\n');
 bd   = opts.bound;
 cSum = squeeze(sum(S_glu0(bd+1:H-bd, bd+1:W-bd, :), [1 2]));
 keep = cSum > 0;
@@ -545,7 +545,7 @@ newSynID = tmp;
 
 % Hard minimum-events cut
 keepCnt       = synEventCount >= opts.minEventsSyn;
-fprintf('  Removing %d synapses with < %d events.\n', sum(~keepCnt), opts.minEventsSyn);
+fprintf('  Removing %d footprints with < %d events.\n', sum(~keepCnt), opts.minEventsSyn);
 S_glu         = S_glu(:,:,keepCnt);
 synCentroid   = synCentroid(keepCnt,:);
 synEventCount = synEventCount(keepCnt);
@@ -558,7 +558,7 @@ tmp(valid) = map2(newSynID(valid));
 newSynID = tmp;
 
 synEventRate = synEventCount / max(T, 1);   % events per frame
-fprintf('  Kept %d synapses.  Median rate: %.4f ev/fr\n', newNsyn, median(synEventRate));
+fprintf('  Kept %d footprints.  Median rate: %.4f ev/fr\n', newNsyn, median(synEventRate));
 
 %% ===================================================================
 %  STEP 6: OVERVIEW VISUALISATION
@@ -694,6 +694,17 @@ VoltronResult.nFrames         = T;
 %  LOCAL HELPERS
 %% ===================================================================
 
+    function lab = radiusComponents(pts, r)
+        % connected components of the graph linking points within distance r
+        % (same as conncomp(graph(pdist2(pts,pts) <= r)), without the N x N matrix)
+        nP  = size(pts,1);
+        nbr = rangesearch(pts, pts, r);
+        ii  = repelem((1:nP)', cellfun(@numel, nbr));
+        jj  = [nbr{:}]';
+        Ag  = sparse(ii, jj, true, nP, nP);
+        lab = conncomp(graph(Ag | Ag'));
+    end
+
     function ev = buildEvent(t, pixIdx, c, r, pixVal)
         ev.frame       = t;
         ev.pixIdx      = pixIdx;
@@ -740,8 +751,7 @@ VoltronResult.nFrames         = T;
         axL      = figH.UserData.ax;
 
         % Pairwise distance clustering + radius split (mirrors Step 3)
-        AL   = pdist2(centL, centL, 'squaredeuclidean') <= rmax^2;
-        cls_ = accumarray(conncomp(graph(AL))',(1:N_)',[],@(v){v});
+        cls_ = accumarray(radiusComponents(centL, rmax)',(1:N_)',[],@(v){v});
         synID_ = zeros(N_,1);
         sc_    = 0;
         for ci_ = 1:numel(cls_)

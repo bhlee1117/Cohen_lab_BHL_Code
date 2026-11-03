@@ -1,0 +1,611 @@
+%% Quick look: ASAP7y + iGluSnFR4f culture, spinning disk, blue camera (frames2.bin)
+%  Everything is on the blue cam (Device_Data{4}); frames1.bin is only a snap from the orange cam.
+%  The movie is read in chunks with readBinMov_times (a 400 x 600 px, 10k-frame movie is 19 GB
+%  as double): one pass over the whole file collects the frame means and the background row
+%  means needed for the band correction, then the quick-look window frm is processed
+%  winChunk frames at a time:
+%    1) spinning-disk band subtraction (sensor coordinates, so before any shift)
+%    2) NoRMCorre motion correction to one reference (as for mc2XX.bin)
+%       -> saved as mc2_quicklook_fr<a>-<b>.bin (float32, readBinMovSingle(file, nRow2, nCol2)),
+%          shifts and regression coefficients in the .mat
+%    3) regression of motion (x, y, x^2, y^2, x*y) from every pixel, ONE fit over the whole window
+%       (a fit per chunk left steps at the chunk boundaries), keeping each pixel's mean (as
+%       regressKeepMean in Analysis_20261002_SD_VoltronST_plus_Glu.m); applied in a second pass
+%       over the .bin that writes the mp4
+%  No bleaching correction.
+%
+%  Spinning-disk artifact: the disk scan beats against the rolling shutter, which the Orca
+%  reads out from the sensor centre (row 1024 of the sensor). This gives horizontal bands
+%  that drift through the frame as a chevron about that row, with a drift speed that changes
+%  over the recording. The bands are ADDITIVE (~0.5 counts on the background and on the soma
+%  alike in 20261021 #132723, per-pixel coefficient ~1 everywhere) and uniform along each row.
+%  Because the drift is not stationary, the period-folded correction of the orange camera
+%  (period = 12, Analysis_20260713_V2_iGluSnFR_MC.m) removes nothing here at any period
+%  (tested 2-120 frames at 83 Hz in 20261021 #132723, 2-60 frames at 162 Hz in 20261031 #205557).
+%  The 12 patterns match the 12 disk phases a 1 kHz (1 ms) recording samples; at 6.18 ms per frame
+%  the frames do not return to fixed disk phases. On #205557 (37.7-47.6 s, background) the divisive
+%  12-pattern correction itself raised the row SD 0.52 -> 0.55 counts, the band correction lowered
+%  it to 0.31, and after it no 2D pattern of period 2-80 frames is left (held-out test).
+%  Like the 12-pattern correction, the band is subtracted before the motion correction.
+%  Instead, per frame and per row, the band is measured on background pixels (cells
+%  excluded, so their activity is not subtracted) and subtracted from the whole row.
+%  The band's average over rows is put back (bandKeepCommon): field-wide events (network
+%  bursts, KCl responses) also light up the background pixels and would otherwise be partly
+%  subtracted from every pixel; the cost is that a whole-frame flicker of the artifact stays.
+%  Caveat of the regression: any signal of the window shaped like the motion is removed with
+%  it (e.g. a response during a drift of the dish).
+
+clear; clc;
+fpath = '/Volumes/cohen_lab/Lab/Labmembers/Byung Hun Lee/Data/20261031/205557ASAP7y_iGluSnFR4f_Culture_kcl';
+camOffset = 100;      % camera dark offset
+bgPrctile = 60;       % background = pixels below this percentile of the smoothed mean image
+hpWin_s   = 5;        % s, slow part of the row bands kept in the movie (bleaching)
+rowSmooth = 5;        % rows, gaussian window smoothing the band profile across rows (noise)
+bandKeepCommon = true;% keep the band's average over rows in the movie (field-wide events)
+chunkLen  = 2000;     % frames per readBinMov_times call in the whole-file pass (400x600 px: 3.8 GB as double)
+frm       = 2000:20000;   % quick-look window, frames of the trimmed movie (laser-off frames dropped)
+winChunk  = 1000;     % frames of the window processed at a time
+viewLen   = 1000;     % frames from the start of frm for the QC kymographs and the clicky drawing
+medWin    = 100;      % frames, movmedian subtracted for the dF movies
+doMC      = true;     % NoRMCorre motion correction of the quick-look window
+mcRef_s   = [0 0.5];  % s, MC reference = mean of these frames (pick a still period)
+doRegress = true;     % regress motion (x, y, x^2, y^2, x*y) from every pixel
+overwrite = false;    % true: rewrite the mp4s even when they are complete
+redoMC    = false;    % true: redo band + MC of the window (.bin/.mat) even when they are complete
+redoGlu   = false;    % true: redo the extractGluSNFR3 synapses (Glu_quicklook .mat) even when saved
+% motion regressors from the patch-averaged NoRMCorre shifts [x | y]: x, y, x^2, y^2, x*y
+motionRegs = @(xy) [mean(xy(:,1:end/2),2), mean(xy(:,end/2+1:end),2), mean(xy(:,1:end/2),2).^2, ...
+    mean(xy(:,end/2+1:end),2).^2, mean(xy(:,1:end/2),2).*mean(xy(:,end/2+1:end),2)];
+
+%% Whole movie in chunks: frame means and background row means
+load(fullfile(fpath,'output_data.mat'), 'Device_Data');
+nCol2 = double(Device_Data{4}.ROI(2));
+nRow2 = double(Device_Data{4}.ROI(4));
+exposuretime2 = Device_Data{4}.exposuretime;
+binFile = fullfile(fpath,'frames2.bin');
+d = dir(binFile);
+nFrameAll = floor(d.bytes/(2*nRow2*nCol2));
+readFr  = @(fr) double(readBinMov_times(binFile, nRow2, nCol2, fr)) - camOffset;
+
+% frame times from the blue camera frame counter (DAQ sample of each frame, t = 0 at the DAQ
+% start), continued past the end of the counter record with its median interval (as gluClock in
+% Analysis_20261002_SD_VoltronST_plus_Glu.m). The frame period is longer than the exposure
+% (6.18 vs 6.02 ms in 20261031 #205557), so exposure x N drifts (1.5 s by frame 9222 there).
+DAQ_rate  = Device_Data{1,2}.Counter_Inputs(1,1).rate;
+cam2_vsyn = double(Device_Data{1,2}.Counter_Inputs(1,2).data(:));
+cam2_trig = find(diff(cam2_vsyn) == 1) + 1;   % DAQ sample of frame n = cam2_trig(n)
+dFrame    = median(diff(cam2_trig));          % DAQ samples per frame
+tFrame    = [cam2_trig; cam2_trig(end) + dFrame*(1:max(nFrameAll-numel(cam2_trig),0))'] / DAQ_rate;
+tFrame    = tFrame(1:nFrameAll)';             % s, every frame of frames2.bin
+frameDt   = dFrame / DAQ_rate;                % s, frame period
+fprintf('Frame period %.3f ms from the camera counter (exposure %.3f ms); counter covers frames 1-%d\n', ...
+    frameDt*1e3, exposuretime2*1e3, numel(cam2_trig));
+fastWin = round(0.5/frameDt);                 % frames, 0.5 s moving mean for the fast fluctuations
+
+% background mask from the mean image of the first chunk
+mov2 = readFr(1:min(chunkLen, nFrameAll));
+im2 = mean(mov2,3);
+imS = imgaussfilt(im2,2);
+bgMask = imerode(imS < prctile(imS(:), bgPrctile), strel('disk',2));
+nBG = max(sum(bgMask,2),1);
+
+meanF = zeros(nFrameAll,1);
+rowBG = zeros(nRow2, nFrameAll);              % background row means
+for c0 = 1:chunkLen:nFrameAll
+    fr = c0:min(c0+chunkLen-1, nFrameAll);
+    if c0 > 1, mov2 = readFr(fr); end
+    meanF(fr)   = squeeze(mean(mov2,[1 2]));
+    rowBG(:,fr) = squeeze(sum(mov2.*bgMask,2)) ./ nBG;
+    fprintf('  frames %d-%d of %d read\n', fr(1), fr(end), nFrameAll);
+end
+clear mov2
+
+% keep the frames with the blue laser on, minus the partial first and last ones
+lit = find(meanF > 0.5*median(meanF));
+fr0 = lit(1) + 1;
+fr1 = lit(end) - 1;
+meanF = meanF(fr0:fr1);
+rowBG = rowBG(:,fr0:fr1);
+nT = numel(meanF);
+t_glu = tFrame(fr0:fr1);                      % s from the DAQ start, camera counter
+fprintf('%d x %d px, %d frames (%.2f-%.2f s at %.1f Hz), file frames %d-%d\n', ...
+    nRow2, nCol2, nT, t_glu([1 end]), 1/frameDt, fr0, fr1);
+
+%% Spinning-disk row bands (whole recording)
+band = rowBG - movmedian(rowBG, round(hpWin_s/frameDt), 2);   % fast part = bands
+band = smoothdata(band, 1, 'gaussian', rowSmooth);
+if bandKeepCommon, band = band - mean(band,1); end
+
+%% Quick-look window, chunk by chunk: corrections and mp4 with time stamp
+% Pass 1 (band + MC) writes the .bin and sums, per pixel, the normal equations of the motion
+% regression; pass 2 reads the .bin back, removes the motion terms with the coefficients of the
+% whole window, subtracts the movmedian (chunks padded by medWin/2 frames, padding dropped after)
+% and writes the mp4. Raw and corrected panels share lim; corrected - movmedian has its own
+% symmetric scale subLim (+-3 SD of the first chunk).
+% Pass 1 is skipped when the .bin (full size) and .mat exist and redoMC = false; pass 2 then only
+% rebuilds the first nView raw frames for the QC kymographs unless the mp4 is missing or incomplete,
+% or overwrite = true.
+frm = max(frm(1),1):min(frm(end),nT);
+nWin = numel(frm);
+fprintf('Quick-look window: frames %d-%d (%.1f-%.1f s)\n', frm(1), frm(end), t_glu(frm([1 end])));
+vidFile = fullfile(fpath, sprintf('Quicklook1_fr%d-%d.mp4', frm(1), frm(end)));
+mcBase  = fullfile(fpath, sprintf('mc2_quicklook_fr%d-%d', frm(1), frm(end)));
+binMC   = [mcBase '.bin'];
+nPix    = nRow2*nCol2;
+try, vr = VideoReader(vidFile); vidDone = vr.NumFrames == nWin; catch, vidDone = false; end
+clear vr
+dBin    = dir(binMC);
+mcDone  = isfile([mcBase '.mat']) && ~isempty(dBin) && dBin.bytes == 4*nPix*nWin;
+runMC    = redoMC || ~mcDone;
+writeVid = overwrite || ~vidDone || runMC;
+pad   = ceil(medWin/2);
+nView = min(viewLen, nWin);
+corrLabel = strjoin([{'band'}, repmat({'MC'},1,double(doMC)), repmat({'motion regressed'},1,double(doRegress && doMC))], ' + ');
+if ~runMC
+    fprintf('  band + MC done (%s.bin/.mat): reused\n', mcBase);
+    Wm = load([mcBase '.mat']);
+    mcTrace2 = Wm.mcTrace2;  mov_ref2 = Wm.mov_ref2;
+    if isfield(Wm, 'regC'), regC = Wm.regC; regMean = Wm.regMean; end
+else
+    % ---- pass 1: band + MC -> .bin, shifts, regression sums ----
+    mcTrace2 = zeros(nWin, 2);
+    mov_ref2 = [];
+    if doMC
+        refFr = find(t_glu >= mcRef_s(1) & t_glu <= mcRef_s(2));
+        mov_ref2 = mean(readFr(refFr + fr0 - 1) - reshape(band(:,refFr), nRow2, 1, []), 3);
+    end
+    SPI = zeros(nPix, 6);  SII = zeros(6);    % sum P*I', sum I*I' with I = [1; regressors]
+    fidMC = fopen(binMC, 'w');
+    for k = 1:winChunk:nWin
+        core = frm(k:min(k+winChunk-1, nWin));
+        cmov = readFr(core + fr0 - 1) - reshape(band(:,core), nRow2, 1, []);   % band correction
+        if doMC
+            % evalc swallows the tic/toc and NoRMCorre progress printing
+            [mcLog, cmov, xyField] = evalc('optical_flow_motion_correction_LBH(vm(cmov), mov_ref2, ''normcorre'')');
+            if contains(mcLog,'Error during motion correction') || contains(mcLog,'Size not matched')
+                fprintf('NoRMCorre fallback triggered:\n%s\n', mcLog);
+            end
+            cmov = double(cmov);
+            mcTrace2(k-1 + (1:numel(core)), 1:size(xyField.xymean,2)) = xyField.xymean;   % [x | y], one column per patch
+            I = [ones(1,numel(core)); motionRegs(xyField.xymean)'];
+            SPI = SPI + reshape(cmov, nPix, [])*I';
+            SII = SII + I*I';
+        end
+        fwrite(fidMC, single(cmov), 'float32');                        % band + MC, frames in order
+        fprintf('  pass 1 (band + MC): frames %d-%d of %d-%d\n', core(1), core(end), frm(1), frm(end));
+    end
+    fclose(fidMC);
+    clear cmov
+    regC = [];  regMean = [];
+    if doMC
+        regC    = SPI / SII;                      % nPix x 6, offset + 5 motion coefficients
+        regMean = mean(motionRegs(mcTrace2), 1);  % the movie keeps each pixel's mean
+    end
+    % frame j of the .bin = frm(j) of the trimmed movie = frame frm(j)+fr0-1 of frames2.bin
+    mcInfo = ['band + motion corrected (no motion regression), camera offset subtracted; ' ...
+        'float32 nRow2 x nCol2 x numel(frm), mov = readBinMovSingle(file, nRow2, nCol2); ' ...
+        'regC: per-pixel [offset x y x^2 y^2 x*y] coefficients over the window, regMean: mean regressors'];
+    tWin = t_glu(frm);  bandWin = band(:,frm);
+    % saved locally, then moved onto the share (a direct save over SMB can fail and leave an empty file)
+    tmp = [tempname '.mat'];
+    save(tmp, 'mcInfo', 'frm', 'fr0', 'nRow2', 'nCol2', 'exposuretime2', 'frameDt', 'tWin', ...
+        'mcTrace2', 'mov_ref2', 'mcRef_s', 'bandWin', 'camOffset', 'regC', 'regMean');
+    movefile(tmp, [mcBase '.mat'], 'f');
+    fprintf('Saved %s.bin / .mat (band + MC, %d frames, float32)\n', mcBase, nWin);
+end
+doReg = doRegress && doMC && exist('regC','var') && ~isempty(regC);
+if ~runMC && doRegress && doMC && ~doReg
+    % saved window without coefficients: one pass over the .bin
+    SPI = zeros(nPix, 6);  SII = zeros(6);
+    fidR = fopen(binMC, 'r');
+    for k = 1:winChunk:nWin
+        ii = k:min(k+winChunk-1, nWin);
+        I = [ones(1,numel(ii)); motionRegs(mcTrace2(ii,:))'];
+        SPI = SPI + double(reshape(fread(fidR, nPix*numel(ii), '*single'), nPix, []))*I';
+        SII = SII + I*I';
+    end
+    fclose(fidR);
+    regC = SPI / SII;  regMean = mean(motionRegs(mcTrace2), 1);  doReg = true;
+    Wm.regC = regC;  Wm.regMean = regMean;                       % kept for the next run
+    tmp = [tempname '.mat'];  save(tmp, '-struct', 'Wm');  movefile(tmp, [mcBase '.mat'], 'f');
+end
+
+% ---- pass 2: motion regression with the whole-window coefficients, movmedian, views, mp4 ----
+viewRaw  = zeros(nRow2, nCol2, nView);       % first nView frames of frm, for the QC kymographs
+lim     = prctile(im2(:), [1 99.8]);
+subLim  = [];
+vidFps  = 30;                                % playback rate (speed vs real time is printed)
+gap     = 4;                                 % px, white line between panels
+toGray  = @(M, L) min(max((M - L(1))/diff(L), 0), 1);
+sep     = ones(nRow2, gap);
+x0      = [0 1 2]*(nCol2 + gap) + 5;         % label positions of the three panels
+if writeVid
+    v = VideoWriter(vidFile, 'MPEG-4'); v.FrameRate = vidFps; v.Quality = 90; open(v);
+else
+    fprintf('  %s complete: not rewritten (overwrite = false)\n', vidFile);
+end
+kEnd = nWin;
+if ~writeVid, kEnd = nView; end               % only the chunks holding the view frames
+for k = 1:winChunk:kEnd
+    core = k:min(k+winChunk-1, nWin);         % frames of the window (index into frm)
+    ext  = max(core(1)-pad,1):min(core(end)+pad,nWin);
+    keep = ismember(ext, core);
+    fidR = fopen(binMC, 'r');
+    fseek(fidR, (ext(1)-1)*nPix*4, 'bof');
+    cmov = double(reshape(fread(fidR, nPix*numel(ext), '*single'), nPix, numel(ext)));
+    fclose(fidR);
+    if doReg
+        cmov = cmov - regC(:,2:end)*(motionRegs(mcTrace2(ext,:)) - regMean)';   % pixel means kept
+    end
+    cmov = reshape(cmov, nRow2, nCol2, []);
+    msub = cmov - movmedian(cmov, medWin, 3);
+    cmov = cmov(:,:,keep);  msub = msub(:,:,keep);
+    mraw = readFr(frm(core) + fr0 - 1);
+    if isempty(subLim), subLim = [-3 3]*std(msub(:)); end
+
+    inV = core <= nView;
+    viewRaw(:,:,core(inV))  = mraw(:,:,inV);
+
+    if writeVid
+        for j = 1:numel(core)
+            I = [toGray(mraw(:,:,j), lim) sep toGray(cmov(:,:,j), lim) sep toGray(msub(:,:,j), subLim)];
+            I = insertText(repmat(I,1,1,3), [x0' [5;5;5]], {sprintf('raw, %.0f-%.0f counts', lim), ...
+                sprintf('%s, %.0f-%.0f counts', corrLabel, lim), ...
+                sprintf('corrected - movmedian(%d), %c%.0f counts', medWin, char(177), subLim(2))}, ...
+                'FontSize', 16, 'BoxColor', 'black', 'BoxOpacity', 0.6, 'TextColor', 'yellow');
+            I = insertText(I, [5 nRow2-32], sprintf('t = %.3f s (frame %d)', t_glu(frm(core(j))), frm(core(j))), ...
+                'FontSize', 18, 'BoxColor', 'black', 'BoxOpacity', 0.6, 'TextColor', 'white');
+            writeVideo(v, I);
+        end
+        fprintf('  pass 2 (regression, mp4): frames %d-%d of %d-%d\n', frm(core([1 end])), frm(1), frm(end));
+    end
+end
+clear mraw cmov msub
+if writeVid
+    close(v);
+    fprintf('Saved %s (%d frames, %.0f fps = %.2fx real time)\n', vidFile, nWin, vidFps, vidFps*frameDt);
+end
+
+nPatch = size(mcTrace2,2)/2;
+fprintf('Motion: x %.2f to %.2f px, y %.2f to %.2f px (%d patches)\n', ...
+    min(mcTrace2(:,1:nPatch),[],'all'), max(mcTrace2(:,1:nPatch),[],'all'), ...
+    min(mcTrace2(:,nPatch+1:end),[],'all'), max(mcTrace2(:,nPatch+1:end),[],'all'), nPatch);
+
+%% QC: band correction, motion
+% Row means of the fast fluctuations (0.5 s moving mean removed) in the first nView frames of
+% the window; the sensor-locked bands show up as chevron stripes, field-wide events as
+% vertical stripes. Band-corrected row means = raw row means - band.
+viewFr = frm(1:nView);
+fast = @(R) R - movmean(R, fastWin, 2);
+kRaw = fast(squeeze(mean(viewRaw,2)));
+kAc  = fast(squeeze(mean(viewRaw,2)) - band(:,viewFr));
+showFr = 1:min(400, nView);
+cl = [-1 1]*prctile(abs(kRaw(:)), 99);
+
+figure(1); clf;
+tiledlayout(4,3,'TileSpacing','compact','Padding','compact');
+nexttile; imshow2(im2, []); title('Mean image (first chunk)');
+nexttile; imshow2(bgMask, []); title(sprintf('Background pixels (< %d prctile)', bgPrctile));
+nexttile; plot(std(band,0,2), 1:nRow2); axis ij tight; xlabel('Band std (counts)'); ylabel('Row'); title('Band amplitude per row');
+nexttile([1 3]); plot(t_glu, meanF); hold on; xline(t_glu(frm([1 end])), 'r--'); hold off;
+xlim(t_glu([1 end])); ylabel('Frame mean (counts)'); title('Whole recording (red: quick-look window frm)');
+nexttile([1 3]); imagesc(viewFr(showFr), 1:nRow2, kRaw(:,showFr), cl); colormap(gca, turbo); colorbar;
+title('Row means of the fast fluctuation, raw'); ylabel('Row');
+nexttile([1 3]); imagesc(viewFr(showFr), 1:nRow2, kAc(:,showFr), cl); colormap(gca, turbo); colorbar;
+title('Row means of the fast fluctuation, band corrected'); ylabel('Row'); xlabel('Frame');
+
+figure(2); clf;
+tiledlayout(2,1,'TileSpacing','compact','Padding','compact');
+nexttile; plot(t_glu(frm), mcTrace2(:,1:nPatch)); xlim(t_glu(frm([1 end]))); ylabel('x shift (px)');
+title(sprintf('NoRMCorre shifts, %d patches (reference %.1f-%.1f s)', nPatch, mcRef_s));
+nexttile; plot(t_glu(frm), mcTrace2(:,nPatch+1:end)); xlim(t_glu(frm([1 end]))); ylabel('y shift (px)'); xlabel('Time (s)');
+
+%% Clicky on the corrected movie (band + MC + motion regressed), runs on its own
+% Needs only the first section (fpath, frm, viewLen, winChunk, doRegress, motionRegs): run that
+% section, then this one. Loads mc2_quicklook_fr<a>-<b>.mat/.bin saved by the window section (the
+% latest one starting at frm(1)) and rebuilds the corrected movie of the mp4 middle panel: band + MC
+% frames from the .bin minus the motion terms with the whole-window coefficients (regC).
+% Draw ROIs with clicky_faster on its first viewLen frames: click the vertices, right click to close
+% an ROI, right click on an empty spot to finish. Each ROI trace over the whole window is the ROI
+% mean of the band + MC frames with x, y, x^2, y^2, x*y regressed over the whole window, i.e. the
+% ROI mean of the corrected movie (the per-pixel least squares averaged over the ROI equals the
+% least squares of the ROI mean).
+% Saved: clicky_fr<a>-<b>.mat (roi, trF = ROI means in counts, tWin) and clicky_fr<a>-<b>.fig.
+mcList = dir(fullfile(fpath, sprintf('mc2_quicklook_fr%d-*.mat', frm(1))));
+if isempty(mcList)
+    error('No mc2_quicklook_fr%d-*.mat in %s: run the window section first', frm(1), fpath);
+end
+[~, iNew] = max([mcList.datenum]);
+mcFile = fullfile(fpath, mcList(iNew).name);
+W = load(mcFile);                             % frm, tWin, nRow2, nCol2, mcTrace2, regC, regMean
+binMC = strrep(mcFile, '.mat', '.bin');
+fprintf('Clicky on %s (frames %d-%d)\n', binMC, W.frm([1 end]));
+nPix = W.nRow2*W.nCol2;
+nWin = numel(W.frm);
+doReg = doRegress && any(W.mcTrace2(:));
+
+% corrected movie, first viewLen frames, for drawing
+nViewC = min(viewLen, nWin);
+fidR = fopen(binMC, 'r');
+clkView = double(reshape(fread(fidR, nPix*nViewC, '*single'), nPix, nViewC));
+fclose(fidR);
+if doReg && isfield(W, 'regC') && ~isempty(W.regC)
+    clkView = clkView - W.regC(:,2:end)*(motionRegs(W.mcTrace2(1:nViewC,:)) - W.regMean)';
+end
+clkView = reshape(clkView, W.nRow2, W.nCol2, nViewC);
+imView = mean(clkView, 3);
+[roi, ~] = clicky_faster(clkView, imView);
+nROI = numel(roi);
+[xg, yg] = meshgrid(1:W.nCol2, 1:W.nRow2);
+roiMask = false(nPix, nROI);
+for n = 1:nROI
+    roiMask(:,n) = reshape(inpolygon(xg, yg, roi{n}(:,1), roi{n}(:,2)), [], 1);
+end
+
+% ROI traces of the corrected movie over the whole window
+trF = zeros(nWin, nROI);
+fidR = fopen(binMC, 'r');
+for k = 1:winChunk:nWin
+    nk = min(winChunk, nWin-k+1);
+    P = reshape(fread(fidR, nPix*nk, '*single'), nPix, nk);
+    for n = 1:nROI, trF(k:k+nk-1, n) = mean(P(roiMask(:,n),:), 1)'; end
+end
+fclose(fidR);  clear P
+if doReg
+    R = motionRegs(W.mcTrace2);  R = R - mean(R,1);
+    trF = trF - R*(R \ (trF - mean(trF,1)));  % each trace keeps its mean
+end
+tWin = W.tWin;
+roiFrm = W.frm;
+clkBase = fullfile(fpath, sprintf('clicky_fr%d-%d', W.frm(1), W.frm(end)));
+% saved locally, then moved onto the share (a direct save over SMB can fail and leave an empty file)
+tmp = [tempname '.mat'];
+save(tmp, 'roi', 'trF', 'tWin', 'roiFrm', 'mcFile');
+movefile(tmp, [clkBase '.mat'], 'f');
+
+dFF = trF./median(trF,1) - 1;
+spacing = max(prctile(dFF,99.5,1) - prctile(dFF,0.5,1));
+cmap = distinguishable_colors(nROI);
+
+fig5 = figure(5); clf;
+tiledlayout(1,3,'TileSpacing','compact','Padding','compact');
+nexttile; imshow2(imView, []); hold on;
+for n = 1:nROI
+    plot(roi{n}([1:end 1],1), roi{n}([1:end 1],2), 'Color', cmap(n,:), 'LineWidth', 1);
+    text(mean(roi{n}(:,1)), mean(roi{n}(:,2)), num2str(n), 'Color', cmap(n,:), 'FontSize', 12);
+end
+hold off; title(sprintf('ROIs (mean of the first %d frames)', nViewC));
+nexttile([1 2]); hold on;
+for n = 1:nROI
+    plot(tWin, dFF(:,n) - (n-1)*spacing, 'Color', cmap(n,:));
+end
+hold off; axis tight; set(gca, 'YTick', []);
+xlabel('Time (s)'); ylabel(sprintf('dF/F, %.2f per ROI', spacing));
+title(sprintf('ROI traces, band + MC%s, frames %d-%d', repmat(' + motion regressed',1,double(doReg)), W.frm([1 end])));
+tmp = [tempname '.fig'];
+savefig(fig5, tmp);
+movefile(tmp, [clkBase '.fig'], 'f');
+fprintf('Saved %s.mat / .fig (%d ROIs)\n', clkBase, nROI);
+
+%% Glutamate synapses (extractGluSNFR3) and the four dF movies: compute and preview
+% Runs on its own after the first section, from the saved window (mc2_quicklook_fr<a>-<b>.bin/.mat),
+% following Section 3 of Analysis_20261002_SD_VoltronST_plus_Glu.m:
+%  1) events: gluDetectLen frames from the middle of the window only (detection is slow): the
+%     artifact-corrected movie minus its hpWin_s movmedian, matched-filtered with the iGluSnFR4
+%     kernel, extractGluSNFR3 Steps 0-2
+%  2) synapses: those events clustered (density peaks) -> footprints S_glu
+%  3) traces: T_glu = S_glu \ movie on the footprint pixels (baseline kept), on every frame
+%     -> Glu_quicklook_fr<a>-<b>.mat, reused unless redoGlu = true
+%  4) every pixel of the artifact-corrected movie regressed on all T_glu over the whole window
+%     (offset + one coefficient per synapse): the fit is the glutamate-only movie
+% Four dF movies, 2 x 2, each minus movmedian(medWin), one symmetric scale (+-3 SD of the
+% artifact-corrected dF of the preview frames):
+%   top:    MC dF                motion corrected only: the spinning-disk band put back, shifted with
+%                                the frame's y shift (MC frame row r = raw row r - y; band uniform along rows)
+%           artifact corrected   band + motion (x, y, x^2, y^2, x*y) regressed
+%   bottom: glutamate only       the part explained by the synapse traces
+%           residual             artifact corrected - glutamate only (what is left, e.g. ASAP voltage)
+% The previewLen frames from the start of the detection frames are shown with moviefixsc (figure 7)
+% and the summary in figure 6; nothing is written here except the synapse .mat. The mp4 is written
+% by the next section.
+% With many synapses the per-pixel regression also takes ~Nsyn/frames of the noise variance.
+gluDetectLen = 500;      % frames from the middle of the window used to find the synapses
+gluZSeed     = 14;         % zSeedMin (Analysis_20261002 picks it per recording in its Section 3a)
+gluTau_ms    = [1.5 30];  % iGluSnFR4 rise / decay (ms) of the temporal matched filter
+gluMaxEvents = 3e5;       % stop when more events are pooled (zSeedMin too low)
+previewLen   = 1000;      % frames shown with moviefixsc before saving
+
+mcList = dir(fullfile(fpath, sprintf('mc2_quicklook_fr%d-*.mat', frm(1))));
+if isempty(mcList)
+    error('No mc2_quicklook_fr%d-*.mat in %s: run the window section first', frm(1), fpath);
+end
+[~, iNew] = max([mcList.datenum]);
+mcFile = fullfile(fpath, mcList(iNew).name);
+W = load(mcFile);                             % frm, tWin, nRow2, nCol2, mcTrace2, regC, regMean, bandWin
+binMC = strrep(mcFile, '.mat', '.bin');
+nPix = W.nRow2*W.nCol2;
+nWin = numel(W.frm);
+dtW  = median(diff(W.tWin));                  % s, frame period (camera counter)
+gluBase = fullfile(fpath, sprintf('Glu_quicklook_fr%d-%d', W.frm(1), W.frm(end)));
+movFile = fullfile(fpath, sprintf('Movies_fr%d-%d.mp4', W.frm(1), W.frm(end)));
+haveGlu = ~redoGlu && isfile([gluBase '.mat']);
+iDet = round(nWin/2) - floor(gluDetectLen/2) + (1:gluDetectLen);   % detection frames: middle of the window
+iDet = iDet(iDet >= 1 & iDet <= nWin);
+
+% artifact-corrected movie (band + MC + motion regressed with the whole-window coefficients)
+doReg = doRegress && any(W.mcTrace2(:)) && isfield(W, 'regC') && ~isempty(W.regC);
+readMC   = @(ii) reshape(double(readBinMovSingle_times(binMC, W.nRow2, W.nCol2, ii)), nPix, []);   % band + MC
+if doReg
+    motionFit = @(ii) W.regC(:,2:end)*(motionRegs(W.mcTrace2(ii,:)) - W.regMean)';
+else
+    motionFit = @(ii) 0;
+end
+readCorr = @(ii) readMC(ii) - motionFit(ii);
+
+if haveGlu
+    fprintf('Synapses from %s.mat\n', gluBase);
+    Gl = load([gluBase '.mat'], 'S_glu', 'T_glu', 'synCentroid', 'synEventCount', 'nEvents');
+    S_glu = Gl.S_glu;  T_glu = Gl.T_glu;  synCentroid = Gl.synCentroid;
+    synEventCount = Gl.synEventCount;  nEvents = Gl.nEvents;
+    Nsyn = size(S_glu, 2);
+    if Nsyn == 0
+        error('%s.mat holds no synapses (%d events): set redoGlu = true with a lower gluZSeed or a longer gluDetectLen', gluBase, nEvents);
+    end
+else
+    fprintf('Glutamate synapses on %s (frames %d-%d)\n', binMC, W.frm([1 end]));
+    % ---- 1) events on the detection frames ----
+    dtms = dtW*1000;                          % iGluSnFR4 kernel, as gluTemporalKernel of Analysis_20261002
+    nk   = 0:ceil(5*gluTau_ms(2)/dtms);
+    Hk   = @(t) gluTau_ms(2)*(1 - exp(-t/gluTau_ms(2))) - gluTau_ms(1)*(1 - exp(-t/gluTau_ms(1)));
+    tk   = Hk((nk+1)*dtms) - Hk(nk*dtms);  tk = tk/norm(tk);
+    gp = struct('smoothSigma',1, 'zSeedMin',gluZSeed, 'zThrFoot',6, 'minPeakDist_s',0.2, 'minPeakProm',0.75, ...
+        'minArea',2, 'eventMaxArea',20, 'nmfReps',2, 'r_min',2, 'r_max',3.5, 'bound',14, 'minEventsSyn',0, ...
+        'footSigma',0.75, 'usePeakWeight',true, 'doPlot',false, 'uiSeedThresh',false, 'uiClusterSize',false, ...
+        'uiSynFilter',false, 'plotCentroids',false, 'showNMFDiag',false, 'computeTraces',false);
+    optsEv = gp;  optsEv.stage = 'events';
+    M = reshape(readCorr(iDet), W.nRow2, W.nCol2, []);
+    M = M - movmedian(M, round(hpWin_s/dtW), 3);
+    M = flip(filter(tk, 1, flip(M, 3), [], 3), 3);   % forward-looking: an event peaks at its onset
+    rng(1);                                   % NMF splitting uses random starts: reproducible
+    Rk = extractGluSNFR3(M, [], dtW, optsEv);
+    events = Rk.eventList;  nFrDet = numel(iDet);
+    fprintf('  events: frames %d-%d (%.1f-%.1f s), %d events\n', W.frm(iDet([1 end])), W.tWin(iDet([1 end])), numel(events));
+    if numel(events) > gluMaxEvents
+        error('%d events (> gluMaxEvents = %d): raise gluZSeed', numel(events), gluMaxEvents);
+    end
+    clear M Rk
+
+    % ---- 2) synapses: pooled events clustered once ----
+    optsCl = gp;  optsCl.stage = 'cluster';  optsCl.sparseFootprints = true;
+    optsCl.clusterMethod = 'density';  optsCl.densSigma = 1;  optsCl.densMinPeak = 3;  optsCl.densFloor = 0.5;
+    optsCl.densCoreFrac = 0.5;  optsCl.densMinCoreEvents = 2;  optsCl.densWeight = 'count';
+    optsCl.eventList = events;  optsCl.imgSize = [W.nRow2 W.nCol2];  optsCl.nFrames = nFrDet;
+    rng(0);                                   % k-means split of large clusters
+    C = extractGluSNFR3([], [], dtW, optsCl);
+    S_glu = C.S_glu;                          % sparse [pixels x synapses]
+    Nsyn = size(S_glu, 2);
+    synCentroid = C.synCentroid;  synEventCount = C.synEventCount;  nEvents = numel(events);
+    fprintf('  %d events -> %d synapses (%.0f%% of events unassigned)\n', nEvents, Nsyn, 100*mean(C.eventSynID == 0));
+    if Nsyn == 0                              % nothing saved, so the next run detects again
+        error('No synapses from %d events on %d frames: lower gluZSeed or lengthen gluDetectLen', nEvents, numel(iDet));
+    end
+
+    % ---- 3) traces T_glu ----
+    used = find(any(S_glu > 0, 2));
+    Smat = S_glu(used,:);
+    G = decomposition(full(Smat'*Smat));
+    if isIllConditioned(G), G = decomposition(full(Smat'*Smat), 'cod'); end   % overlapping footprints
+    T_glu = zeros(Nsyn, nWin);
+    for k = 1:winChunk:nWin
+        ii = k:min(k+winChunk-1, nWin);
+        P = readCorr(ii);
+        T_glu(:,ii) = G \ (Smat'*P(used,:));
+    end
+    clear P
+    tWin = W.tWin;  gluFrm = W.frm;
+    % saved locally, then moved onto the share (a direct save over SMB can fail and leave an empty file)
+    tmp = [tempname '.mat'];
+    detFrm = W.frm(iDet);                     % frames the synapses were found on
+    save(tmp, 'S_glu', 'T_glu', 'synCentroid', 'synEventCount', 'nEvents', 'gp', 'optsCl', 'gluTau_ms', ...
+        'tWin', 'gluFrm', 'detFrm', 'mcFile', '-v7.3');
+    movefile(tmp, [gluBase '.mat'], 'f');
+    fprintf('Saved %s.mat (%d synapses)\n', gluBase, Nsyn);
+end
+
+% ---- 4) per-pixel regression on all T_glu over the whole window ----
+SPI = zeros(nPix, Nsyn+1);  SII = zeros(Nsyn+1);   % sum P*I', sum I*I' with I = [1; T_glu]
+for k = 1:winChunk:nWin
+    ii = k:min(k+winChunk-1, nWin);
+    I = [ones(1,numel(ii)); T_glu(:,ii)];
+    SPI = SPI + readCorr(ii)*I';  SII = SII + I*I';
+end
+gluC = (decomposition(SII, 'cod') \ SPI')';   % pixels x (1 + Nsyn)
+clear SPI
+Tbar = mean(T_glu, 2);
+
+% ---- the four dF movies of frames ext (used here and by the saving section) ----
+nP   = size(W.mcTrace2,2)/2;
+myW  = mean(W.mcTrace2(:,nP+1:end),2);        % patch-averaged y shift (patches differ by ~0.2 px)
+rows = (1:W.nRow2)';
+pad  = ceil(medWin/2);
+hpf  = @(X) X - movmedian(X, medWin, 2);
+bandShift = @(ext) interp2(1:numel(ext), rows, W.bandWin(:,ext), repmat(1:numel(ext), W.nRow2, 1), ...
+    min(max(rows - myW(ext)', 1), W.nRow2));  % band in the motion-corrected frame (rows x frames)
+gluFit = @(ext) gluC(:,2:end)*(T_glu(:,ext) - Tbar);
+
+% ---- preview: previewLen frames from the start of the detection frames ----
+core = iDet(1) + (0:previewLen-1);  core = core(core <= nWin);
+ext  = max(core(1)-pad,1):min(core(end)+pad,nWin);
+keep = ismember(ext, core);
+Pmc = readMC(ext);  Pac = Pmc - motionFit(ext);  Pg = gluFit(ext);
+D = {hpf(Pmc + repmat(bandShift(ext), W.nCol2, 1)), hpf(Pac), hpf(Pg), hpf(Pac - Pg)};
+D = cellfun(@(X) X(:,keep), D, 'UniformOutput', false);
+clear Pmc Pac Pg
+gLim = [-3 3]*std(D{2}(:));                   % one scale for all four panels and the mp4
+gap  = 4;
+toGray = @(M) min(max((M - gLim(1))/diff(gLim), 0), 1);
+tile4  = @(D, j) [toGray(reshape(D{1}(:,j), W.nRow2, W.nCol2)), ones(W.nRow2,gap), toGray(reshape(D{2}(:,j), W.nRow2, W.nCol2)); ...
+    ones(gap, 2*W.nCol2+gap); ...
+    toGray(reshape(D{3}(:,j), W.nRow2, W.nCol2)), ones(W.nRow2,gap), toGray(reshape(D{4}(:,j), W.nRow2, W.nCol2))];
+prevMov = zeros(2*W.nRow2+gap, 2*W.nCol2+gap, numel(core), 'single');
+for j = 1:numel(core), prevMov(:,:,j) = tile4(D, j); end
+sdMap = reshape([std(D{2},0,2) std(D{4},0,2)], W.nRow2, W.nCol2, 2);   % artifact corrected / residual dF
+clear D
+
+imMean = reshape(gluC(:,1) + gluC(:,2:end)*Tbar, W.nRow2, W.nCol2);   % mean image of the corrected movie
+dFFg = T_glu./median(T_glu,2) - 1;
+fig6 = figure(6); clf;
+tiledlayout(2,3,'TileSpacing','compact','Padding','compact');
+nexttile; imshow2(imMean, []); hold on;
+plot(synCentroid(:,1), synCentroid(:,2), 'r.', 'MarkerSize', 6); hold off;
+title(sprintf('%d synapses (%d events)', Nsyn, nEvents));
+nexttile; imagesc(sdMap(:,:,1), [0 prctile(sdMap(:),99.5)]); axis image off; colorbar;
+title('SD of artifact corrected dF, preview (counts)');
+nexttile; imagesc(sdMap(:,:,2), [0 prctile(sdMap(:),99.5)]); axis image off; colorbar;
+title('SD of residual dF, preview (counts)');
+nexttile([1 3]); imagesc(W.tWin, 1:Nsyn, dFFg, [-1 1]*prctile(abs(dFFg(:)),99)); colormap(gca, turbo); colorbar;
+xlabel('Time (s)'); ylabel('Synapse'); title('T\_glu, dF/F (median baseline)');
+
+fprintf('Preview frames %d-%d (%.2f-%.2f s), %c%.1f counts. Top: MC dF | artifact corrected; bottom: glutamate only | residual\n', ...
+    W.frm(core([1 end])), W.tWin(core([1 end])), char(177), gLim(2));
+figure(7); clf;
+moviefixsc(prevMov, [0 1])
+
+%% Save the four dF movies (mp4, whole window) and the summary figure
+% Run after the section above, once the preview looks right. Writes Movies_fr<a>-<b>.mp4 (2 x 2
+% panels, the scale gLim of the preview, time stamps) and Glu_quicklook_fr<a>-<b>.fig.
+% Skipped when the mp4 has all frames and overwrite = false.
+try, vr = VideoReader(movFile); movDone = vr.NumFrames == nWin; catch, movDone = false; end
+clear vr
+if movDone && ~overwrite
+    fprintf('%s complete: not rewritten (overwrite = false)\n', movFile);
+else
+    labels = {'MC dF', 'artifact corrected dF', sprintf('glutamate only dF (%d synapses)', Nsyn), 'residual dF'};
+    labelXY = [5 5; W.nCol2+gap+5 5; 5 W.nRow2+gap+5; W.nCol2+gap+5 W.nRow2+gap+5];
+    v = VideoWriter(movFile, 'MPEG-4'); v.FrameRate = 30; v.Quality = 90; open(v);
+    for k = 1:winChunk:nWin
+        core = k:min(k+winChunk-1, nWin);
+        ext  = max(core(1)-pad,1):min(core(end)+pad,nWin);
+        keep = ismember(ext, core);
+        Pmc = readMC(ext);  Pac = Pmc - motionFit(ext);  Pg = gluFit(ext);
+        D = {hpf(Pmc + repmat(bandShift(ext), W.nCol2, 1)), hpf(Pac), hpf(Pg), hpf(Pac - Pg)};
+        D = cellfun(@(X) X(:,keep), D, 'UniformOutput', false);
+        clear Pmc Pac Pg
+        for j = 1:numel(core)
+            I = insertText(repmat(tile4(D, j),1,1,3), labelXY, labels, ...
+                'FontSize', 16, 'BoxColor', 'black', 'BoxOpacity', 0.6, 'TextColor', 'yellow');
+            I = insertText(I, [5 2*W.nRow2+gap-32], sprintf('t = %.3f s (frame %d), %c%.0f counts', ...
+                W.tWin(core(j)), W.frm(core(j)), char(177), gLim(2)), ...
+                'FontSize', 18, 'BoxColor', 'black', 'BoxOpacity', 0.6, 'TextColor', 'white');
+            writeVideo(v, I);
+        end
+        fprintf('  movies: frames %d-%d of %d\n', W.frm(core([1 end])), W.frm(end));
+    end
+    close(v);
+    clear D
+    fprintf('Saved %s\n', movFile);
+end
+tmp = [tempname '.fig'];
+savefig(fig6, tmp);
+movefile(tmp, [gluBase '.fig'], 'f');
+fprintf('Saved %s.fig\n', gluBase);

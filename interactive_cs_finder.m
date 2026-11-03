@@ -1,23 +1,41 @@
-function [CS_trace, CS_thres, CS_params] = interactive_cs_finder(sp_soma, tr_hi)
+function [CS_trace, CS_thres, CS_params] = interactive_cs_finder(sp_soma, tr_hi, opts)
 % INTERACTIVE_CS_FINDER  Visual interface to tune CS detection thresholds
 % and spike parameters.
 %   [CS_trace, CS_thres, CS_params] = interactive_cs_finder(sp_soma, tr_hi)
+%   [...] = interactive_cs_finder(sp_soma, tr_hi, opts)
 %
 %   CS_params (optional 3rd output) returns the extra GUI settings as a
 %   struct: .N_Spike, .Max_AUC, .N_Spike2ISI  (existing 2-output callers
 %   are unaffected).
+%   opts (optional): start values .CS_thres, .N_Spike, .Max_AUC, .N_Spike2ISI,
+%   and .showUI (default true). showUI=false applies the settings without
+%   opening the window (batch use).
 
 % Default parameters
 CS_thres = [4 1];
 N_Spike = 3;
 N_Spike2ISI = 3;
-Max_AUC = 150;
+Max_AUC = 50;
+showUI = true;
+if nargin > 2
+    if isfield(opts,'CS_thres'),    CS_thres = opts.CS_thres; end
+    if isfield(opts,'N_Spike'),     N_Spike = opts.N_Spike; end
+    if isfield(opts,'N_Spike2ISI'), N_Spike2ISI = opts.N_Spike2ISI; end
+    if isfield(opts,'Max_AUC'),     Max_AUC = opts.Max_AUC; end
+    if isfield(opts,'showUI'),      showUI = opts.showUI; end
+end
 
 % Process subthreshold trace
 %tr_sub= get_subthreshold(tr_hi,sp_soma,7,17);
 tr_sub = movmean(tr_hi, 20, 2);
 tr_sub = tr_sub - movmedian(tr_sub, 500, 2);
 nTime = length(tr_sub);
+
+if ~showUI
+    detectCS();
+    CS_params = struct('N_Spike', N_Spike, 'Max_AUC', Max_AUC, 'N_Spike2ISI', N_Spike2ISI);
+    return
+end
 
 % Create figure and main plot
 f = figure('Name','Interactive CS Finder','NumberTitle','off','Position',[200 200 900 500]);
@@ -84,7 +102,18 @@ end
         N_Spike = str2double(nSpikeEdit.String);
         Max_AUC = str2double(maxAmpEdit.String);
         N_Spike2ISI = str2double(nSpike2ISIEdit.String);
+        detectCS();
 
+        tr_hi_CS = NaN(1,nTime);
+        tr_hi_CS(CS_trace>0) = tr_hi(CS_trace>0);
+
+        % Update plot
+        set(plotCS, 'XData', 1:nTime, 'YData', tr_hi_CS);
+        drawnow;
+    end
+
+%% --- Nested detection with the current settings ---
+    function detectCS()
         % Detect transients using user settings
         [trans, tr_trace] = detect_transient2(tr_sub, CS_thres, sp_soma, 20);
         if isempty(trans.amp)
@@ -109,12 +138,5 @@ end
             bfrm2 = find(bwCS(CS_spike_time) == b);
             CS_trace(bfrm(1):CS_spike_time(bfrm2(end)) - 5) = 0;
         end
-
-        tr_hi_CS = NaN(1,nTime);
-        tr_hi_CS(CS_trace>0) = tr_hi(CS_trace>0);
-
-        % Update plot
-        set(plotCS, 'XData', 1:nTime, 'YData', tr_hi_CS);
-        drawnow;
     end
 end
